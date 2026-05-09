@@ -531,9 +531,9 @@ class CubieDerbyTests(unittest.TestCase):
             self.assertIn("后退步数：", text)
             self.assertIn("=== 结果 ===", text)
             self.assertIn("长离", text)
-            self.assertIn("轮开始棋盘：", text)
+            self.assertIn("本轮开始时位置分布：", text)
             self.assertIn("\n--- ", text)
-            self.assertIn("行动后棋盘：", text)
+            self.assertIn("行动后位置分布：", text)
             self.assertIn("【判定时机：行动结束】", text)
             self.assertIn("今汐检查行动角色", text)
             self.assertIn("【判定时机：回合结束】", text)
@@ -542,7 +542,7 @@ class CubieDerbyTests(unittest.TestCase):
             round_three_start = text.index("=== 第3轮 ===")
             first_npc_action = text.index("NPC行动：", round_three_start)
             round_three_intro = text[round_three_start:first_npc_action]
-            self.assertIn("第0格：[NPC]", round_three_intro)
+            self.assertIn("第0格（左→右）：[NPC]", round_three_intro)
 
             lines = round_three_intro.splitlines()
             order_index = next(i for i, line in enumerate(lines) if line.startswith("本轮行动顺序："))

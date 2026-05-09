@@ -415,7 +415,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             log_block(trace, "NPC登场：", f"出发位置：{format_position(0)}")
 
         log(trace, f"\n=== 第{round_number}轮 ===")
-        log_grid(trace, grid, title="轮开始棋盘：")
+        log_grid(trace, grid, title="本轮开始时位置分布：")
         if npc_active:
             log_block(trace, "NPC状态：", f"当前位置：{format_position(display_position(npc_progress, track_length))}")
         log_block(trace, "本轮行动顺序：", format_runner_arrow_list(player_order))
@@ -434,7 +434,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                         rng=rng,
                         trace=trace,
                     )
-                    log_grid(trace, grid, title="NPC行动后棋盘：")
+                    log_grid(trace, grid, title="NPC行动后位置分布：")
                 continue
 
             if progress[player] >= track_length:
@@ -588,7 +588,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 else:
                     log_block(trace, f"{format_runner(player)}技能未进入强化状态：", "原因：行动结束后不是最后一名")
 
-            log_grid(trace, grid, title="行动后棋盘：")
+            log_grid(trace, grid, title="行动后位置分布：")
 
             if new_progress >= track_length:
                 log_timing(trace, "移动结算后", "到达或经过终点，立即进行冠军判定")
@@ -1385,7 +1385,7 @@ def log_grid(
     for pos, cell in sorted(grid.items()):
         if cell:
             wrote_cell = True
-            log(enabled, f"{format_position(pos)}：{format_cell(cell)}")
+            log(enabled, f"{format_position(pos)}（左→右）：{format_cell(cell)}")
     if wrote_cell or title:
         log(enabled, "")
 
