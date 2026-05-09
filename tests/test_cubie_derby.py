@@ -527,25 +527,28 @@ class CubieDerbyTests(unittest.TestCase):
 
             text = log_path.read_text(encoding="utf-8")
             self.assertEqual(exit_code, 0)
-            self.assertIn("NPC行动：后退", text)
+            self.assertIn("NPC行动：", text)
+            self.assertIn("后退步数：", text)
             self.assertIn("=== 结果 ===", text)
             self.assertIn("2长离", text)
             self.assertIn("轮开始棋盘：", text)
             self.assertIn("\n--- ", text)
             self.assertIn("行动后棋盘：", text)
-            self.assertIn("【判定时机：行动结束】1今汐检查行动角色", text)
-            self.assertIn("【判定时机：回合结束】2长离检查", text)
+            self.assertIn("【判定时机：行动结束】", text)
+            self.assertIn("1今汐检查行动角色", text)
+            self.assertIn("【判定时机：回合结束】", text)
+            self.assertIn("2长离检查", text)
 
             round_three_start = text.index("=== 第3轮 ===")
-            first_npc_action = text.index("NPC行动：后退", round_three_start)
+            first_npc_action = text.index("NPC行动：", round_three_start)
             round_three_intro = text[round_three_start:first_npc_action]
             self.assertIn("第0格：[NPC]", round_three_intro)
 
-            order_line = next(
-                line for line in round_three_intro.splitlines() if line.startswith("本轮行动顺序：")
-            )
-            self.assertIn("NPC", order_line)
-            self.assertEqual(order_line.removeprefix("本轮行动顺序：").count("->") + 1, 7)
+            lines = round_three_intro.splitlines()
+            order_index = next(i for i, line in enumerate(lines) if line.startswith("本轮行动顺序："))
+            order_text = lines[order_index + 1].strip()
+            self.assertIn("NPC", order_text)
+            self.assertEqual(order_text.count("->") + 1, 7)
 
 
 if __name__ == "__main__":
