@@ -25,11 +25,6 @@ SEASON2_BACKWARD_CELLS = frozenset({10, 28})
 SEASON2_SHUFFLE_CELLS = frozenset({6, 20})
 CONFIG_NAME_LABELS = {
     "custom": "自定义",
-    "mode1_random_order_random_start": "预设1：随机顺序，随机起点",
-    "mode2_start_order_random_start": "预设2：按起点顺序行动，随机起点",
-    "mode3_fixed_order_fixed_start": "预设3：A组上半区固定起点",
-    "mode4_random_order_fixed_start": "预设4：决赛下半区固定起点",
-    "mode5_fixed_order_fixed_start": "预设5：A组下半区固定起点",
 }
 
 
@@ -46,10 +41,10 @@ RUNNER_NAMES: dict[int, str] = {
     10: "赞妮",
     11: "卡提希娅",
     12: "菲比",
-    SIGRIKA_ID: "西格莉卡",
-    LUUK_HERSSEN_ID: "陆赫斯",
-    DENIA_ID: "达尼娅",
-    HIYUKI_ID: "绯雪",
+    13: "西格莉卡",
+    14: "陆赫斯",
+    15: "达尼娅",
+    16: "绯雪",
 }
 
 RUNNER_ALIASES: dict[str, int] = {
@@ -65,14 +60,14 @@ RUNNER_ALIASES: dict[str, int] = {
     "zani": 10,
     "cartethyia": 11,
     "phoebe": 12,
-    "sigrika": SIGRIKA_ID,
-    "luuk": LUUK_HERSSEN_ID,
-    "luuk herssen": LUUK_HERSSEN_ID,
-    "luuk-herssen": LUUK_HERSSEN_ID,
-    "luuk_herssen": LUUK_HERSSEN_ID,
-    "luukherssen": LUUK_HERSSEN_ID,
-    "denia": DENIA_ID,
-    "hiyuki": HIYUKI_ID,
+    "sigrika": 13,
+    "luuk": 14,
+    "luuk herssen": 14,
+    "luuk-herssen": 14,
+    "luuk_herssen": 14,
+    "luukherssen": 14,
+    "denia": 15,
+    "hiyuki": 16,
 }
 
 NAME_TO_RUNNER: dict[str, int] = {name: runner for runner, name in RUNNER_NAMES.items()}
@@ -222,7 +217,7 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
             start_grid=empty_grid(DEFAULT_LAP_LENGTH),
             random_start_stack=True,
             initial_order_mode="start",
-            name="mode1_random_order_random_start",
+            name="预设1：随机顺序，随机起点",
         )
     if mode == 2:
         selected = tuple(runners or (1, 2, 3, 4, 5, 6))
@@ -232,13 +227,13 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
             start_grid=empty_grid(DEFAULT_LAP_LENGTH),
             random_start_stack=True,
             initial_order_mode="start",
-            name="mode2_start_order_random_start",
+            name="预设2：按起点顺序行动，随机起点",
         )
     if mode == 3:
         selected = tuple(runners or (9, 10, 7, 12, 8, 11))
         start = {0: (9, 10, 7, 12, 8, 11)}
         return fixed_grid_config(
-            name="mode3_fixed_order_fixed_start",
+            name="预设3：A组上半区固定起点",
             runners=selected,
             track_length=DEFAULT_LAP_LENGTH,
             start_cells=start,
@@ -248,7 +243,7 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
         selected = tuple(runners or (3, 4, 8, 10))
         start = {1: (10,), 2: (4, 3), 3: (8,)}
         return fixed_grid_config(
-            name="mode4_random_order_fixed_start",
+            name="预设4：决赛下半区固定起点",
             runners=selected,
             track_length=DEFAULT_LAP_LENGTH,
             start_cells=start,
@@ -258,7 +253,7 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
         selected = tuple(runners or (7, 8, 9, 10, 11, 12))
         start = {1: (10, 7, 9), 2: (12,), 3: (8, 11)}
         return fixed_grid_config(
-            name="mode5_fixed_order_fixed_start",
+            name="预设5：A组下半区固定起点",
             runners=selected,
             track_length=DEFAULT_LAP_LENGTH,
             start_cells=start,
