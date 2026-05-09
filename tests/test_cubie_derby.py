@@ -531,6 +531,17 @@ class CubieDerbyTests(unittest.TestCase):
             self.assertIn("=== 结果 ===", text)
             self.assertIn("2长离", text)
 
+            round_three_start = text.index("=== 第3轮 ===")
+            first_npc_action = text.index("NPC行动：后退", round_three_start)
+            round_three_intro = text[round_three_start:first_npc_action]
+            self.assertIn("第0格：[NPC]", round_three_intro)
+
+            order_line = next(
+                line for line in round_three_intro.splitlines() if line.startswith("本轮行动顺序：")
+            )
+            self.assertIn("NPC", order_line)
+            self.assertEqual(order_line.removeprefix("本轮行动顺序：").count("->") + 1, 7)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -400,15 +400,11 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
         f"NPC={'开启' if config.npc_enabled else '关闭'}"
     )
     while True:
-        if config.npc_enabled and round_number >= config.npc_start_round:
+        if config.npc_enabled and round_number >= config.npc_start_round and not npc_active:
             npc_active = True
-            npc_progress = move_npc(
-                grid=grid,
-                npc_progress=npc_progress,
-                track_length=track_length,
-                rng=rng,
-                trace=trace,
-            )
+            npc_progress = 0
+            add_npc_to_start(grid)
+            log(trace, f"NPC登场：从{format_position(0)}出发")
 
         log(trace, f"\n=== 第{round_number}轮 ===")
         log_grid(trace, grid)
@@ -418,6 +414,18 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
 
         finished = False
         for player in list(player_order):
+            if player == NPC_ID:
+                if npc_active:
+                    npc_progress = move_npc(
+                        grid=grid,
+                        npc_progress=npc_progress,
+                        track_length=track_length,
+                        rng=rng,
+                        trace=trace,
+                    )
+                    log_grid(trace, grid)
+                continue
+
             if progress[player] >= track_length:
                 continue
 
@@ -554,13 +562,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             )
 
         next_turn_last = check_player2_skill(grid, rng)
-        if next_turn_last and 2 in runners:
-            player_order = list(runners)
-            rng.shuffle(player_order)
-            player_order = [runner for runner in player_order if runner != 2] + [2]
-        else:
-            player_order = list(runners)
-            rng.shuffle(player_order)
+        player_order = next_round_action_order(
+            runners=runners,
+            rng=rng,
+            include_npc=config.npc_enabled and round_number + 1 >= config.npc_start_round,
+            player2_last=next_turn_last and 2 in runners,
+        )
 
         if cantarella_state == 2:
             cantarella_state = 0
@@ -586,6 +593,31 @@ def initial_player_order(config: RaceConfig, grid: dict[int, Sequence[int]], rng
     if config.initial_order_mode == "fixed":
         return list(config.fixed_initial_order)
     raise ValueError(f"unknown initial_order_mode: {config.initial_order_mode}")
+
+
+def next_round_action_order(
+    *,
+    runners: Sequence[int],
+    rng: random.Random,
+    include_npc: bool,
+    player2_last: bool,
+) -> list[int]:
+    order = list(runners)
+    if include_npc:
+        order.append(NPC_ID)
+    rng.shuffle(order)
+    if player2_last and 2 in order:
+        order = [runner for runner in order if runner != 2] + [2]
+    return order
+
+
+def add_npc_to_start(grid: dict[int, list[int]]) -> None:
+    remove_runner_from_grid(grid, NPC_ID)
+    if grid.get(0):
+        grid[0] = list(grid[0]) + [NPC_ID]
+    else:
+        grid[0] = [NPC_ID]
+    keep_npc_rightmost(grid[0])
 
 
 def roll_dice(player: int, rng: random.Random) -> int:

@@ -67,7 +67,7 @@ Use `--season 2` to apply the Season 2 ruleset to the selected preset or custom 
 - Forward cells: `3`, `11`, `16`, `23`.
 - Backward cells: `10`, `28`.
 - Shuffle cells: `6`, `20`.
-- NPC starts acting from round 3, moves backward `1..6` positions, is always rightmost when sharing a cell, and returns to `0` at round end unless sharing the last-place runner's cell.
+- NPC joins the action order from round 3 at position `0`, rolls with the selected runners, moves backward `1..6` positions on its own turn, is always rightmost when sharing a cell, and returns to `0` at round end unless sharing the last-place runner's cell.
 
 ## Output Columns
 
