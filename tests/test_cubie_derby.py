@@ -19,6 +19,7 @@ from cubie_derby import (
     parse_start_layout,
     parse_start_spec,
     preset_config,
+    rank_scope,
     run_monte_carlo,
     season_rules,
     settle_npc_end_of_round,
@@ -149,6 +150,15 @@ class CubieDerbyTests(unittest.TestCase):
         progress = {4: 3, 3: 3, 8: 3}
 
         self.assertEqual(current_rank((3, 4, 8), progress, grid), [4, 3, 8])
+
+    def test_npc_only_participates_in_ranking_after_action(self):
+        grid = {13: [3], 14: [6], 31: [-1]}
+        progress = {3: 13, 6: 14, -1: 31}
+
+        self.assertEqual(rank_scope((3, 6), progress, include_npc=False), (3, 6))
+        self.assertEqual(current_rank(rank_scope((3, 6), progress, False), progress, grid), [6, 3])
+        self.assertEqual(rank_scope((3, 6), progress, include_npc=True), (3, 6, -1))
+        self.assertEqual(current_rank(rank_scope((3, 6), progress, True), progress, grid), [-1, 6, 3])
 
     def test_player1_skill_checks_actor_left_after_action(self):
         grid = {5: [2, 1]}
@@ -538,6 +548,8 @@ class CubieDerbyTests(unittest.TestCase):
             self.assertIn("今汐检查行动角色", text)
             self.assertIn("【判定时机：回合结束】", text)
             self.assertIn("长离检查", text)
+            self.assertIn("NPC参与排名：否", text)
+            self.assertIn("NPC参与排名：是", text)
 
             round_three_start = text.index("=== 第3轮 ===")
             first_npc_action = text.index("NPC行动：", round_three_start)

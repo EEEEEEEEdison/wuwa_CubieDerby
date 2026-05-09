@@ -390,6 +390,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
     cartethyia_extra_steps = False
     npc_progress = 0
     npc_active = False
+    npc_rank_active = False
 
     round_number = 1
     log_block(
@@ -408,10 +409,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
         f"NPC：{'开启' if config.npc_enabled else '关闭'}",
     )
     while True:
+        npc_rank_active = False
         if config.npc_enabled and round_number >= config.npc_start_round and not npc_active:
             npc_active = True
             npc_progress = 0
             add_npc_to_start(grid)
+            progress[NPC_ID] = npc_progress
             log_block(trace, "NPC登场：", f"出发位置：{format_position(0)}")
 
         log(trace, f"\n=== 第{round_number}轮 ===")
@@ -434,6 +437,8 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                         rng=rng,
                         trace=trace,
                     )
+                    progress[NPC_ID] = npc_progress
+                    npc_rank_active = True
                     log_grid(trace, grid, title="NPC行动后位置分布：")
                 continue
 
@@ -462,7 +467,9 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
 
             if player == 3:
                 log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为最后一名")
-                if current_rank(runners, progress, grid)[-1] == player:
+                rank_for_decision = current_rank(rank_scope(runners, progress, npc_rank_active), progress, grid)
+                log_rank_decision(trace, rank_for_decision, npc_rank_active)
+                if rank_for_decision[-1] == player:
                     extra_steps = 3
                     log_block(trace, f"{format_runner(player)}技能触发：", "原因：当前最后一名", "效果：额外+3步")
                 else:
@@ -581,7 +588,9 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
 
             if player == 11 and cartethyia_available:
                 log_timing(trace, "行动结束", f"{format_runner(player)}检查是否处于最后一名，以决定本场后续强化")
-                if current_rank(runners, progress, grid)[-1] == player:
+                rank_for_decision = current_rank(rank_scope(runners, progress, npc_rank_active), progress, grid)
+                log_rank_decision(trace, rank_for_decision, npc_rank_active)
+                if rank_for_decision[-1] == player:
                     cartethyia_extra_steps = True
                     cartethyia_available = False
                     log_block(trace, f"{format_runner(player)}技能进入强化状态：", "效果：本场剩余回合可判定额外+2步")
@@ -666,6 +675,12 @@ def initial_player_order(config: RaceConfig, grid: dict[int, Sequence[int]], rng
     if config.initial_order_mode == "fixed":
         return list(config.fixed_initial_order)
     raise ValueError(f"unknown initial_order_mode: {config.initial_order_mode}")
+
+
+def rank_scope(runners: Sequence[int], progress: dict[int, int], include_npc: bool) -> tuple[int, ...]:
+    if include_npc and NPC_ID in progress:
+        return tuple(runners) + (NPC_ID,)
+    return tuple(runners)
 
 
 def next_round_action_order(
@@ -939,6 +954,7 @@ def settle_npc_end_of_round(
     last_runner = current_rank(runners, progress, grid)[-1]
     last_pos = display_position(progress[last_runner], track_length)
     if npc_pos == last_pos:
+        progress[NPC_ID] = npc_progress
         log_block(
             trace,
             "NPC停留：",
@@ -952,6 +968,7 @@ def settle_npc_end_of_round(
     else:
         grid[0] = [NPC_ID]
     keep_npc_rightmost(grid[0])
+    progress[NPC_ID] = 0
     log_block(
         trace,
         "NPC回到起始格：",
@@ -1361,6 +1378,16 @@ def log_timing(enabled: bool | TraceLogger, timing: str, message: str) -> None:
     log(enabled, f"【判定时机：{timing}】")
     log(enabled, f"  {message}")
     log(enabled, "")
+
+
+def log_rank_decision(enabled: bool | TraceLogger, ranking: Sequence[int], npc_rank_active: bool) -> None:
+    log_block(
+        enabled,
+        "当前名次判断：",
+        f"NPC参与排名：{'是' if npc_rank_active else '否'}",
+        f"名次（前→后）：{format_runner_arrow_list(ranking)}",
+        f"当前最后一名：{format_runner(ranking[-1])}",
+    )
 
 
 def log_block(enabled: bool | TraceLogger, title: str, *lines: str) -> None:
