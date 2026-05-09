@@ -65,7 +65,7 @@ Use `--season 2` to apply the Season 2 ruleset to the selected preset or custom 
 ## Runner IDs
 
 - `13` / `sigrika`: 西格莉卡. From round 2 onward, at round start, marks up to two immediately higher-ranked runners; marked runners move 1 fewer step that round, with a minimum movement of 1.
-- `14` / `luuk_herssen`: 陆赫斯. Forward special cells move his active group 4 cells total; backward special cells move his active group 2 cells backward.
+- `14` / `luuk_herssen`: 陆赫斯. Only on his own turn, forward special cells move his active group 4 cells total; backward special cells move his active group 2 cells backward.
 - `15` / `denia`: 达尼娅. If her dice roll matches her previous round's dice roll, she gets +2 steps.
 - `16` / `hiyuki`: 绯雪. Each time her movement path and the NPC intersect, including passing through or landing on the NPC's cell, she gains a stacking +1 step bonus for future moves. NPC movement paths are checked the same way.
 

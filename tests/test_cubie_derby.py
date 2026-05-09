@@ -659,6 +659,32 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(progress[14], 8)
         self.assertEqual(grid[8], [14])
 
+    def test_luuk_herssen_does_not_enhance_special_cell_when_carried(self):
+        config = RaceConfig(
+            runners=(12, 14, 16),
+            track_length=32,
+            start_grid={21: (12, 14, 16)},
+            season=2,
+            forward_cells=frozenset({23}),
+        )
+        grid = {21: [12, 14, 16]}
+        progress = {12: 21, 14: 21, 16: 21}
+
+        new_progress = move_runner_with_left_side(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=16,
+            idx_in_cell=2,
+            total_steps=2,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(new_progress, 24)
+        self.assertEqual(progress[14], 24)
+        self.assertEqual(grid[24], [12, 14, 16])
+        self.assertNotIn(27, grid)
+
     def test_season_two_shuffle_cell_randomizes_arriving_group(self):
         config = RaceConfig(
             runners=(1, 2, 3, 4),

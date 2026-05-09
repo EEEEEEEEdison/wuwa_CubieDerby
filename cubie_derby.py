@@ -890,7 +890,17 @@ def move_single_runner(
         skill_state=skill_state,
         trace=trace,
     )
-    add_group_to_position(grid, progress, [player], new_progress, rng, config, skill_state, trace)
+    add_group_to_position(
+        grid,
+        progress,
+        [player],
+        new_progress,
+        rng,
+        config,
+        active_player=player,
+        skill_state=skill_state,
+        trace=trace,
+    )
     return progress[player]
 
 
@@ -922,7 +932,17 @@ def move_runner_with_left_side(
         skill_state=skill_state,
         trace=trace,
     )
-    add_group_to_position(grid, progress, movers, new_progress, rng, config, skill_state, trace)
+    add_group_to_position(
+        grid,
+        progress,
+        movers,
+        new_progress,
+        rng,
+        config,
+        active_player=player,
+        skill_state=skill_state,
+        trace=trace,
+    )
     return progress[player]
 
 
@@ -967,7 +987,17 @@ def move_cantarella(
             skill_state=skill_state,
             trace=trace,
         )
-        add_group_to_position(grid, progress, movers, new_progress, rng, config, skill_state, trace)
+        add_group_to_position(
+            grid,
+            progress,
+            movers,
+            new_progress,
+            rng,
+            config,
+            active_player=player,
+            skill_state=skill_state,
+            trace=trace,
+        )
         new_progress = progress[player]
         new_pos = display_position(new_progress, track_length)
         log_grid(trace, grid)
@@ -993,6 +1023,8 @@ def add_group_to_position(
     new_progress: int,
     rng: random.Random,
     config: RaceConfig,
+    *,
+    active_player: int | None = None,
     skill_state: RaceSkillState | None = None,
     trace: bool | TraceLogger = False,
 ) -> None:
@@ -1012,7 +1044,17 @@ def add_group_to_position(
         f"到达位置：{format_position(new_pos)}",
         f"格内顺序：{format_cell(grid[new_pos])}",
     )
-    apply_cell_effects(grid, progress, movers, new_pos, rng, config, skill_state, trace)
+    apply_cell_effects(
+        grid,
+        progress,
+        movers,
+        new_pos,
+        rng,
+        config,
+        active_player=active_player,
+        skill_state=skill_state,
+        trace=trace,
+    )
 
 
 def apply_cell_effects(
@@ -1022,6 +1064,8 @@ def apply_cell_effects(
     pos: int,
     rng: random.Random,
     config: RaceConfig,
+    *,
+    active_player: int | None = None,
     skill_state: RaceSkillState | None = None,
     trace: bool | TraceLogger = False,
 ) -> None:
@@ -1041,9 +1085,31 @@ def apply_cell_effects(
             f"打乱后：{format_cell(grid[pos])}",
         )
     if pos in config.forward_cells:
-        move_group_due_to_cell_effect(grid, progress, movers, pos, 1, rng, config, skill_state, trace)
+        move_group_due_to_cell_effect(
+            grid,
+            progress,
+            movers,
+            pos,
+            1,
+            rng,
+            config,
+            active_player=active_player,
+            skill_state=skill_state,
+            trace=trace,
+        )
     elif pos in config.backward_cells:
-        move_group_due_to_cell_effect(grid, progress, movers, pos, -1, rng, config, skill_state, trace)
+        move_group_due_to_cell_effect(
+            grid,
+            progress,
+            movers,
+            pos,
+            -1,
+            rng,
+            config,
+            active_player=active_player,
+            skill_state=skill_state,
+            trace=trace,
+        )
 
 
 def move_group_due_to_cell_effect(
@@ -1054,13 +1120,15 @@ def move_group_due_to_cell_effect(
     delta: int,
     rng: random.Random,
     config: RaceConfig,
+    *,
+    active_player: int | None = None,
     skill_state: RaceSkillState | None = None,
     trace: bool | TraceLogger = False,
 ) -> None:
     active_movers = [runner for runner in movers if runner in grid.get(current_pos, [])]
     if not active_movers:
         return
-    delta = adjust_cell_effect_delta(active_movers, delta, trace)
+    delta = adjust_cell_effect_delta(active_player, delta, trace)
     grid[current_pos] = [runner for runner in grid[current_pos] if runner not in active_movers]
     if not grid[current_pos]:
         grid.pop(current_pos, None)
@@ -1148,7 +1216,17 @@ def move_npc(
         f"接触角色：{format_cell(contact_cell)}",
         f"格内顺序：{format_cell(grid[new_pos])}",
     )
-    apply_cell_effects(grid, progress, [NPC_ID], new_pos, rng, config, skill_state, trace)
+    apply_cell_effects(
+        grid,
+        progress,
+        [NPC_ID],
+        new_pos,
+        rng,
+        config,
+        active_player=NPC_ID,
+        skill_state=skill_state,
+        trace=trace,
+    )
     return progress[NPC_ID]
 
 
@@ -1216,11 +1294,11 @@ def shuffle_without_npc(cell: Sequence[int], rng: random.Random) -> list[int]:
 
 
 def adjust_cell_effect_delta(
-    movers: Sequence[int],
+    active_player: int | None,
     delta: int,
     trace: bool | TraceLogger = False,
 ) -> int:
-    if LUUK_HERSSEN_ID not in movers:
+    if active_player != LUUK_HERSSEN_ID:
         return delta
     adjusted = 4 if delta > 0 else -2
     log_block(
