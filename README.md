@@ -62,6 +62,13 @@ python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:
 
 Use `--season 2` to apply the Season 2 ruleset to the selected preset or custom start. Without `--lap-length`, Season 2 defaults to a 32-position ring lap.
 
+## Runner IDs
+
+- `13` / `sigrika`: 西格莉卡. At round start, marks up to two immediately higher-ranked runners; marked runners move 1 fewer step that round, with a minimum movement of 1.
+- `14` / `luuk_herssen`: 陆赫斯. Forward special cells move his active group 4 cells total; backward special cells move his active group 2 cells backward.
+- `15` / `denia`: 达尼娅. If her dice roll matches her previous round's dice roll, she gets +2 steps.
+- `16` / `hiyuki`: 绯雪. Each time she and the NPC meet by one landing on the other's cell, she gains a stacking +1 step bonus for future moves.
+
 ## Season 2 Rules
 
 - Forward cells: `3`, `11`, `16`, `23`.
