@@ -40,7 +40,7 @@ Print machine-readable output:
 python cubie_derby.py -n 10000 --preset 4 --json
 ```
 
-Trace one race for rule debugging:
+Trace one race for rule debugging. Trace output is formatted for reading: each action is separated by blank lines, and skill/special-cell checks are marked with `判定时机` labels.
 
 ```powershell
 python cubie_derby.py --preset 4 --seed 2 --trace

@@ -407,15 +407,18 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             log(trace, f"NPC登场：从{format_position(0)}出发")
 
         log(trace, f"\n=== 第{round_number}轮 ===")
-        log_grid(trace, grid)
+        log_grid(trace, grid, title="轮开始棋盘：")
         if npc_active:
             log(trace, f"NPC位置：{format_position(display_position(npc_progress, track_length))}")
         log(trace, "本轮行动顺序：" + format_runner_arrow_list(player_order))
 
         finished = False
         for player in list(player_order):
+            log(trace, "")
             if player == NPC_ID:
                 if npc_active:
+                    log(trace, "--- NPC行动 ---")
+                    log_timing(trace, "NPC行动轮到时", "从当前位置按反方向移动1~6步")
                     npc_progress = move_npc(
                         grid=grid,
                         npc_progress=npc_progress,
@@ -423,7 +426,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                         rng=rng,
                         trace=trace,
                     )
-                    log_grid(trace, grid)
+                    log_grid(trace, grid, title="NPC行动后棋盘：")
                 continue
 
             if progress[player] >= track_length:
@@ -435,49 +438,85 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 raise RuntimeError(f"runner {player} is missing from position {current_pos}")
             idx_in_cell = current_cell.index(player)
 
+            log(trace, f"--- {format_runner(player)}行动 ---")
+            log(
+                trace,
+                f"行动开始：位置={format_position(current_pos)}，"
+                f"格内顺序={format_cell(current_cell)}",
+            )
+
             dice = roll_dice(player, rng)
             extra_steps = 0
             skip_carried_runners = False
             cantarella_move = False
 
             if player == 3:
+                log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为最后一名")
                 if current_rank(runners, progress, grid)[-1] == player:
                     extra_steps = 3
                     log(trace, f"{format_runner(player)}技能触发：当前最后一名，额外+3步")
+                else:
+                    log(trace, f"{format_runner(player)}技能未触发：当前不是最后一名")
             elif player == 5:
+                log_timing(trace, "行动开始", f"{format_runner(player)}按同格其他角色数量获得额外步数，并独自移动")
                 extra_steps = len(current_cell) - 1
                 skip_carried_runners = True
                 log(trace, f"{format_runner(player)}技能触发：独自行动，额外+{extra_steps}步")
             elif player == 7:
+                log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最后行动者")
                 if player_order[-1] == player:
                     extra_steps = 2
                     log(trace, f"{format_runner(player)}技能触发：本轮最后行动，额外+2步")
+                else:
+                    log(trace, f"{format_runner(player)}技能未触发：不是本轮最后行动者")
             elif player == 8:
+                log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最先行动者")
                 if player_order[0] == player:
                     extra_steps = 2
                     log(trace, f"{format_runner(player)}技能触发：本轮最先行动，额外+2步")
+                else:
+                    log(trace, f"{format_runner(player)}技能未触发：不是本轮最先行动者")
             elif player == 9:
+                log_timing(trace, "行动开始", f"{format_runner(player)}检查是否处于逐格移动状态")
                 cantarella_move = cantarella_state == 1
+                if cantarella_move:
+                    log(trace, f"{format_runner(player)}技能生效：本次逐格移动")
+                else:
+                    log(trace, f"{format_runner(player)}技能未生效：不处于逐格移动状态")
             elif player == 10:
+                log_timing(trace, "行动开始", f"{format_runner(player)}先结算上次保留的额外步数，再检查同格触发")
                 extra_steps = zani_extra_steps
                 if len(current_cell) > 1 and rng.random() <= 0.4:
                     zani_extra_steps = 2
                     log(trace, f"{format_runner(player)}技能触发：下一次行动额外+2步")
                 else:
                     zani_extra_steps = 0
+                    log(trace, f"{format_runner(player)}技能未触发：下一次行动无额外步数")
             elif player == 11:
+                log_timing(trace, "行动开始", f"{format_runner(player)}若已进入强化状态，则检查60%额外+2步")
                 if cartethyia_extra_steps and rng.random() <= 0.6:
                     extra_steps = 2
                     log(trace, f"{format_runner(player)}技能触发：额外+2步")
+                elif cartethyia_extra_steps:
+                    log(trace, f"{format_runner(player)}技能未触发：本次60%判定失败")
+                else:
+                    log(trace, f"{format_runner(player)}技能未判定：尚未进入强化状态")
             elif player == 12:
+                log_timing(trace, "行动开始", f"{format_runner(player)}进行50%额外+1步判定")
                 if rng.random() <= 0.5:
                     extra_steps = 1
                     log(trace, f"{format_runner(player)}技能触发：额外+1步")
+                else:
+                    log(trace, f"{format_runner(player)}技能未触发：50%判定失败")
 
             total_steps = dice + extra_steps
-            if player == 6 and rng.random() <= 0.28:
-                total_steps += dice
-                log(trace, f"{format_runner(player)}技能触发：重复本次骰子，总步数={total_steps}")
+            if player == 6:
+                log_timing(trace, "骰子后", f"{format_runner(player)}进行重复本次骰子的判定")
+                if rng.random() <= 0.28:
+                    total_steps += dice
+                    log(trace, f"{format_runner(player)}技能触发：重复本次骰子，总步数={total_steps}")
+                else:
+                    log(trace, f"{format_runner(player)}技能未触发：本次不重复骰子")
 
             log(trace, f"{format_runner(player)}行动：骰子={dice}，总步数={total_steps}")
 
@@ -525,13 +564,18 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             )
 
             if player == 11 and cartethyia_available:
+                log_timing(trace, "行动结束", f"{format_runner(player)}检查是否处于最后一名，以决定本场后续强化")
                 if current_rank(runners, progress, grid)[-1] == player:
                     cartethyia_extra_steps = True
                     cartethyia_available = False
+                    log(trace, f"{format_runner(player)}技能进入强化状态：本场剩余回合可判定额外+2步")
+                else:
+                    log(trace, f"{format_runner(player)}技能未进入强化状态：行动结束后不是最后一名")
 
-            log_grid(trace, grid)
+            log_grid(trace, grid, title="行动后棋盘：")
 
             if new_progress >= track_length:
+                log_timing(trace, "移动结算后", "到达或经过终点，立即进行冠军判定")
                 finished = True
                 break
 
@@ -552,6 +596,8 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             return result
 
         if npc_active:
+            log(trace, "")
+            log_timing(trace, "回合结束", "NPC检查是否与最后一名同格，不同格则回到第0格")
             npc_progress = settle_npc_end_of_round(
                 grid=grid,
                 progress=progress,
@@ -561,7 +607,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 trace=trace,
             )
 
-        next_turn_last = check_player2_skill(grid, rng)
+        if 2 in runners:
+            log(trace, "")
+            log_timing(trace, "回合结束", f"{format_runner(2)}检查是否在同格最右侧之外，以决定下一轮是否最后行动")
+            next_turn_last = check_player2_skill(grid, rng, trace)
+        else:
+            next_turn_last = False
         player_order = next_round_action_order(
             runners=runners,
             rng=rng,
@@ -756,6 +807,8 @@ def apply_cell_effects(
     config: RaceConfig,
     trace: bool | TraceLogger = False,
 ) -> None:
+    if pos in config.shuffle_cells or pos in config.forward_cells or pos in config.backward_cells:
+        log_timing(trace, "落点结算后", f"检查{format_position(pos)}的赛道特殊格效果")
     if pos in config.shuffle_cells:
         before = list(grid[pos])
         rng.shuffle(grid[pos])
@@ -898,25 +951,45 @@ def maybe_trigger_player1_skill_after_action(
     if actor in (1, NPC_ID) or 1 not in progress or actor not in progress:
         return
 
+    log_timing(trace, "行动结束", f"{format_runner(1)}检查行动角色{format_runner(actor)}是否与自己同格且在左侧")
     pos = display_position(progress[actor], track_length)
     cell = grid.get(pos)
     if not cell or actor not in cell or 1 not in cell:
+        log(trace, f"{format_runner(1)}技能不判定：{format_runner(actor)}最终未与{format_runner(1)}同格")
         return
 
     keep_npc_rightmost(cell)
     if cell.index(actor) >= cell.index(1):
+        log(
+            trace,
+            f"{format_runner(1)}技能不判定：{format_runner(actor)}不在{format_runner(1)}左侧，"
+            f"格内={format_cell(cell)}",
+        )
         return
 
+    log(trace, f"{format_runner(1)}技能进入概率判定：格内={format_cell(cell)}")
     if rng.random() <= 0.4:
         cell[:] = [1] + [runner for runner in cell if runner != 1]
         keep_npc_rightmost(cell)
         log(trace, f"{format_runner(1)}技能触发：由{format_runner(actor)}触发，格内={format_cell(cell)}")
+    else:
+        log(trace, f"{format_runner(1)}技能未触发：概率判定失败，格内={format_cell(cell)}")
 
 
-def check_player2_skill(grid: dict[int, Sequence[int]], rng: random.Random) -> bool:
+def check_player2_skill(
+    grid: dict[int, Sequence[int]],
+    rng: random.Random,
+    trace: bool | TraceLogger = False,
+) -> bool:
     for cell in grid.values():
         if 2 in cell and cell.index(2) < len(cell) - 1:
-            return rng.random() <= 0.65
+            log(trace, f"{format_runner(2)}技能进入概率判定：格内={format_cell(cell)}")
+            if rng.random() <= 0.65:
+                log(trace, f"{format_runner(2)}技能触发：下一轮固定最后行动")
+                return True
+            log(trace, f"{format_runner(2)}技能未触发：概率判定失败")
+            return False
+    log(trace, f"{format_runner(2)}技能不判定：当前不在同格最右侧之外")
     return False
 
 
@@ -1215,9 +1288,19 @@ def log(enabled: bool | TraceLogger, message: str) -> None:
         print(message)
 
 
-def log_grid(enabled: bool | TraceLogger, grid: dict[int, Sequence[int]]) -> None:
+def log_timing(enabled: bool | TraceLogger, timing: str, message: str) -> None:
+    log(enabled, f"【判定时机：{timing}】{message}")
+
+
+def log_grid(
+    enabled: bool | TraceLogger,
+    grid: dict[int, Sequence[int]],
+    title: str | None = None,
+) -> None:
     if not enabled:
         return
+    if title:
+        log(enabled, title)
     for pos, cell in sorted(grid.items()):
         if cell:
             log(enabled, f"{format_position(pos)}：{format_cell(cell)}")

@@ -530,6 +530,11 @@ class CubieDerbyTests(unittest.TestCase):
             self.assertIn("NPC行动：后退", text)
             self.assertIn("=== 结果 ===", text)
             self.assertIn("2长离", text)
+            self.assertIn("轮开始棋盘：", text)
+            self.assertIn("\n--- ", text)
+            self.assertIn("行动后棋盘：", text)
+            self.assertIn("【判定时机：行动结束】1今汐检查行动角色", text)
+            self.assertIn("【判定时机：回合结束】2长离检查", text)
 
             round_three_start = text.index("=== 第3轮 ===")
             first_npc_action = text.index("NPC行动：后退", round_three_start)
