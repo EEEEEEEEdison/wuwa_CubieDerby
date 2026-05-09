@@ -507,6 +507,15 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     trace=trace,
                 )
 
+            maybe_trigger_player1_skill_after_action(
+                grid=grid,
+                progress=progress,
+                actor=player,
+                track_length=track_length,
+                rng=rng,
+                trace=trace,
+            )
+
             if player == 11 and cartethyia_available:
                 if current_rank(runners, progress, grid)[-1] == player:
                     cartethyia_extra_steps = True
@@ -596,10 +605,9 @@ def move_single_runner(
     track_length = config.track_length
     current_progress = progress[player]
     current_pos = display_position(current_progress, track_length)
-    old_cell = list(grid[current_pos])
     grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
     new_progress = move_progress(current_progress, total_steps, track_length)
-    add_group_to_position(grid, progress, [player], new_progress, old_cell, rng, config, trace)
+    add_group_to_position(grid, progress, [player], new_progress, rng, config, trace)
     return progress[player]
 
 
@@ -622,7 +630,7 @@ def move_runner_with_left_side(
     movers = left_runners + [player]
     grid[current_pos] = [runner for runner in old_cell if runner not in movers]
     new_progress = move_progress(current_progress, total_steps, track_length)
-    add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, config, trace)
+    add_group_to_position(grid, progress, movers, new_progress, rng, config, trace)
     return progress[player]
 
 
@@ -658,7 +666,7 @@ def move_cantarella(
         grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
         new_progress = move_progress(current_progress, 1, track_length)
         new_pos = display_position(new_progress, track_length)
-        add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, config, trace)
+        add_group_to_position(grid, progress, movers, new_progress, rng, config, trace)
         new_progress = progress[player]
         new_pos = display_position(new_progress, track_length)
         log_grid(trace, grid)
@@ -682,7 +690,6 @@ def add_group_to_position(
     progress: dict[int, int],
     movers: Sequence[int],
     new_progress: int,
-    old_cell: Sequence[int],
     rng: random.Random,
     config: RaceConfig,
     trace: bool | TraceLogger = False,
@@ -695,10 +702,9 @@ def add_group_to_position(
         grid[new_pos] = list(movers) + grid[new_pos]
     else:
         grid[new_pos] = list(movers)
-    grid[new_pos] = check_player1_skill(grid[new_pos], old_cell, rng)
     keep_npc_rightmost(grid[new_pos])
     log(trace, f"land: movers={list(movers)} -> pos {new_pos}, cell={grid[new_pos]}")
-    apply_cell_effects(grid, progress, movers, new_pos, old_cell, rng, config, trace)
+    apply_cell_effects(grid, progress, movers, new_pos, rng, config, trace)
 
 
 def apply_cell_effects(
@@ -706,7 +712,6 @@ def apply_cell_effects(
     progress: dict[int, int],
     movers: Sequence[int],
     pos: int,
-    old_cell: Sequence[int],
     rng: random.Random,
     config: RaceConfig,
     trace: bool | TraceLogger = False,
@@ -717,9 +722,9 @@ def apply_cell_effects(
         keep_npc_rightmost(grid[pos])
         log(trace, f"cell {pos} shuffle: {before} -> {grid[pos]}")
     if pos in config.forward_cells:
-        move_group_due_to_cell_effect(grid, progress, movers, pos, old_cell, 1, rng, config, trace)
+        move_group_due_to_cell_effect(grid, progress, movers, pos, 1, rng, config, trace)
     elif pos in config.backward_cells:
-        move_group_due_to_cell_effect(grid, progress, movers, pos, old_cell, -1, rng, config, trace)
+        move_group_due_to_cell_effect(grid, progress, movers, pos, -1, rng, config, trace)
 
 
 def move_group_due_to_cell_effect(
@@ -727,7 +732,6 @@ def move_group_due_to_cell_effect(
     progress: dict[int, int],
     movers: Sequence[int],
     current_pos: int,
-    old_cell: Sequence[int],
     delta: int,
     rng: random.Random,
     config: RaceConfig,
@@ -752,7 +756,6 @@ def move_group_due_to_cell_effect(
         grid[new_pos] = active_movers + grid[new_pos]
     else:
         grid[new_pos] = active_movers
-    grid[new_pos] = check_player1_skill(grid[new_pos], old_cell, rng)
     keep_npc_rightmost(grid[new_pos])
     direction = "forward" if delta > 0 else "backward"
     log(trace, f"cell {current_pos} {direction}: movers={active_movers} -> pos {new_pos}, cell={grid[new_pos]}")
@@ -828,14 +831,31 @@ def keep_npc_rightmost(cell: list[int]) -> None:
     cell[:] = [runner for runner in cell if runner != NPC_ID] + [NPC_ID] * npc_count
 
 
-def check_player1_skill(cell: list[int], old_cell: Sequence[int], rng: random.Random) -> list[int]:
-    if cell == list(old_cell) or 1 not in cell or 1 in old_cell:
-        return cell
-    one_idx = cell.index(1)
-    if one_idx > 0 and rng.random() <= 0.4:
-        without_one = [runner for runner in cell if runner != 1]
-        return [1] + without_one
-    return cell
+def maybe_trigger_player1_skill_after_action(
+    *,
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
+    actor: int,
+    track_length: int,
+    rng: random.Random,
+    trace: bool | TraceLogger = False,
+) -> None:
+    if actor in (1, NPC_ID) or 1 not in progress or actor not in progress:
+        return
+
+    pos = display_position(progress[actor], track_length)
+    cell = grid.get(pos)
+    if not cell or actor not in cell or 1 not in cell:
+        return
+
+    keep_npc_rightmost(cell)
+    if cell.index(actor) >= cell.index(1):
+        return
+
+    if rng.random() <= 0.4:
+        cell[:] = [1] + [runner for runner in cell if runner != 1]
+        keep_npc_rightmost(cell)
+        log(trace, f"runner 1 skill: triggered by runner {actor}, cell={cell}")
 
 
 def check_player2_skill(grid: dict[int, Sequence[int]], rng: random.Random) -> bool:

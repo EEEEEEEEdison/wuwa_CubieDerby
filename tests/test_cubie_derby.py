@@ -10,6 +10,7 @@ from cubie_derby import (
     display_position,
     main,
     make_start_grid,
+    maybe_trigger_player1_skill_after_action,
     initial_player_order,
     move_npc,
     move_runner_with_left_side,
@@ -36,6 +37,17 @@ def argparse_namespace(**kwargs):
     }
     defaults.update(kwargs)
     return type("Args", (), defaults)()
+
+
+class CountingRandom(random.Random):
+    def __init__(self, random_value: float = 0.1):
+        super().__init__(1)
+        self.random_value = random_value
+        self.random_calls = 0
+
+    def random(self) -> float:
+        self.random_calls += 1
+        return self.random_value
 
 
 class CubieDerbyTests(unittest.TestCase):
@@ -137,6 +149,68 @@ class CubieDerbyTests(unittest.TestCase):
         progress = {4: 3, 3: 3, 8: 3}
 
         self.assertEqual(current_rank((3, 4, 8), progress, grid), [4, 3, 8])
+
+    def test_player1_skill_checks_actor_left_after_action(self):
+        grid = {5: [2, 1]}
+        progress = {1: 5, 2: 5}
+
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=2,
+            track_length=24,
+            rng=CountingRandom(0.1),
+        )
+
+        self.assertEqual(grid[5], [1, 2])
+
+    def test_player1_skill_uses_actor_position_not_any_left_runner(self):
+        grid = {5: [3, 1, 2]}
+        progress = {1: 5, 2: 5, 3: 5}
+        rng = CountingRandom(0.1)
+
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=2,
+            track_length=24,
+            rng=rng,
+        )
+
+        self.assertEqual(grid[5], [3, 1, 2])
+        self.assertEqual(rng.random_calls, 0)
+
+    def test_player1_skill_waits_for_final_position_after_cell_effects(self):
+        config = RaceConfig(
+            runners=(1, 2),
+            track_length=32,
+            start_grid={2: (2,), 3: (1,)},
+            season=2,
+            forward_cells=frozenset({3}),
+        )
+        grid = {2: [2], 3: [1]}
+        progress = {1: 3, 2: 2}
+        rng = CountingRandom(0.1)
+
+        move_single_runner(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=2,
+            total_steps=1,
+            rng=rng,
+        )
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=2,
+            track_length=32,
+            rng=rng,
+        )
+
+        self.assertEqual(grid[3], [1])
+        self.assertEqual(grid[4], [2])
+        self.assertEqual(rng.random_calls, 0)
 
     def test_negative_start_first_reaches_zero_without_winning(self):
         grid = {-3: [3]}
