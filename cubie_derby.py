@@ -853,12 +853,14 @@ def apply_cell_effects(
         log_timing(trace, "落点结算后", f"检查{format_position(pos)}的赛道特殊格效果")
     if pos in config.shuffle_cells:
         before = list(grid[pos])
-        rng.shuffle(grid[pos])
-        keep_npc_rightmost(grid[pos])
+        shuffled = shuffle_without_npc(grid[pos], rng)
+        grid[pos] = shuffled
         log_block(
             trace,
             f"特殊格 {format_position(pos)}：",
             "效果：随机打乱格内顺序",
+            f"打乱对象：{format_cell([runner for runner in before if runner != NPC_ID])}",
+            "NPC处理：不参与打乱，结算后固定最右",
             f"打乱前：{format_cell(before)}",
             f"打乱后：{format_cell(grid[pos])}",
         )
@@ -1004,6 +1006,13 @@ def keep_npc_rightmost(cell: list[int]) -> None:
         return
     npc_count = cell.count(NPC_ID)
     cell[:] = [runner for runner in cell if runner != NPC_ID] + [NPC_ID] * npc_count
+
+
+def shuffle_without_npc(cell: Sequence[int], rng: random.Random) -> list[int]:
+    runners = [runner for runner in cell if runner != NPC_ID]
+    npc_count = sum(1 for runner in cell if runner == NPC_ID)
+    rng.shuffle(runners)
+    return runners + [NPC_ID] * npc_count
 
 
 def maybe_trigger_player1_skill_after_action(

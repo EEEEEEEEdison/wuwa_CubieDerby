@@ -63,6 +63,16 @@ class FixedDiceRandom(CountingRandom):
         return self.dice_value
 
 
+class RecordingShuffleRandom(random.Random):
+    def __init__(self):
+        super().__init__(1)
+        self.shuffle_inputs: list[list[int]] = []
+
+    def shuffle(self, x) -> None:
+        self.shuffle_inputs.append(list(x))
+        x.reverse()
+
+
 def first_trace_action(text: str, runner_name: str) -> str:
     start = text.index(f"--- {runner_name}行动 ---")
     next_start = text.find("\n--- ", start + 1)
@@ -594,6 +604,31 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(grid[6][-1], -1)
         self.assertCountEqual(grid[6], [1, 2, 3, -1])
+
+    def test_shuffle_cell_excludes_npc_from_shuffle_pool(self):
+        config = RaceConfig(
+            runners=(1, 2, 3),
+            track_length=32,
+            start_grid={5: (1, 2, 3), 6: (-1,)},
+            season=2,
+            shuffle_cells=frozenset({6}),
+        )
+        grid = {5: [1, 2, 3], 6: [-1]}
+        progress = {1: 5, 2: 5, 3: 5, -1: 6}
+        rng = RecordingShuffleRandom()
+
+        move_runner_with_left_side(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=3,
+            idx_in_cell=2,
+            total_steps=1,
+            rng=rng,
+        )
+
+        self.assertEqual(rng.shuffle_inputs, [[1, 2, 3]])
+        self.assertEqual(grid[6], [3, 2, 1, -1])
 
     def test_npc_returns_to_start_unless_with_last_runner(self):
         grid = {5: [3], 12: [4], 30: [-1]}
