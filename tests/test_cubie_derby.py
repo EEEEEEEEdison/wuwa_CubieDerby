@@ -194,7 +194,7 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(grid[5], [1, 2])
 
-    def test_player1_skill_uses_actor_position_not_any_left_runner(self):
+    def test_player1_skill_checks_any_runner_left_of_player1(self):
         grid = {5: [3, 1, 2]}
         progress = {1: 5, 2: 5, 3: 5}
         rng = CountingRandom(0.1)
@@ -207,8 +207,25 @@ class CubieDerbyTests(unittest.TestCase):
             rng=rng,
         )
 
-        self.assertEqual(grid[5], [3, 1, 2])
-        self.assertEqual(rng.random_calls, 0)
+        self.assertEqual(grid[5], [1, 3, 2])
+        self.assertEqual(rng.random_calls, 1)
+
+    def test_player1_skill_checks_player1_cell_even_when_actor_elsewhere(self):
+        grid = {5: [3, 1], 7: [2]}
+        progress = {1: 5, 2: 7, 3: 5}
+        rng = CountingRandom(0.1)
+
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=2,
+            track_length=24,
+            rng=rng,
+        )
+
+        self.assertEqual(grid[5], [1, 3])
+        self.assertEqual(grid[7], [2])
+        self.assertEqual(rng.random_calls, 1)
 
     def test_player1_skill_can_retry_after_previous_failure(self):
         grid = {5: [2, 1]}
@@ -600,7 +617,7 @@ class CubieDerbyTests(unittest.TestCase):
             self.assertIn("\n--- ", text)
             self.assertIn("行动后位置分布：", text)
             self.assertIn("【判定时机：行动结束】", text)
-            self.assertIn("今汐检查行动角色", text)
+            self.assertIn("今汐检查自己所在格左侧", text)
             self.assertIn("【判定时机：回合结束】", text)
             self.assertIn("长离检查", text)
             self.assertIn("NPC参与排名：否", text)

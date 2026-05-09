@@ -1009,28 +1009,30 @@ def maybe_trigger_player1_skill_after_action(
     rng: random.Random,
     trace: bool | TraceLogger = False,
 ) -> None:
-    if actor in (1, NPC_ID) or 1 not in progress or actor not in progress:
+    if actor in (1, NPC_ID) or 1 not in progress:
         return
 
-    log_timing(trace, "行动结束", f"{format_runner(1)}检查行动角色{format_runner(actor)}是否与自己同格且在左侧")
-    pos = display_position(progress[actor], track_length)
+    log_timing(trace, "行动结束", f"{format_runner(1)}检查自己所在格左侧是否存在角色")
+    pos = display_position(progress[1], track_length)
     cell = grid.get(pos)
-    if not cell or actor not in cell or 1 not in cell:
+    if not cell or 1 not in cell:
         log_block(
             trace,
             f"{format_runner(1)}技能不判定：",
-            f"行动角色：{format_runner(actor)}",
-            f"原因：最终未与{format_runner(1)}同格",
+            f"位置：{format_position(pos)}",
+            f"原因：{format_runner(1)}不在该格",
         )
         return
 
     keep_npc_rightmost(cell)
-    if cell.index(actor) >= cell.index(1):
+    one_idx = cell.index(1)
+    left_runners = [runner for runner in cell[:one_idx] if runner != NPC_ID]
+    if not left_runners:
         log_block(
             trace,
             f"{format_runner(1)}技能不判定：",
-            f"行动角色：{format_runner(actor)}",
-            f"原因：不在{format_runner(1)}左侧",
+            f"位置：{format_position(pos)}",
+            f"原因：左侧没有角色",
             f"格内顺序：{format_cell(cell)}",
         )
         return
@@ -1038,7 +1040,7 @@ def maybe_trigger_player1_skill_after_action(
     log_block(
         trace,
         f"{format_runner(1)}技能进入概率判定：",
-        f"行动角色：{format_runner(actor)}",
+        f"左侧角色：{format_cell(left_runners)}",
         f"格内顺序：{format_cell(cell)}",
     )
     if rng.random() <= 0.4:
@@ -1047,7 +1049,7 @@ def maybe_trigger_player1_skill_after_action(
         log_block(
             trace,
             f"{format_runner(1)}技能触发：",
-            f"触发角色：{format_runner(actor)}",
+            f"原左侧角色：{format_cell(left_runners)}",
             f"格内顺序：{format_cell(cell)}",
         )
     else:
