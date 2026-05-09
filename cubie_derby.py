@@ -1328,7 +1328,7 @@ def format_runner_arrow_list(runners: Iterable[int]) -> str:
 def format_runner(runner: int) -> str:
     if runner == NPC_ID:
         return "NPC"
-    return f"{runner}{RUNNER_NAMES.get(runner, str(runner))}"
+    return RUNNER_NAMES.get(runner, str(runner))
 
 
 def format_cell(cell: Iterable[int]) -> str:
