@@ -392,12 +392,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
     npc_active = False
 
     round_number = 1
-    log(trace, f"scenario={config.name}, season={config.season}, lap_length={track_length}")
-    log(trace, "special cells: "
-        f"forward={sorted(config.forward_cells)}, "
-        f"backward={sorted(config.backward_cells)}, "
-        f"shuffle={sorted(config.shuffle_cells)}, "
-        f"npc_enabled={config.npc_enabled}"
+    log(trace, f"赛制={config.name}；赛季={config.season}；环形赛道={track_length}格")
+    log(trace, "特殊格："
+        f"前进一格={format_position_list(sorted(config.forward_cells))}；"
+        f"后退一格={format_position_list(sorted(config.backward_cells))}；"
+        f"随机打乱={format_position_list(sorted(config.shuffle_cells))}；"
+        f"NPC={'开启' if config.npc_enabled else '关闭'}"
     )
     while True:
         if config.npc_enabled and round_number >= config.npc_start_round:
@@ -410,11 +410,11 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 trace=trace,
             )
 
-        log(trace, f"\n=== round {round_number} ===")
+        log(trace, f"\n=== 第{round_number}轮 ===")
         log_grid(trace, grid)
         if npc_active:
-            log(trace, f"npc pos: {display_position(npc_progress, track_length)}")
-        log(trace, "order: " + " -> ".join(map(str, player_order)))
+            log(trace, f"NPC位置：{format_position(display_position(npc_progress, track_length))}")
+        log(trace, "本轮行动顺序：" + format_runner_arrow_list(player_order))
 
         finished = False
         for player in list(player_order):
@@ -435,43 +435,43 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             if player == 3:
                 if current_rank(runners, progress, grid)[-1] == player:
                     extra_steps = 3
-                    log(trace, "runner 3 skill: +3 because runner is last")
+                    log(trace, f"{format_runner(player)}技能触发：当前最后一名，额外+3步")
             elif player == 5:
                 extra_steps = len(current_cell) - 1
                 skip_carried_runners = True
-                log(trace, f"runner 5 skill: +{extra_steps}, moves alone")
+                log(trace, f"{format_runner(player)}技能触发：独自行动，额外+{extra_steps}步")
             elif player == 7:
                 if player_order[-1] == player:
                     extra_steps = 2
-                    log(trace, "runner 7 skill: +2 as last mover")
+                    log(trace, f"{format_runner(player)}技能触发：本轮最后行动，额外+2步")
             elif player == 8:
                 if player_order[0] == player:
                     extra_steps = 2
-                    log(trace, "runner 8 skill: +2 as first mover")
+                    log(trace, f"{format_runner(player)}技能触发：本轮最先行动，额外+2步")
             elif player == 9:
                 cantarella_move = cantarella_state == 1
             elif player == 10:
                 extra_steps = zani_extra_steps
                 if len(current_cell) > 1 and rng.random() <= 0.4:
                     zani_extra_steps = 2
-                    log(trace, "runner 10 skill: next action +2")
+                    log(trace, f"{format_runner(player)}技能触发：下一次行动额外+2步")
                 else:
                     zani_extra_steps = 0
             elif player == 11:
                 if cartethyia_extra_steps and rng.random() <= 0.6:
                     extra_steps = 2
-                    log(trace, "runner 11 skill: +2")
+                    log(trace, f"{format_runner(player)}技能触发：额外+2步")
             elif player == 12:
                 if rng.random() <= 0.5:
                     extra_steps = 1
-                    log(trace, "runner 12 skill: +1")
+                    log(trace, f"{format_runner(player)}技能触发：额外+1步")
 
             total_steps = dice + extra_steps
             if player == 6 and rng.random() <= 0.28:
                 total_steps += dice
-                log(trace, f"runner 6 skill: repeats dice, total {total_steps}")
+                log(trace, f"{format_runner(player)}技能触发：重复本次骰子，总步数={total_steps}")
 
-            log(trace, f"runner {player}: dice={dice}, total_steps={total_steps}")
+            log(trace, f"{format_runner(player)}行动：骰子={dice}，总步数={total_steps}")
 
             if cantarella_move:
                 new_progress, cantarella_state, cantarella_group = move_cantarella(
@@ -536,7 +536,11 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 second_position=second_position,
                 winner_margin=max(0, track_length - second_position),
             )
-            log(trace, f"finish: winner={format_runner(result.winner)}, ranking={list(result.ranking)}, margin={result.winner_margin}")
+            log(
+                trace,
+                f"比赛结束：冠军={format_runner(result.winner)}，"
+                f"排名={format_runner_list(result.ranking)}，领先距离={result.winner_margin}",
+            )
             return result
 
         if npc_active:
@@ -677,7 +681,7 @@ def move_cantarella(
                 group_mode = True
                 group = list(grid[new_pos])
                 cantarella_state = 2
-                log(trace, "runner 9 skill: merged with destination group")
+                log(trace, f"{format_runner(player)}技能触发：与终点格角色合流")
 
         if new_progress >= track_length:
             break
@@ -703,7 +707,11 @@ def add_group_to_position(
     else:
         grid[new_pos] = list(movers)
     keep_npc_rightmost(grid[new_pos])
-    log(trace, f"land: movers={list(movers)} -> pos {new_pos}, cell={grid[new_pos]}")
+    log(
+        trace,
+        f"落点结算：移动队列={format_cell(movers)} -> "
+        f"{format_position(new_pos)}，格内={format_cell(grid[new_pos])}",
+    )
     apply_cell_effects(grid, progress, movers, new_pos, rng, config, trace)
 
 
@@ -720,7 +728,7 @@ def apply_cell_effects(
         before = list(grid[pos])
         rng.shuffle(grid[pos])
         keep_npc_rightmost(grid[pos])
-        log(trace, f"cell {pos} shuffle: {before} -> {grid[pos]}")
+        log(trace, f"特殊格{format_position(pos)}：随机打乱 {format_cell(before)} -> {format_cell(grid[pos])}")
     if pos in config.forward_cells:
         move_group_due_to_cell_effect(grid, progress, movers, pos, 1, rng, config, trace)
     elif pos in config.backward_cells:
@@ -758,7 +766,13 @@ def move_group_due_to_cell_effect(
         grid[new_pos] = active_movers
     keep_npc_rightmost(grid[new_pos])
     direction = "forward" if delta > 0 else "backward"
-    log(trace, f"cell {current_pos} {direction}: movers={active_movers} -> pos {new_pos}, cell={grid[new_pos]}")
+    direction_text = "前进一格" if direction == "forward" else "后退一格"
+    log(
+        trace,
+        f"特殊格{format_position(current_pos)}：{direction_text}，"
+        f"移动队列={format_cell(active_movers)} -> {format_position(new_pos)}，"
+        f"格内={format_cell(grid[new_pos])}",
+    )
 
 
 def move_progress(current_progress: int, steps: int, track_length: int) -> int:
@@ -784,7 +798,12 @@ def move_npc(
     else:
         grid[new_pos] = [NPC_ID]
     keep_npc_rightmost(grid[new_pos])
-    log(trace, f"npc moves backward {steps} steps: {npc_progress % track_length} -> {new_pos}, contact={contact_cell}, cell={grid[new_pos]}")
+    log(
+        trace,
+        f"NPC行动：后退{steps}步，"
+        f"{format_position(npc_progress % track_length)} -> {format_position(new_pos)}，"
+        f"接触={format_cell(contact_cell)}，格内={format_cell(grid[new_pos])}",
+    )
     return new_progress
 
 
@@ -801,7 +820,7 @@ def settle_npc_end_of_round(
     last_runner = current_rank(runners, progress, grid)[-1]
     last_pos = display_position(progress[last_runner], track_length)
     if npc_pos == last_pos:
-        log(trace, f"npc stays at pos {npc_pos} with last runner {format_runner(last_runner)}")
+        log(trace, f"NPC停留：与最后一名{format_runner(last_runner)}同在{format_position(npc_pos)}")
         return npc_progress
     remove_runner_from_grid(grid, NPC_ID)
     if grid.get(0):
@@ -809,7 +828,11 @@ def settle_npc_end_of_round(
     else:
         grid[0] = [NPC_ID]
     keep_npc_rightmost(grid[0])
-    log(trace, f"npc returns to start because npc_pos={npc_pos}, last_runner={format_runner(last_runner)}, last_pos={last_pos}")
+    log(
+        trace,
+        f"NPC回到起始格：NPC在{format_position(npc_pos)}，"
+        f"最后一名{format_runner(last_runner)}在{format_position(last_pos)}",
+    )
     return 0
 
 
@@ -855,7 +878,7 @@ def maybe_trigger_player1_skill_after_action(
     if rng.random() <= 0.4:
         cell[:] = [1] + [runner for runner in cell if runner != 1]
         keep_npc_rightmost(cell)
-        log(trace, f"runner 1 skill: triggered by runner {actor}, cell={cell}")
+        log(trace, f"{format_runner(1)}技能触发：由{format_runner(actor)}触发，格内={format_cell(cell)}")
 
 
 def check_player2_skill(grid: dict[int, Sequence[int]], rng: random.Random) -> bool:
@@ -1105,7 +1128,7 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
         "------------  ---------  ---------  ---------  ---------  ---------  ------------",
     ]
     for row in rows:
-        label = f"{row.runner}.{row.name}"
+        label = format_runner(row.runner)
         lines.append(
             f"{label:<12}  {row.wins:>9,}  {row.win_rate:>8.2%}  "
             f"{row.average_rank:>9.3f}  {row.rank_variance:>9.3f}  "
@@ -1115,7 +1138,7 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
     lines.extend(
         [
             "",
-            f"Best pick: {best.runner}.{best.name} "
+            f"Best pick: {format_runner(best.runner)} "
             f"with {best.win_rate:.2%} first-place probability.",
         ]
     )
@@ -1126,10 +1149,31 @@ def format_runner_list(runners: Iterable[int]) -> str:
     return ", ".join(format_runner(runner) for runner in runners)
 
 
+def format_runner_arrow_list(runners: Iterable[int]) -> str:
+    return " -> ".join(format_runner(runner) for runner in runners)
+
+
 def format_runner(runner: int) -> str:
     if runner == NPC_ID:
         return "NPC"
-    return f"{runner}.{RUNNER_NAMES.get(runner, str(runner))}"
+    return f"{runner}{RUNNER_NAMES.get(runner, str(runner))}"
+
+
+def format_cell(cell: Iterable[int]) -> str:
+    return "[" + ", ".join(format_runner(runner) for runner in cell) + "]"
+
+
+def format_position(pos: int) -> str:
+    if pos < 0:
+        return f"起点前{-pos}格({pos})"
+    return f"第{pos}格"
+
+
+def format_position_list(positions: Iterable[int]) -> str:
+    items = list(positions)
+    if not items:
+        return "无"
+    return "[" + ", ".join(format_position(pos) for pos in items) + "]"
 
 
 def log(enabled: bool | TraceLogger, message: str) -> None:
@@ -1144,7 +1188,7 @@ def log_grid(enabled: bool | TraceLogger, grid: dict[int, Sequence[int]]) -> Non
         return
     for pos, cell in sorted(grid.items()):
         if cell:
-            log(enabled, f"pos {pos}: {list(cell)}")
+            log(enabled, f"{format_position(pos)}：{format_cell(cell)}")
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -1199,13 +1243,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = simulate_race(config, random.Random(args.seed), trace=trace)
             result_text = json.dumps(trace_result_to_dict(result), ensure_ascii=False, indent=2)
             trace.write_line("")
-            trace.write_line("=== result ===")
+            trace.write_line("=== 结果 ===")
             trace.write_line(result_text)
             if args.trace_log:
                 path = Path(args.trace_log)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(trace.text(), encoding="utf-8")
-                print(f"Trace log written to {path}")
+                print(f"过程日志已写入：{path}")
             return 0
         summary = run_monte_carlo(config, args.iterations, seed=args.seed, workers=args.workers)
     except ValueError as exc:
@@ -1221,8 +1265,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def trace_result_to_dict(result: RaceResult) -> dict[str, object]:
     return {
-        "winner": result.winner,
-        "ranking": list(result.ranking),
+        "winner": format_runner(result.winner),
+        "winner_id": result.winner,
+        "ranking": [format_runner(runner) for runner in result.ranking],
+        "ranking_ids": list(result.ranking),
         "second_position": result.second_position,
         "winner_margin": result.winner_margin,
     }

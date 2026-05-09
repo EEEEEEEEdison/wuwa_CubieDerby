@@ -527,8 +527,9 @@ class CubieDerbyTests(unittest.TestCase):
 
             text = log_path.read_text(encoding="utf-8")
             self.assertEqual(exit_code, 0)
-            self.assertIn("npc moves backward", text)
-            self.assertIn("=== result ===", text)
+            self.assertIn("NPC行动：后退", text)
+            self.assertIn("=== 结果 ===", text)
+            self.assertIn("2长离", text)
 
 
 if __name__ == "__main__":
