@@ -40,6 +40,12 @@ Print machine-readable output:
 python cubie_derby.py -n 10000 --preset 4 --json
 ```
 
+For large Monte Carlo runs, enable CPU parallelism. Use `--workers 0` to use all CPU cores, or pass a fixed worker count such as `--workers 4`:
+
+```powershell
+python cubie_derby.py -n 100000 --season 2 --start "0:*" --runners 11 12 13 14 15 16 --seed 42 --workers 0
+```
+
 Trace one race for rule debugging. Trace output is formatted for reading: each action is separated by blank lines, and skill/special-cell checks are marked with `判定时机` labels.
 
 ```powershell
