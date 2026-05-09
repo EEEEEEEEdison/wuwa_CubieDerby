@@ -78,8 +78,8 @@ Use `--season 2` to apply the Season 2 ruleset to the selected preset or custom 
 
 ## Output Columns
 
-- `夺冠次数`: number of simulated races won by the runner.
 - `夺冠率`: estimated first-place probability.
+- `前三率`: estimated probability of finishing in the top three.
 - `平均名次`: lower is better.
 - `名次方差`: ranking volatility.
 - `场均领先`: champion progress margin contribution averaged across all races.

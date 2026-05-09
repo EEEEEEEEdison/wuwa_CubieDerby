@@ -103,6 +103,8 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(summary.best.runner, 3)
         self.assertEqual(summary.rows[0].wins, 20)
         self.assertEqual(summary.rows[0].win_rate, 1.0)
+        self.assertEqual(summary.rows[0].top3_count, 20)
+        self.assertEqual(summary.rows[0].top3_rate, 1.0)
 
     def test_preset_four_runs_and_counts_all_races(self):
         config = preset_config(4)
@@ -111,6 +113,7 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(sum(row.wins for row in summary.rows), 100)
         self.assertEqual({row.runner for row in summary.rows}, {3, 4, 8, 10})
+        self.assertEqual(sum(row.top3_count for row in summary.rows), 300)
 
     def test_format_summary_uses_chinese_aligned_table(self):
         config = RaceConfig(
@@ -125,8 +128,9 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertIn("赛制：自定义", text)
         self.assertIn("角色", text)
-        self.assertIn("夺冠次数", text)
+        self.assertIn("前三率", text)
         self.assertIn("推荐选择：", text)
+        self.assertNotIn("夺冠次数", text)
         self.assertNotIn("Scenario:", text)
         self.assertNotIn("win_rate", text)
 

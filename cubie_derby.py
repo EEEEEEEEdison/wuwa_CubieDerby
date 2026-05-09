@@ -130,6 +130,8 @@ class RunnerSummary:
     name: str
     wins: int
     win_rate: float
+    top3_count: int
+    top3_rate: float
     average_rank: float
     rank_variance: float
     winner_gap_per_race: float
@@ -154,6 +156,7 @@ class MonteCarloAccumulator:
         size = len(self.runners)
         self.iterations = 0
         self.wins = [0] * size
+        self.top3 = [0] * size
         self.rank_sum = [0.0] * size
         self.rank_square_sum = [0.0] * size
         self.winner_gap_sum = [0.0] * size
@@ -165,6 +168,8 @@ class MonteCarloAccumulator:
         self.winner_gap_sum[winner_idx] += result.winner_margin
         for rank, runner in enumerate(result.ranking, start=1):
             idx = self.index[runner]
+            if rank <= 3:
+                self.top3[idx] += 1
             self.rank_sum[idx] += rank
             self.rank_square_sum[idx] += rank * rank
 
@@ -174,6 +179,7 @@ class MonteCarloAccumulator:
         self.iterations += other.iterations
         for i in range(len(self.runners)):
             self.wins[i] += other.wins[i]
+            self.top3[i] += other.top3[i]
             self.rank_sum[i] += other.rank_sum[i]
             self.rank_square_sum[i] += other.rank_square_sum[i]
             self.winner_gap_sum[i] += other.winner_gap_sum[i]
@@ -196,6 +202,8 @@ class MonteCarloAccumulator:
                     name=RUNNER_NAMES.get(runner, str(runner)),
                     wins=wins,
                     win_rate=wins / n if n else 0.0,
+                    top3_count=self.top3[idx],
+                    top3_rate=self.top3[idx] / n if n else 0.0,
                     average_rank=avg_rank,
                     rank_variance=variance,
                     winner_gap_per_race=self.winner_gap_sum[idx] / n if n else 0.0,
@@ -1694,6 +1702,8 @@ def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
                 "name": row.name,
                 "wins": row.wins,
                 "win_rate": row.win_rate,
+                "top3_count": row.top3_count,
+                "top3_rate": row.top3_rate,
                 "average_rank": row.average_rank,
                 "rank_variance": row.rank_variance,
                 "winner_gap_per_race": row.winner_gap_per_race,
@@ -1709,12 +1719,12 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
     if sort_by_win_rate:
         rows.sort(key=lambda row: (row.win_rate, -row.average_rank), reverse=True)
 
-    headers = ("角色", "夺冠次数", "夺冠率", "平均名次", "名次方差", "场均领先", "胜时领先")
+    headers = ("角色", "夺冠率", "前三率", "平均名次", "名次方差", "场均领先", "胜时领先")
     table_rows = [
         (
             format_runner(row.runner),
-            f"{row.wins:,}",
             f"{row.win_rate:.2%}",
+            f"{row.top3_rate:.2%}",
             f"{row.average_rank:.3f}",
             f"{row.rank_variance:.3f}",
             f"{row.winner_gap_per_race:.3f}",
