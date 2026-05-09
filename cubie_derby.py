@@ -448,6 +448,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             runners=runners,
             progress=progress,
             grid=grid,
+            round_number=round_number,
             trace=trace,
         )
         log_block(trace, "本轮行动顺序：", format_runner_arrow_list(player_order))
@@ -736,9 +737,14 @@ def mark_sigrika_debuffs(
     runners: Sequence[int],
     progress: dict[int, int],
     grid: dict[int, Sequence[int]],
+    round_number: int = 2,
     trace: bool | TraceLogger = False,
 ) -> set[int]:
     if SIGRIKA_ID not in runners:
+        return set()
+    if round_number == 1:
+        log_timing(trace, "回合开始", f"{format_runner(SIGRIKA_ID)}第一轮不发动技能")
+        log_block(trace, f"{format_runner(SIGRIKA_ID)}技能不发动：", "原因：第一轮不发动")
         return set()
     ranking = current_rank(runners, progress, grid)
     sigrika_index = ranking.index(SIGRIKA_ID)
@@ -867,6 +873,14 @@ def move_single_runner(
     current_pos = display_position(current_progress, track_length)
     grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
     new_progress = move_progress(current_progress, total_steps, track_length)
+    record_hiyuki_npc_path_contact(
+        movers=[player],
+        progress=progress,
+        track_length=track_length,
+        path=forward_path_positions(current_progress, total_steps, track_length),
+        skill_state=skill_state,
+        trace=trace,
+    )
     add_group_to_position(grid, progress, [player], new_progress, rng, config, skill_state, trace)
     return progress[player]
 
@@ -891,6 +905,14 @@ def move_runner_with_left_side(
     movers = left_runners + [player]
     grid[current_pos] = [runner for runner in old_cell if runner not in movers]
     new_progress = move_progress(current_progress, total_steps, track_length)
+    record_hiyuki_npc_path_contact(
+        movers=movers,
+        progress=progress,
+        track_length=track_length,
+        path=forward_path_positions(current_progress, total_steps, track_length),
+        skill_state=skill_state,
+        trace=trace,
+    )
     add_group_to_position(grid, progress, movers, new_progress, rng, config, skill_state, trace)
     return progress[player]
 
@@ -928,6 +950,14 @@ def move_cantarella(
         grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
         new_progress = move_progress(current_progress, 1, track_length)
         new_pos = display_position(new_progress, track_length)
+        record_hiyuki_npc_path_contact(
+            movers=movers,
+            progress=progress,
+            track_length=track_length,
+            path=forward_path_positions(current_progress, 1, track_length),
+            skill_state=skill_state,
+            trace=trace,
+        )
         add_group_to_position(grid, progress, movers, new_progress, rng, config, skill_state, trace)
         new_progress = progress[player]
         new_pos = display_position(new_progress, track_length)
@@ -961,8 +991,6 @@ def add_group_to_position(
     new_pos = display_position(new_progress, track_length)
     for runner in movers:
         progress[runner] = new_progress
-    destination_before = list(grid.get(new_pos, []))
-    record_hiyuki_npc_contact(movers, destination_before, skill_state, trace)
     if grid.get(new_pos):
         grid[new_pos] = list(movers) + grid[new_pos]
     else:
@@ -1036,10 +1064,21 @@ def move_group_due_to_cell_effect(
     else:
         new_progress = max(MIN_START_POSITION, base_progress + delta)
     new_pos = display_position(new_progress, config.track_length)
+    record_hiyuki_npc_path_contact(
+        movers=active_movers,
+        progress=progress,
+        track_length=config.track_length,
+        path=cell_effect_path_positions(
+            start_progress=base_progress,
+            delta=delta,
+            track_length=config.track_length,
+            wrap=active_movers == [NPC_ID],
+        ),
+        skill_state=skill_state,
+        trace=trace,
+    )
     for runner in active_movers:
         progress[runner] = new_progress
-    destination_before = list(grid.get(new_pos, []))
-    record_hiyuki_npc_contact(active_movers, destination_before, skill_state, trace)
     if grid.get(new_pos):
         grid[new_pos] = active_movers + grid[new_pos]
     else:
@@ -1077,7 +1116,14 @@ def move_npc(
     new_progress = (npc_progress - steps) % track_length
     new_pos = new_progress
     destination_before = list(grid.get(new_pos, []))
-    record_hiyuki_npc_contact([NPC_ID], destination_before, skill_state, trace)
+    record_hiyuki_npc_path_contact(
+        movers=[NPC_ID],
+        progress=progress,
+        track_length=track_length,
+        path=npc_reverse_path_positions(npc_progress, steps, track_length),
+        skill_state=skill_state,
+        trace=trace,
+    )
     contact_cell = [runner for runner in destination_before if runner != NPC_ID]
     if grid.get(new_pos):
         grid[new_pos] = grid[new_pos] + [NPC_ID]
@@ -1177,12 +1223,75 @@ def adjust_cell_effect_delta(
     return adjusted
 
 
-def record_hiyuki_npc_contact(
+def forward_path_positions(current_progress: int, steps: int, track_length: int) -> list[int]:
+    if steps <= 0:
+        return []
+    final_progress = min(current_progress + steps, track_length)
+    return [display_position(progress, track_length) for progress in range(current_progress + 1, final_progress + 1)]
+
+
+def cell_effect_path_positions(
+    *,
+    start_progress: int,
+    delta: int,
+    track_length: int,
+    wrap: bool,
+) -> list[int]:
+    if delta == 0:
+        return []
+    if wrap:
+        direction = 1 if delta > 0 else -1
+        return [(start_progress + direction * offset) % track_length for offset in range(1, abs(delta) + 1)]
+    if delta > 0:
+        return forward_path_positions(start_progress, delta, track_length)
+    final_progress = max(MIN_START_POSITION, start_progress + delta)
+    return [display_position(progress, track_length) for progress in range(start_progress - 1, final_progress - 1, -1)]
+
+
+def npc_reverse_path_positions(npc_progress: int, steps: int, track_length: int) -> list[int]:
+    return [(npc_progress - offset) % track_length for offset in range(1, steps + 1)]
+
+
+def record_hiyuki_npc_path_contact(
+    *,
+    movers: Sequence[int],
+    progress: dict[int, int],
+    track_length: int,
+    path: Sequence[int],
+    skill_state: RaceSkillState | None,
+    trace: bool | TraceLogger = False,
+) -> None:
+    if skill_state is None or not path:
+        return
+    movers_set = set(movers)
+    path_positions = set(path)
+    reason: str | None = None
+    if HIYUKI_ID in movers_set and NPC_ID in progress:
+        npc_pos = display_position(progress[NPC_ID], track_length)
+        if npc_pos in path_positions:
+            reason = f"{format_runner(HIYUKI_ID)}移动路径经过NPC所在{format_position(npc_pos)}"
+    elif NPC_ID in movers_set and HIYUKI_ID in progress:
+        hiyuki_pos = display_position(progress[HIYUKI_ID], track_length)
+        if hiyuki_pos in path_positions:
+            reason = f"NPC移动路径经过{format_runner(HIYUKI_ID)}所在{format_position(hiyuki_pos)}"
+    if reason is None:
+        return
+    skill_state.hiyuki_bonus_steps += 1
+    log_block(
+        trace,
+        f"{format_runner(HIYUKI_ID)}技能叠加：",
+        f"原因：{reason}",
+        f"当前额外步数：+{skill_state.hiyuki_bonus_steps}",
+    )
+
+
+def record_hiyuki_npc_destination_contact_legacy(
     arrivals: Sequence[int],
     destination_before: Sequence[int],
     skill_state: RaceSkillState | None,
     trace: bool | TraceLogger = False,
 ) -> None:
+    """旧版绯雪规则：仅在终点格重合时叠加。保留以便需要时快速回滚。"""
     if skill_state is None:
         return
     arrivals_set = set(arrivals)

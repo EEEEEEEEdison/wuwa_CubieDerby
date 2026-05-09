@@ -210,6 +210,19 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(debuffed, {14, 15})
 
+    def test_sigrika_does_not_mark_anyone_on_first_round(self):
+        grid = {2: [16], 3: [13], 4: [15], 5: [14]}
+        progress = {13: 3, 14: 5, 15: 4, 16: 2}
+
+        debuffed = mark_sigrika_debuffs(
+            runners=(13, 14, 15, 16),
+            progress=progress,
+            grid=grid,
+            round_number=1,
+        )
+
+        self.assertEqual(debuffed, set())
+
     def test_sigrika_debuff_reduces_steps_but_not_below_one(self):
         debuffed = {14, 15}
 
@@ -703,6 +716,30 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(state.hiyuki_bonus_steps, 1)
         self.assertEqual(grid[2], [16, -1])
 
+    def test_hiyuki_gains_stack_when_passing_through_npc(self):
+        config = RaceConfig(
+            runners=(16,),
+            track_length=32,
+            start_grid={0: (16,)},
+        )
+        grid = {0: [16], 2: [-1]}
+        progress = {16: 0, -1: 2}
+        state = RaceSkillState()
+
+        move_single_runner(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=16,
+            total_steps=3,
+            rng=random.Random(1),
+            skill_state=state,
+        )
+
+        self.assertEqual(state.hiyuki_bonus_steps, 1)
+        self.assertEqual(grid[2], [-1])
+        self.assertEqual(grid[3], [16])
+
     def test_hiyuki_gains_stack_when_npc_lands_on_hiyuki_before_cell_effect(self):
         config = RaceConfig(
             runners=(16,),
@@ -729,6 +766,31 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(npc_progress, 27)
         self.assertEqual(grid[28], [16])
         self.assertEqual(grid[27], [-1])
+
+    def test_hiyuki_gains_stack_when_npc_passes_through_hiyuki(self):
+        config = RaceConfig(
+            runners=(16,),
+            track_length=32,
+            start_grid={29: (16,)},
+        )
+        grid = {29: [16]}
+        progress = {16: 29, -1: 0}
+        state = RaceSkillState()
+
+        npc_progress = move_npc(
+            grid=grid,
+            progress=progress,
+            config=config,
+            npc_progress=0,
+            rng=FixedDiceRandom(random_value=0.1, dice_value=4),
+            skill_state=state,
+            trace=False,
+        )
+
+        self.assertEqual(state.hiyuki_bonus_steps, 1)
+        self.assertEqual(npc_progress, 28)
+        self.assertEqual(grid[29], [16])
+        self.assertEqual(grid[28], [-1])
 
     def test_npc_stays_rightmost_after_shuffle_cell(self):
         config = RaceConfig(
