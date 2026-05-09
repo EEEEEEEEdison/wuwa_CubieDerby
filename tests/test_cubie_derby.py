@@ -15,6 +15,7 @@ from cubie_derby import (
     display_position,
     display_width,
     format_summary,
+    summary_to_dict,
     main,
     make_start_grid,
     mark_sigrika_debuffs,
@@ -33,6 +34,7 @@ from cubie_derby import (
     season_rules,
     settle_npc_end_of_round,
     simulate_race,
+    with_elapsed,
 )
 
 
@@ -129,6 +131,8 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("赛制：自定义", text)
         self.assertIn("角色", text)
         self.assertIn("前三率", text)
+        self.assertIn("用时：未统计", text)
+        self.assertIn("速度：未统计", text)
         self.assertIn("推荐选择：", text)
         self.assertNotIn("夺冠次数", text)
         self.assertNotIn("Scenario:", text)
@@ -139,6 +143,17 @@ class CubieDerbyTests(unittest.TestCase):
         table_lines = lines[header_index : header_index + 2 + len(config.runners)]
         expected_width = display_width(table_lines[0])
         self.assertTrue(all(display_width(line) == expected_width for line in table_lines))
+
+    def test_format_summary_shows_elapsed_time_when_recorded(self):
+        summary = with_elapsed(run_monte_carlo(preset_config(4), 10, seed=1), 0.5)
+
+        text = format_summary(summary)
+        data = summary_to_dict(summary)
+
+        self.assertIn("用时：500 ms", text)
+        self.assertIn("速度：20 局/秒", text)
+        self.assertEqual(data["elapsed_seconds"], 0.5)
+        self.assertEqual(data["races_per_second"], 20.0)
 
     def test_format_summary_localizes_builtin_config_names(self):
         summary = run_monte_carlo(preset_config(4), 10, seed=1)

@@ -6,6 +6,7 @@ import math
 import multiprocessing as mp
 import random
 import sys
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -138,6 +139,7 @@ class SimulationSummary:
     iterations: int
     config: RaceConfig
     rows: tuple[RunnerSummary, ...]
+    elapsed_seconds: float | None = None
 
     @property
     def best(self) -> RunnerSummary:
@@ -1765,6 +1767,8 @@ def default_initial_order_mode(grid: dict[int, Sequence[int]], random_start_posi
 def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
     return {
         "iterations": summary.iterations,
+        "elapsed_seconds": summary.elapsed_seconds,
+        "races_per_second": races_per_second(summary),
         "config": {
             "name": summary.config.name,
             "season": summary.config.season,
@@ -1829,6 +1833,8 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
         f"赛季：第{summary.config.season}季",
         f"模拟次数：{summary.iterations:,}",
         f"赛道长度：{summary.config.track_length}格",
+        f"用时：{format_elapsed(summary.elapsed_seconds)}",
+        f"速度：{format_rate(races_per_second(summary))}",
         "",
         format_table_row(headers, widths, aligns),
         format_table_separator(widths),
@@ -1842,6 +1848,35 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
         ]
     )
     return "\n".join(lines)
+
+
+def with_elapsed(summary: SimulationSummary, elapsed_seconds: float) -> SimulationSummary:
+    return SimulationSummary(
+        iterations=summary.iterations,
+        config=summary.config,
+        rows=summary.rows,
+        elapsed_seconds=elapsed_seconds,
+    )
+
+
+def races_per_second(summary: SimulationSummary) -> float | None:
+    if summary.elapsed_seconds is None or summary.elapsed_seconds <= 0:
+        return None
+    return summary.iterations / summary.elapsed_seconds
+
+
+def format_elapsed(elapsed_seconds: float | None) -> str:
+    if elapsed_seconds is None:
+        return "未统计"
+    if elapsed_seconds < 1:
+        return f"{elapsed_seconds * 1000:.0f} ms"
+    return f"{elapsed_seconds:.2f} 秒"
+
+
+def format_rate(rate: float | None) -> str:
+    if rate is None:
+        return "未统计"
+    return f"{rate:,.0f} 局/秒"
 
 
 def format_config_name(name: str) -> str:
@@ -2023,7 +2058,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 path.write_text(trace.text(), encoding="utf-8")
                 print(f"过程日志已写入：{path}")
             return 0
+        start_time = time.perf_counter()
         summary = run_monte_carlo(config, args.iterations, seed=args.seed, workers=args.workers)
+        summary = with_elapsed(summary, time.perf_counter() - start_time)
     except ValueError as exc:
         parser.error(str(exc))
         return 2
