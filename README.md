@@ -28,10 +28,10 @@ Start all selected runners in one cell with a freshly randomized stack order in 
 python cubie_derby.py -n 100000 --lap-length 24 --start "0:*" --runners 3 4 8 10 --seed 42
 ```
 
-Use `--initial-order start` if the first-round action order should follow that randomized stack order.
+When every runner starts in position `0`, the first-round action order follows the left-to-right stack order by default. Use `--initial-order random` to override it.
 
 ```powershell
-python cubie_derby.py -n 100000 --lap-length 24 --start "0:*" --runners 3 4 8 10 --initial-order start
+python cubie_derby.py -n 100000 --lap-length 24 --start "0:*" --runners 3 4 8 10 --initial-order random
 ```
 
 Print machine-readable output:

@@ -10,6 +10,7 @@ from cubie_derby import (
     display_position,
     main,
     make_start_grid,
+    initial_player_order,
     move_npc,
     move_runner_with_left_side,
     move_single_runner,
@@ -89,6 +90,32 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertTrue(config.random_start_stack)
         self.assertEqual(config.random_start_position, 0)
         self.assertEqual(config.runners, (3, 4, 8, 10))
+        self.assertEqual(config.initial_order_mode, "start")
+
+    def test_fixed_start_at_zero_defaults_to_left_to_right_order(self):
+        args = argparse_namespace(
+            runners=["3", "4", "8", "10"],
+            track_length=24,
+            start="0:3,4,8,10",
+            initial_order=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertEqual(config.initial_order_mode, "start")
+        self.assertEqual(initial_player_order(config, {0: [3, 4, 8, 10]}, random.Random(1)), [3, 4, 8, 10])
+
+    def test_mixed_start_defaults_to_random_order(self):
+        args = argparse_namespace(
+            runners=["3", "4", "8", "10"],
+            track_length=24,
+            start="-1:3;0:4,8,10",
+            initial_order=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertEqual(config.initial_order_mode, "random")
 
     def test_custom_start_does_not_validate_against_default_preset(self):
         args = argparse_namespace(
@@ -103,6 +130,7 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(config.runners, (1, 2, 3, 4, 5, 6))
         self.assertEqual(config.start_grid, {-3: (2,), -2: (1, 4), -1: (3, 6), 0: (5,)})
+        self.assertEqual(config.initial_order_mode, "random")
 
     def test_same_position_ranking_uses_cell_order(self):
         grid = {3: (4, 3, 8)}

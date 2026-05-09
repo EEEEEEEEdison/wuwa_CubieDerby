@@ -182,7 +182,7 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
             track_length=DEFAULT_LAP_LENGTH,
             start_grid=empty_grid(DEFAULT_LAP_LENGTH),
             random_start_stack=True,
-            initial_order_mode="random",
+            initial_order_mode="start",
             name="mode1_random_order_random_start",
         )
     if mode == 2:
@@ -991,7 +991,7 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
                 runners = tuple(runner for _, cell in sorted(start_cells.items()) for runner in cell)
             grid = make_start_grid(track_length, start_cells)
             validate_fixed_start(runners, grid)
-        initial_order_mode = "random"
+        initial_order_mode = default_initial_order_mode(grid, random_start_position)
         fixed_order: tuple[int, ...] = ()
         if args.initial_order:
             if args.initial_order == "random":
@@ -1021,6 +1021,15 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
     config = preset_config(args.preset, runners)
     config = apply_season_rules(config, season, args.track_length)
     return config
+
+
+def default_initial_order_mode(grid: dict[int, Sequence[int]], random_start_position: int | None) -> str:
+    nonempty_positions = [pos for pos, cell in grid.items() if cell]
+    if random_start_position == 0:
+        return "start"
+    if nonempty_positions == [0]:
+        return "start"
+    return "random"
 
 
 def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
