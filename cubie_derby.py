@@ -48,6 +48,7 @@ class RaceConfig:
     track_length: int
     start_grid: tuple[tuple[int, ...], ...]
     random_start_stack: bool = False
+    random_start_position: int = 0
     initial_order_mode: str = "random"  # random, start, fixed
     fixed_initial_order: tuple[int, ...] = ()
     name: str = "custom"
@@ -279,7 +280,8 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
     if config.random_start_stack:
         start_stack = list(runners)
         rng.shuffle(start_stack)
-        grid[0] = start_stack
+        grid = [[] for _ in range(config.track_length + 1)]
+        grid[config.random_start_position] = start_stack
 
     positions: dict[int, int] = {}
     for pos, cell in enumerate(grid):
@@ -660,7 +662,15 @@ def parse_runner_tokens(tokens: Sequence[str] | None) -> tuple[int, ...] | None:
 
 
 def parse_start_spec(spec: str) -> dict[int, tuple[int, ...]]:
+    cells, random_start_position = parse_start_layout(spec)
+    if random_start_position is not None:
+        raise ValueError("use parse_start_layout for '*' random-stack start specs")
+    return cells
+
+
+def parse_start_layout(spec: str) -> tuple[dict[int, tuple[int, ...]], int | None]:
     cells: dict[int, tuple[int, ...]] = {}
+    random_start_position: int | None = None
     if not spec.strip():
         raise ValueError("start spec cannot be empty")
     for group in spec.split(";"):
@@ -670,16 +680,23 @@ def parse_start_spec(spec: str) -> dict[int, tuple[int, ...]]:
             raise ValueError(f"invalid start group {group!r}; expected 'position:runners'")
         pos_text, runners_text = group.split(":", 1)
         pos = int(pos_text.strip())
+        if runners_text.strip() == "*":
+            if random_start_position is not None:
+                raise ValueError("start spec can only contain one '*' random-stack group")
+            random_start_position = pos
+            continue
         runners = tuple(parse_runner(part) for part in runners_text.split(",") if part.strip())
         if not runners:
             raise ValueError(f"position {pos} has no runners")
         if pos in cells:
             raise ValueError(f"position {pos} is defined more than once")
         cells[pos] = runners
+    if random_start_position is not None and cells:
+        raise ValueError("'*' means all selected runners start in that cell, so it cannot be mixed with fixed cells")
     all_runners = [runner for runners in cells.values() for runner in runners]
     if len(set(all_runners)) != len(all_runners):
         raise ValueError("start spec contains duplicate runners")
-    return cells
+    return cells, random_start_position
 
 
 def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
@@ -687,11 +704,18 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
     if args.start:
         base = preset_config(args.preset, runners)
         track_length = args.track_length or base.track_length
-        start_cells = parse_start_spec(args.start)
-        if runners is None:
-            runners = tuple(runner for _, cell in sorted(start_cells.items()) for runner in cell)
-        grid = make_start_grid(track_length, start_cells)
-        validate_fixed_start(runners, grid)
+        start_cells, random_start_position = parse_start_layout(args.start)
+        if random_start_position is not None:
+            if random_start_position < 0 or random_start_position > track_length:
+                raise ValueError(f"random start position {random_start_position} is outside the track")
+            if runners is None:
+                runners = base.runners
+            grid = empty_grid(track_length)
+        else:
+            if runners is None:
+                runners = tuple(runner for _, cell in sorted(start_cells.items()) for runner in cell)
+            grid = make_start_grid(track_length, start_cells)
+            validate_fixed_start(runners, grid)
         initial_order_mode = "random"
         fixed_order: tuple[int, ...] = ()
         if args.initial_order:
@@ -707,7 +731,8 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
             runners=runners,
             track_length=track_length,
             start_grid=grid,
-            random_start_stack=False,
+            random_start_stack=random_start_position is not None,
+            random_start_position=random_start_position or 0,
             initial_order_mode=initial_order_mode,
             fixed_initial_order=fixed_order,
             name="custom",
@@ -724,6 +749,7 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
             track_length=args.track_length,
             start_grid=make_start_grid(args.track_length, cells),
             random_start_stack=config.random_start_stack,
+            random_start_position=config.random_start_position,
             initial_order_mode=config.initial_order_mode,
             fixed_initial_order=config.fixed_initial_order,
             name=config.name,
@@ -738,6 +764,8 @@ def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
             "name": summary.config.name,
             "runners": list(summary.config.runners),
             "track_length": summary.config.track_length,
+            "random_start_stack": summary.config.random_start_stack,
+            "random_start_position": summary.config.random_start_position,
         },
         "best": {
             "runner": summary.best.runner,
@@ -819,7 +847,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--track-length", type=int, help="override track length")
     parser.add_argument(
         "--start",
-        help="custom zero-based start grid, e.g. '1:10;2:4,3;3:8'. Overrides preset start grid.",
+        help="custom zero-based start grid, e.g. '1:10;2:4,3;3:8'. Use '0:*' to randomly stack all runners in one cell.",
     )
     parser.add_argument(
         "--initial-order",

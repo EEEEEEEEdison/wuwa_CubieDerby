@@ -3,14 +3,28 @@ import unittest
 
 from cubie_derby import (
     RaceConfig,
+    build_config_from_args,
     current_rank,
     empty_grid,
     make_start_grid,
+    parse_start_layout,
     parse_start_spec,
     preset_config,
     run_monte_carlo,
     simulate_race,
 )
+
+
+def argparse_namespace(**kwargs):
+    defaults = {
+        "preset": 4,
+        "runners": None,
+        "track_length": None,
+        "start": None,
+        "initial_order": None,
+    }
+    defaults.update(kwargs)
+    return type("Args", (), defaults)()
 
 
 class CubieDerbyTests(unittest.TestCase):
@@ -38,6 +52,24 @@ class CubieDerbyTests(unittest.TestCase):
 
     def test_parse_custom_start_spec(self):
         self.assertEqual(parse_start_spec("1:10;2:4,3;3:8"), {1: (10,), 2: (4, 3), 3: (8,)})
+
+    def test_parse_random_stack_start_layout(self):
+        self.assertEqual(parse_start_layout("0:*"), ({}, 0))
+
+    def test_build_config_supports_random_stack_start(self):
+        args = argparse_namespace(
+            preset=4,
+            runners=["3", "4", "8", "10"],
+            track_length=25,
+            start="0:*",
+            initial_order=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertTrue(config.random_start_stack)
+        self.assertEqual(config.random_start_position, 0)
+        self.assertEqual(config.runners, (3, 4, 8, 10))
 
     def test_same_position_ranking_uses_cell_order(self):
         grid = list(empty_grid(5))

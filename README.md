@@ -16,6 +16,18 @@ Use a custom known track environment. Positions are zero-based, and runners in t
 python cubie_derby.py -n 100000 --track-length 25 --start "1:10;2:4,3;3:8" --runners 3 4 8 10 --seed 42
 ```
 
+Start all selected runners in one cell with a freshly randomized stack order in every simulated race:
+
+```powershell
+python cubie_derby.py -n 100000 --track-length 25 --start "0:*" --runners 3 4 8 10 --seed 42
+```
+
+Use `--initial-order start` if the first-round action order should follow that randomized stack order.
+
+```powershell
+python cubie_derby.py -n 100000 --track-length 25 --start "0:*" --runners 3 4 8 10 --initial-order start
+```
+
 Print machine-readable output:
 
 ```powershell
