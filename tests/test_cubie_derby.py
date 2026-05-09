@@ -7,6 +7,7 @@ from cubie_derby import (
     current_rank,
     display_position,
     make_start_grid,
+    move_npc,
     move_runner_with_left_side,
     move_single_runner,
     normalize_cli_args,
@@ -14,12 +15,15 @@ from cubie_derby import (
     parse_start_spec,
     preset_config,
     run_monte_carlo,
+    season_rules,
+    settle_npc_end_of_round,
     simulate_race,
 )
 
 
 def argparse_namespace(**kwargs):
     defaults = {
+        "season": 1,
         "preset": 4,
         "runners": None,
         "track_length": None,
@@ -106,13 +110,14 @@ class CubieDerbyTests(unittest.TestCase):
     def test_negative_start_first_reaches_zero_without_winning(self):
         grid = {-3: [3]}
         progress = {3: -3}
+        config = RaceConfig(runners=(3,), track_length=24, start_grid={-3: (3,)})
 
         new_progress = move_single_runner(
             grid=grid,
             progress=progress,
+            config=config,
             player=3,
             total_steps=3,
-            track_length=24,
             rng=random.Random(1),
         )
 
@@ -124,13 +129,14 @@ class CubieDerbyTests(unittest.TestCase):
     def test_zero_start_requires_full_lap(self):
         grid = {0: [3]}
         progress = {3: 0}
+        config = RaceConfig(runners=(3,), track_length=24, start_grid={0: (3,)})
 
         new_progress = move_single_runner(
             grid=grid,
             progress=progress,
+            config=config,
             player=3,
             total_steps=3,
-            track_length=24,
             rng=random.Random(1),
         )
 
@@ -141,13 +147,14 @@ class CubieDerbyTests(unittest.TestCase):
     def test_crossing_zero_finishes_lap_immediately(self):
         grid = {22: [3]}
         progress = {3: 22}
+        config = RaceConfig(runners=(3,), track_length=24, start_grid={22: (3,)})
 
         new_progress = move_single_runner(
             grid=grid,
             progress=progress,
+            config=config,
             player=3,
             total_steps=3,
-            track_length=24,
             rng=random.Random(1),
         )
 
@@ -158,14 +165,15 @@ class CubieDerbyTests(unittest.TestCase):
     def test_carried_finish_winner_uses_zero_cell_order(self):
         grid = {22: [4, 3], 0: [8]}
         progress = {4: 22, 3: 22, 8: 0}
+        config = RaceConfig(runners=(3, 4, 8), track_length=24, start_grid={22: (4, 3), 0: (8,)})
 
         new_progress = move_runner_with_left_side(
             grid=grid,
             progress=progress,
+            config=config,
             player=3,
             idx_in_cell=1,
             total_steps=3,
-            track_length=24,
             rng=random.Random(1),
         )
 
@@ -185,6 +193,148 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(set(result.ranking), {3, 4})
         self.assertIn(result.winner, {3, 4})
+
+    def test_season_two_default_rules(self):
+        args = argparse_namespace(
+            season=2,
+            preset=4,
+            runners=["3", "4", "8", "10"],
+            track_length=None,
+            start="0:*",
+            initial_order=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertEqual(config.track_length, 32)
+        self.assertTrue(config.npc_enabled)
+        self.assertEqual(config.forward_cells, season_rules(2)["forward_cells"])
+
+    def test_season_two_forward_cell_moves_group_one_more(self):
+        config = RaceConfig(
+            runners=(3,),
+            track_length=32,
+            start_grid={0: (3,)},
+            season=2,
+            forward_cells=frozenset({3}),
+        )
+        grid = {0: [3]}
+        progress = {3: 0}
+
+        new_progress = move_single_runner(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=3,
+            total_steps=3,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(new_progress, 4)
+        self.assertEqual(progress[3], 4)
+        self.assertEqual(grid[4], [3])
+
+    def test_season_two_backward_cell_moves_group_back_one(self):
+        config = RaceConfig(
+            runners=(3,),
+            track_length=32,
+            start_grid={8: (3,)},
+            season=2,
+            backward_cells=frozenset({10}),
+        )
+        grid = {8: [3]}
+        progress = {3: 8}
+
+        move_single_runner(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=3,
+            total_steps=2,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(progress[3], 9)
+        self.assertEqual(grid[9], [3])
+
+    def test_season_two_shuffle_cell_randomizes_arriving_group(self):
+        config = RaceConfig(
+            runners=(1, 2, 3, 4),
+            track_length=32,
+            start_grid={5: (1, 2, 3, 4)},
+            season=2,
+            shuffle_cells=frozenset({6}),
+        )
+        grid = {5: [1, 2, 3, 4]}
+        progress = {1: 5, 2: 5, 3: 5, 4: 5}
+
+        move_runner_with_left_side(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=4,
+            idx_in_cell=3,
+            total_steps=1,
+            rng=random.Random(1),
+        )
+
+        self.assertCountEqual(grid[6], [1, 2, 3, 4])
+        self.assertNotEqual(grid[6], [1, 2, 3, 4])
+
+    def test_npc_moves_backward_and_stays_rightmost(self):
+        grid = {30: [3]}
+
+        npc_progress = move_npc(
+            grid=grid,
+            npc_progress=0,
+            track_length=32,
+            rng=random.Random(1),
+            trace=False,
+        )
+
+        self.assertEqual(npc_progress, 30)
+        self.assertEqual(grid[30], [3, -1])
+
+    def test_npc_stays_rightmost_after_shuffle_cell(self):
+        config = RaceConfig(
+            runners=(1, 2, 3),
+            track_length=32,
+            start_grid={5: (1, 2, 3), 6: (-1,)},
+            season=2,
+            shuffle_cells=frozenset({6}),
+        )
+        grid = {5: [1, 2, 3], 6: [-1]}
+        progress = {1: 5, 2: 5, 3: 5}
+
+        move_runner_with_left_side(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=3,
+            idx_in_cell=2,
+            total_steps=1,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(grid[6][-1], -1)
+        self.assertCountEqual(grid[6], [1, 2, 3, -1])
+
+    def test_npc_returns_to_start_unless_with_last_runner(self):
+        grid = {5: [3], 12: [4], 30: [-1]}
+        progress = {3: 5, 4: 12}
+
+        npc_progress = settle_npc_end_of_round(
+            grid=grid,
+            progress=progress,
+            runners=(3, 4),
+            npc_progress=-2,
+            track_length=32,
+            trace=False,
+        )
+
+        self.assertEqual(npc_progress, 0)
+        self.assertEqual(grid[0], [-1])
+        self.assertNotIn(-1, grid.get(30, []))
 
 
 if __name__ == "__main__":

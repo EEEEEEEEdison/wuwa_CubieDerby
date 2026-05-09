@@ -6,12 +6,17 @@ import math
 import multiprocessing as mp
 import random
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
 
 MIN_START_POSITION = -3
 DEFAULT_LAP_LENGTH = 24
+SEASON2_LAP_LENGTH = 32
+NPC_ID = -1
+SEASON2_FORWARD_CELLS = frozenset({3, 11, 16, 23})
+SEASON2_BACKWARD_CELLS = frozenset({10, 28})
+SEASON2_SHUFFLE_CELLS = frozenset({6, 20})
 
 
 RUNNER_NAMES: dict[int, str] = {
@@ -52,6 +57,12 @@ class RaceConfig:
     runners: tuple[int, ...]
     track_length: int
     start_grid: dict[int, tuple[int, ...]]
+    season: int = 1
+    forward_cells: frozenset[int] = field(default_factory=frozenset)
+    backward_cells: frozenset[int] = field(default_factory=frozenset)
+    shuffle_cells: frozenset[int] = field(default_factory=frozenset)
+    npc_enabled: bool = False
+    npc_start_round: int = 3
     random_start_stack: bool = False
     random_start_position: int = 0
     initial_order_mode: str = "random"  # random, start, fixed
@@ -202,6 +213,51 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
     raise ValueError(f"unknown preset mode: {mode}")
 
 
+def season_rules(season: int) -> dict[str, object]:
+    if season == 1:
+        return {
+            "track_length": DEFAULT_LAP_LENGTH,
+            "forward_cells": frozenset(),
+            "backward_cells": frozenset(),
+            "shuffle_cells": frozenset(),
+            "npc_enabled": False,
+        }
+    if season == 2:
+        return {
+            "track_length": SEASON2_LAP_LENGTH,
+            "forward_cells": SEASON2_FORWARD_CELLS,
+            "backward_cells": SEASON2_BACKWARD_CELLS,
+            "shuffle_cells": SEASON2_SHUFFLE_CELLS,
+            "npc_enabled": True,
+        }
+    raise ValueError(f"unknown season: {season}")
+
+
+def apply_season_rules(config: RaceConfig, season: int, track_length: int | None = None) -> RaceConfig:
+    rules = season_rules(season)
+    lap_length = track_length or int(rules["track_length"])
+    validate_track_length(lap_length)
+    for pos in config.start_grid:
+        validate_start_position(pos, lap_length)
+    validate_start_position(config.random_start_position, lap_length)
+    return RaceConfig(
+        runners=config.runners,
+        track_length=lap_length,
+        start_grid=config.start_grid,
+        season=season,
+        forward_cells=rules["forward_cells"],
+        backward_cells=rules["backward_cells"],
+        shuffle_cells=rules["shuffle_cells"],
+        npc_enabled=bool(rules["npc_enabled"]),
+        npc_start_round=config.npc_start_round,
+        random_start_stack=config.random_start_stack,
+        random_start_position=config.random_start_position,
+        initial_order_mode=config.initial_order_mode,
+        fixed_initial_order=config.fixed_initial_order,
+        name=config.name,
+    )
+
+
 def empty_grid(track_length: int) -> dict[int, tuple[int, ...]]:
     validate_track_length(track_length)
     return {}
@@ -317,11 +373,25 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
     zani_extra_steps = 0
     cartethyia_available = True
     cartethyia_extra_steps = False
+    npc_progress = 0
+    npc_active = False
 
     round_number = 1
     while True:
+        if config.npc_enabled and round_number >= config.npc_start_round:
+            npc_active = True
+            npc_progress = move_npc(
+                grid=grid,
+                npc_progress=npc_progress,
+                track_length=track_length,
+                rng=rng,
+                trace=trace,
+            )
+
         log(trace, f"\n=== round {round_number} ===")
         log_grid(trace, grid)
+        if npc_active:
+            log(trace, f"npc pos: {display_position(npc_progress, track_length)}")
         log(trace, "order: " + " -> ".join(map(str, player_order)))
 
         finished = False
@@ -385,9 +455,9 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
                 new_progress, cantarella_state, cantarella_group = move_cantarella(
                     grid=grid,
                     progress=progress,
+                    config=config,
                     player=player,
                     total_steps=total_steps,
-                    track_length=track_length,
                     rng=rng,
                     cantarella_state=cantarella_state,
                     cantarella_group=cantarella_group,
@@ -397,19 +467,19 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
                 new_progress = move_single_runner(
                     grid=grid,
                     progress=progress,
+                    config=config,
                     player=player,
                     total_steps=total_steps,
-                    track_length=track_length,
                     rng=rng,
                 )
             else:
                 new_progress = move_runner_with_left_side(
                     grid=grid,
                     progress=progress,
+                    config=config,
                     player=player,
                     idx_in_cell=idx_in_cell,
                     total_steps=total_steps,
-                    track_length=track_length,
                     rng=rng,
                 )
 
@@ -432,6 +502,16 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
                 ranking=tuple(ranking),
                 second_position=second_position,
                 winner_margin=max(0, track_length - second_position),
+            )
+
+        if npc_active:
+            npc_progress = settle_npc_end_of_round(
+                grid=grid,
+                progress=progress,
+                runners=runners,
+                npc_progress=npc_progress,
+                track_length=track_length,
+                trace=trace,
             )
 
         next_turn_last = check_player2_skill(grid, rng)
@@ -481,30 +561,32 @@ def move_single_runner(
     *,
     grid: dict[int, list[int]],
     progress: dict[int, int],
+    config: RaceConfig,
     player: int,
     total_steps: int,
-    track_length: int,
     rng: random.Random,
 ) -> int:
+    track_length = config.track_length
     current_progress = progress[player]
     current_pos = display_position(current_progress, track_length)
     old_cell = list(grid[current_pos])
     grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
     new_progress = move_progress(current_progress, total_steps, track_length)
-    add_group_to_position(grid, progress, [player], new_progress, old_cell, rng, track_length)
-    return new_progress
+    add_group_to_position(grid, progress, [player], new_progress, old_cell, rng, config)
+    return progress[player]
 
 
 def move_runner_with_left_side(
     *,
     grid: dict[int, list[int]],
     progress: dict[int, int],
+    config: RaceConfig,
     player: int,
     idx_in_cell: int,
     total_steps: int,
-    track_length: int,
     rng: random.Random,
 ) -> int:
+    track_length = config.track_length
     current_progress = progress[player]
     current_pos = display_position(current_progress, track_length)
     old_cell = list(grid[current_pos])
@@ -512,22 +594,23 @@ def move_runner_with_left_side(
     movers = left_runners + [player]
     grid[current_pos] = [runner for runner in old_cell if runner not in movers]
     new_progress = move_progress(current_progress, total_steps, track_length)
-    add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, track_length)
-    return new_progress
+    add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, config)
+    return progress[player]
 
 
 def move_cantarella(
     *,
     grid: dict[int, list[int]],
     progress: dict[int, int],
+    config: RaceConfig,
     player: int,
     total_steps: int,
-    track_length: int,
     rng: random.Random,
     cantarella_state: int,
     cantarella_group: list[int],
     trace: bool,
 ) -> tuple[int, int, list[int]]:
+    track_length = config.track_length
     new_progress = progress[player]
     group_mode = bool(cantarella_group)
     group = list(cantarella_group)
@@ -547,7 +630,9 @@ def move_cantarella(
         grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
         new_progress = move_progress(current_progress, 1, track_length)
         new_pos = display_position(new_progress, track_length)
-        add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, track_length)
+        add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, config)
+        new_progress = progress[player]
+        new_pos = display_position(new_progress, track_length)
         log_grid(trace, grid)
 
         if not group_mode:
@@ -571,8 +656,9 @@ def add_group_to_position(
     new_progress: int,
     old_cell: Sequence[int],
     rng: random.Random,
-    track_length: int,
+    config: RaceConfig,
 ) -> None:
+    track_length = config.track_length
     new_pos = display_position(new_progress, track_length)
     for runner in movers:
         progress[runner] = new_progress
@@ -581,11 +667,127 @@ def add_group_to_position(
     else:
         grid[new_pos] = list(movers)
     grid[new_pos] = check_player1_skill(grid[new_pos], old_cell, rng)
+    keep_npc_rightmost(grid[new_pos])
+    apply_cell_effects(grid, progress, movers, new_pos, old_cell, rng, config)
+
+
+def apply_cell_effects(
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
+    movers: Sequence[int],
+    pos: int,
+    old_cell: Sequence[int],
+    rng: random.Random,
+    config: RaceConfig,
+) -> None:
+    if pos in config.shuffle_cells:
+        rng.shuffle(grid[pos])
+        keep_npc_rightmost(grid[pos])
+    if pos in config.forward_cells:
+        move_group_due_to_cell_effect(grid, progress, movers, pos, old_cell, 1, rng, config)
+    elif pos in config.backward_cells:
+        move_group_due_to_cell_effect(grid, progress, movers, pos, old_cell, -1, rng, config)
+
+
+def move_group_due_to_cell_effect(
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
+    movers: Sequence[int],
+    current_pos: int,
+    old_cell: Sequence[int],
+    delta: int,
+    rng: random.Random,
+    config: RaceConfig,
+) -> None:
+    active_movers = [runner for runner in movers if runner in grid.get(current_pos, [])]
+    if not active_movers:
+        return
+    grid[current_pos] = [runner for runner in grid[current_pos] if runner not in active_movers]
+    if not grid[current_pos]:
+        grid.pop(current_pos, None)
+
+    base_progress = progress[active_movers[-1]]
+    if delta > 0:
+        new_progress = move_progress(base_progress, delta, config.track_length)
+    else:
+        new_progress = max(MIN_START_POSITION, base_progress + delta)
+    new_pos = display_position(new_progress, config.track_length)
+    for runner in active_movers:
+        progress[runner] = new_progress
+    if grid.get(new_pos):
+        grid[new_pos] = active_movers + grid[new_pos]
+    else:
+        grid[new_pos] = active_movers
+    grid[new_pos] = check_player1_skill(grid[new_pos], old_cell, rng)
+    keep_npc_rightmost(grid[new_pos])
 
 
 def move_progress(current_progress: int, steps: int, track_length: int) -> int:
     target = current_progress + steps
     return track_length if target >= track_length else target
+
+
+def move_npc(
+    *,
+    grid: dict[int, list[int]],
+    npc_progress: int,
+    track_length: int,
+    rng: random.Random,
+    trace: bool,
+) -> int:
+    remove_runner_from_grid(grid, NPC_ID)
+    steps = rng.randint(1, 6)
+    new_progress = (npc_progress - steps) % track_length
+    new_pos = new_progress
+    if grid.get(new_pos):
+        grid[new_pos] = grid[new_pos] + [NPC_ID]
+    else:
+        grid[new_pos] = [NPC_ID]
+    keep_npc_rightmost(grid[new_pos])
+    log(trace, f"npc moves backward {steps} steps to pos {new_pos}")
+    return new_progress
+
+
+def settle_npc_end_of_round(
+    *,
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
+    runners: Sequence[int],
+    npc_progress: int,
+    track_length: int,
+    trace: bool,
+) -> int:
+    npc_pos = npc_progress % track_length
+    last_runner = current_rank(runners, progress, grid)[-1]
+    last_pos = display_position(progress[last_runner], track_length)
+    if npc_pos == last_pos:
+        return npc_progress
+    remove_runner_from_grid(grid, NPC_ID)
+    if grid.get(0):
+        grid[0] = grid[0] + [NPC_ID]
+    else:
+        grid[0] = [NPC_ID]
+    keep_npc_rightmost(grid[0])
+    log(trace, "npc returns to start")
+    return 0
+
+
+def remove_runner_from_grid(grid: dict[int, list[int]], runner: int) -> None:
+    empty_positions: list[int] = []
+    for pos, cell in grid.items():
+        if runner in cell:
+            grid[pos] = [item for item in cell if item != runner]
+            if not grid[pos]:
+                empty_positions.append(pos)
+    for pos in empty_positions:
+        grid.pop(pos, None)
+
+
+def keep_npc_rightmost(cell: list[int]) -> None:
+    if NPC_ID not in cell:
+        return
+    npc_count = cell.count(NPC_ID)
+    cell[:] = [runner for runner in cell if runner != NPC_ID] + [NPC_ID] * npc_count
 
 
 def check_player1_skill(cell: list[int], old_cell: Sequence[int], rng: random.Random) -> list[int]:
@@ -609,7 +811,8 @@ def current_rank(runners: Sequence[int], progress: dict[int, int], grid: dict[in
     cell_index: dict[int, int] = {}
     for cell in grid.values():
         for idx, runner in enumerate(cell):
-            cell_index[runner] = idx
+            if runner != NPC_ID:
+                cell_index[runner] = idx
     return sorted(runners, key=lambda runner: (-progress[runner], cell_index.get(runner, 9999)))
 
 
@@ -733,8 +936,12 @@ def parse_start_layout(spec: str) -> tuple[dict[int, tuple[int, ...]], int | Non
 
 def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
     runners = parse_runner_tokens(args.runners)
+    season = args.season
+    rules = season_rules(season)
     if args.start:
         track_length = args.track_length or DEFAULT_LAP_LENGTH
+        if args.track_length is None:
+            track_length = int(rules["track_length"])
         start_cells, random_start_position = parse_start_layout(args.start)
         if random_start_position is not None:
             validate_start_position(random_start_position, track_length)
@@ -761,6 +968,11 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
             runners=runners,
             track_length=track_length,
             start_grid=grid,
+            season=season,
+            forward_cells=rules["forward_cells"],
+            backward_cells=rules["backward_cells"],
+            shuffle_cells=rules["shuffle_cells"],
+            npc_enabled=bool(rules["npc_enabled"]),
             random_start_stack=random_start_position is not None,
             random_start_position=random_start_position or 0,
             initial_order_mode=initial_order_mode,
@@ -769,21 +981,7 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
         )
 
     config = preset_config(args.preset, runners)
-    if args.track_length and args.track_length != config.track_length:
-        validate_track_length(args.track_length)
-        for pos in config.start_grid:
-            validate_start_position(pos, args.track_length)
-        cells = {pos: cell for pos, cell in config.start_grid.items() if cell}
-        config = RaceConfig(
-            runners=config.runners,
-            track_length=args.track_length,
-            start_grid=make_start_grid(args.track_length, cells),
-            random_start_stack=config.random_start_stack,
-            random_start_position=config.random_start_position,
-            initial_order_mode=config.initial_order_mode,
-            fixed_initial_order=config.fixed_initial_order,
-            name=config.name,
-        )
+    config = apply_season_rules(config, season, args.track_length)
     return config
 
 
@@ -792,9 +990,14 @@ def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
         "iterations": summary.iterations,
         "config": {
             "name": summary.config.name,
+            "season": summary.config.season,
             "runners": list(summary.config.runners),
             "lap_length": summary.config.track_length,
             "track_length": summary.config.track_length,
+            "forward_cells": sorted(summary.config.forward_cells),
+            "backward_cells": sorted(summary.config.backward_cells),
+            "shuffle_cells": sorted(summary.config.shuffle_cells),
+            "npc_enabled": summary.config.npc_enabled,
             "random_start_stack": summary.config.random_start_stack,
             "random_start_position": summary.config.random_start_position,
         },
@@ -827,6 +1030,7 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
 
     lines = [
         f"Scenario: {summary.config.name}",
+        f"Season: {summary.config.season}",
         f"Iterations: {summary.iterations:,}",
         f"Lap length: {summary.config.track_length}",
         "",
@@ -852,7 +1056,13 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
 
 
 def format_runner_list(runners: Iterable[int]) -> str:
-    return ", ".join(f"{runner}.{RUNNER_NAMES.get(runner, str(runner))}" for runner in runners)
+    return ", ".join(format_runner(runner) for runner in runners)
+
+
+def format_runner(runner: int) -> str:
+    if runner == NPC_ID:
+        return "NPC"
+    return f"{runner}.{RUNNER_NAMES.get(runner, str(runner))}"
 
 
 def log(enabled: bool, message: str) -> None:
@@ -873,6 +1083,7 @@ def make_parser() -> argparse.ArgumentParser:
         description="Monte Carlo simulator for Wuthering Waves Cubie Derby.",
     )
     parser.add_argument("-n", "--iterations", type=int, default=100_000, help="number of races to simulate")
+    parser.add_argument("--season", type=int, choices=[1, 2], default=1, help="season ruleset")
     parser.add_argument("--preset", type=int, choices=[1, 2, 3, 4, 5], default=4, help="built-in track preset")
     parser.add_argument("--runners", nargs="+", help="runner ids/names, e.g. --runners 3 4 8 10")
     parser.add_argument("--track-length", "--lap-length", dest="track_length", type=int, help="override lap length")
