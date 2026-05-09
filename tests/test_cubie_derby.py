@@ -180,6 +180,66 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(grid[5], [3, 1, 2])
         self.assertEqual(rng.random_calls, 0)
 
+    def test_player1_skill_can_retry_after_previous_failure(self):
+        grid = {5: [2, 1]}
+        progress = {1: 5, 2: 5}
+        first_rng = CountingRandom(0.9)
+
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=2,
+            track_length=24,
+            rng=first_rng,
+        )
+
+        self.assertEqual(grid[5], [2, 1])
+        self.assertEqual(first_rng.random_calls, 1)
+
+        grid[5] = [3, 2, 1]
+        progress[3] = 5
+        second_rng = CountingRandom(0.1)
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=3,
+            track_length=24,
+            rng=second_rng,
+        )
+
+        self.assertEqual(grid[5], [1, 3, 2])
+        self.assertEqual(second_rng.random_calls, 1)
+
+    def test_player1_skill_can_retry_after_previous_success(self):
+        grid = {5: [2, 1]}
+        progress = {1: 5, 2: 5}
+        first_rng = CountingRandom(0.1)
+
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=2,
+            track_length=24,
+            rng=first_rng,
+        )
+
+        self.assertEqual(grid[5], [1, 2])
+        self.assertEqual(first_rng.random_calls, 1)
+
+        grid[5] = [3, 1, 2]
+        progress[3] = 5
+        second_rng = CountingRandom(0.1)
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=3,
+            track_length=24,
+            rng=second_rng,
+        )
+
+        self.assertEqual(grid[5], [1, 3, 2])
+        self.assertEqual(second_rng.random_calls, 1)
+
     def test_player1_skill_waits_for_final_position_after_cell_effects(self):
         config = RaceConfig(
             runners=(1, 2),
