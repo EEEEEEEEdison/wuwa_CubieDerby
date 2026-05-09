@@ -13,6 +13,8 @@ from cubie_derby import (
     check_hiyuki_bonus,
     current_rank,
     display_position,
+    display_width,
+    format_summary,
     main,
     make_start_grid,
     mark_sigrika_debuffs,
@@ -109,6 +111,37 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(sum(row.wins for row in summary.rows), 100)
         self.assertEqual({row.runner for row in summary.rows}, {3, 4, 8, 10})
+
+    def test_format_summary_uses_chinese_aligned_table(self):
+        config = RaceConfig(
+            runners=(13, 14, 15, 16),
+            track_length=8,
+            start_grid=make_start_grid(8, {0: (13, 14, 15, 16)}),
+            name="custom",
+        )
+        summary = run_monte_carlo(config, 12, seed=3)
+
+        text = format_summary(summary)
+
+        self.assertIn("赛制：自定义", text)
+        self.assertIn("角色", text)
+        self.assertIn("夺冠次数", text)
+        self.assertIn("推荐选择：", text)
+        self.assertNotIn("Scenario:", text)
+        self.assertNotIn("win_rate", text)
+
+        lines = text.splitlines()
+        header_index = next(i for i, line in enumerate(lines) if line.startswith("角色"))
+        table_lines = lines[header_index : header_index + 2 + len(config.runners)]
+        expected_width = display_width(table_lines[0])
+        self.assertTrue(all(display_width(line) == expected_width for line in table_lines))
+
+    def test_format_summary_localizes_builtin_config_names(self):
+        summary = run_monte_carlo(preset_config(4), 10, seed=1)
+
+        text = format_summary(summary)
+
+        self.assertIn("赛制：预设4：决赛下半区固定起点", text)
 
     def test_parse_custom_start_spec(self):
         self.assertEqual(parse_start_spec("1:10;2:4,3;3:8"), {1: (10,), 2: (4, 3), 3: (8,)})

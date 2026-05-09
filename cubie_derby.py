@@ -6,6 +6,7 @@ import math
 import multiprocessing as mp
 import random
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -22,6 +23,14 @@ HIYUKI_ID = 16
 SEASON2_FORWARD_CELLS = frozenset({3, 11, 16, 23})
 SEASON2_BACKWARD_CELLS = frozenset({10, 28})
 SEASON2_SHUFFLE_CELLS = frozenset({6, 20})
+CONFIG_NAME_LABELS = {
+    "custom": "自定义",
+    "mode1_random_order_random_start": "预设1：随机顺序，随机起点",
+    "mode2_start_order_random_start": "预设2：按起点顺序行动，随机起点",
+    "mode3_fixed_order_fixed_start": "预设3：A组上半区固定起点",
+    "mode4_random_order_fixed_start": "预设4：决赛下半区固定起点",
+    "mode5_fixed_order_fixed_start": "预设5：A组下半区固定起点",
+}
 
 
 RUNNER_NAMES: dict[int, str] = {
@@ -1622,31 +1631,75 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
     if sort_by_win_rate:
         rows.sort(key=lambda row: (row.win_rate, -row.average_rank), reverse=True)
 
-    lines = [
-        f"Scenario: {summary.config.name}",
-        f"Season: {summary.config.season}",
-        f"Iterations: {summary.iterations:,}",
-        f"Lap length: {summary.config.track_length}",
-        "",
-        "runner        wins       win_rate   avg_rank   rank_var   gap/race   gap/when_win",
-        "------------  ---------  ---------  ---------  ---------  ---------  ------------",
-    ]
-    for row in rows:
-        label = format_runner(row.runner)
-        lines.append(
-            f"{label:<12}  {row.wins:>9,}  {row.win_rate:>8.2%}  "
-            f"{row.average_rank:>9.3f}  {row.rank_variance:>9.3f}  "
-            f"{row.winner_gap_per_race:>9.3f}  {row.average_winning_margin:>12.3f}"
+    headers = ("角色", "夺冠次数", "夺冠率", "平均名次", "名次方差", "场均领先", "胜时领先")
+    table_rows = [
+        (
+            format_runner(row.runner),
+            f"{row.wins:,}",
+            f"{row.win_rate:.2%}",
+            f"{row.average_rank:.3f}",
+            f"{row.rank_variance:.3f}",
+            f"{row.winner_gap_per_race:.3f}",
+            f"{row.average_winning_margin:.3f}",
         )
+        for row in rows
+    ]
+    columns = [headers, *table_rows]
+    widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
+    aligns = ("left", "right", "right", "right", "right", "right", "right")
+
+    lines = [
+        f"赛制：{format_config_name(summary.config.name)}",
+        f"赛季：第{summary.config.season}季",
+        f"模拟次数：{summary.iterations:,}",
+        f"赛道长度：{summary.config.track_length}格",
+        "",
+        format_table_row(headers, widths, aligns),
+        format_table_separator(widths),
+    ]
+    lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
     best = summary.best
     lines.extend(
         [
             "",
-            f"Best pick: {format_runner(best.runner)} "
-            f"with {best.win_rate:.2%} first-place probability.",
+            f"推荐选择：{format_runner(best.runner)}，夺冠概率 {best.win_rate:.2%}。",
         ]
     )
     return "\n".join(lines)
+
+
+def format_config_name(name: str) -> str:
+    return CONFIG_NAME_LABELS.get(name, name)
+
+
+def format_table_row(cells: Sequence[str], widths: Sequence[int], aligns: Sequence[str]) -> str:
+    parts = [
+        pad_display_width(cell, width, align=align)
+        for cell, width, align in zip(cells, widths, aligns, strict=True)
+    ]
+    return "  ".join(parts)
+
+
+def format_table_separator(widths: Sequence[int]) -> str:
+    return "  ".join("-" * width for width in widths)
+
+
+def pad_display_width(text: str, width: int, *, align: str = "left") -> str:
+    padding = max(0, width - display_width(text))
+    if align == "right":
+        return " " * padding + text
+    if align == "left":
+        return text + " " * padding
+    raise ValueError(f"unknown alignment: {align}")
+
+
+def display_width(text: str) -> int:
+    width = 0
+    for char in text:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+    return width
 
 
 def format_runner_list(runners: Iterable[int]) -> str:

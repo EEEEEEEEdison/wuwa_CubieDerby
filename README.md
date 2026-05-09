@@ -78,11 +78,12 @@ Use `--season 2` to apply the Season 2 ruleset to the selected preset or custom 
 
 ## Output Columns
 
-- `win_rate`: estimated first-place probability.
-- `avg_rank`: lower is better.
-- `rank_var`: ranking volatility.
-- `gap/race`: champion progress margin contribution averaged across all races.
-- `gap/when_win`: average winner margin only among races won by that runner.
+- `夺冠次数`: number of simulated races won by the runner.
+- `夺冠率`: estimated first-place probability.
+- `平均名次`: lower is better.
+- `名次方差`: ranking volatility.
+- `场均领先`: champion progress margin contribution averaged across all races.
+- `胜时领先`: average winner margin only among races won by that runner.
 
 ## Tests
 
