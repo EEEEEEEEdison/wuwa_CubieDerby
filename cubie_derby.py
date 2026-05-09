@@ -734,13 +734,12 @@ def parse_start_layout(spec: str) -> tuple[dict[int, tuple[int, ...]], int | Non
 def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
     runners = parse_runner_tokens(args.runners)
     if args.start:
-        base = preset_config(args.preset, runners)
-        track_length = args.track_length or base.track_length
+        track_length = args.track_length or DEFAULT_LAP_LENGTH
         start_cells, random_start_position = parse_start_layout(args.start)
         if random_start_position is not None:
             validate_start_position(random_start_position, track_length)
             if runners is None:
-                runners = base.runners
+                runners = preset_config(args.preset).runners
             grid = empty_grid(track_length)
         else:
             if runners is None:

@@ -83,6 +83,20 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(config.random_start_position, 0)
         self.assertEqual(config.runners, (3, 4, 8, 10))
 
+    def test_custom_start_does_not_validate_against_default_preset(self):
+        args = argparse_namespace(
+            preset=4,
+            runners=["1", "2", "3", "4", "5", "6"],
+            track_length=24,
+            start="-3:2;-2:1,4;-1:3,6;0:5",
+            initial_order=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertEqual(config.runners, (1, 2, 3, 4, 5, 6))
+        self.assertEqual(config.start_grid, {-3: (2,), -2: (1, 4), -1: (3, 6), 0: (5,)})
+
     def test_same_position_ranking_uses_cell_order(self):
         grid = {3: (4, 3, 8)}
         progress = {4: 3, 3: 3, 8: 3}
