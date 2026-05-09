@@ -5,8 +5,11 @@ from cubie_derby import (
     RaceConfig,
     build_config_from_args,
     current_rank,
-    empty_grid,
+    display_position,
     make_start_grid,
+    move_runner_with_left_side,
+    move_single_runner,
+    normalize_cli_args,
     parse_start_layout,
     parse_start_spec,
     preset_config,
@@ -53,6 +56,15 @@ class CubieDerbyTests(unittest.TestCase):
     def test_parse_custom_start_spec(self):
         self.assertEqual(parse_start_spec("1:10;2:4,3;3:8"), {1: (10,), 2: (4, 3), 3: (8,)})
 
+    def test_parse_custom_start_spec_supports_negative_cells(self):
+        self.assertEqual(parse_start_spec("-3:10;-2:4,3;0:8"), {-3: (10,), -2: (4, 3), 0: (8,)})
+
+    def test_normalize_cli_args_preserves_negative_start_value(self):
+        self.assertEqual(
+            normalize_cli_args(["--start", "-3:10;-2:4,3;0:8", "--runners", "3", "4", "8", "10"]),
+            ["--start=-3:10;-2:4,3;0:8", "--runners", "3", "4", "8", "10"],
+        )
+
     def test_parse_random_stack_start_layout(self):
         self.assertEqual(parse_start_layout("0:*"), ({}, 0))
 
@@ -72,11 +84,80 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(config.runners, (3, 4, 8, 10))
 
     def test_same_position_ranking_uses_cell_order(self):
-        grid = list(empty_grid(5))
-        grid[3] = (4, 3, 8)
-        positions = {4: 3, 3: 3, 8: 3}
+        grid = {3: (4, 3, 8)}
+        progress = {4: 3, 3: 3, 8: 3}
 
-        self.assertEqual(current_rank((3, 4, 8), positions, grid), [4, 3, 8])
+        self.assertEqual(current_rank((3, 4, 8), progress, grid), [4, 3, 8])
+
+    def test_negative_start_first_reaches_zero_without_winning(self):
+        grid = {-3: [3]}
+        progress = {3: -3}
+
+        new_progress = move_single_runner(
+            grid=grid,
+            progress=progress,
+            player=3,
+            total_steps=3,
+            track_length=24,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(new_progress, 0)
+        self.assertEqual(display_position(new_progress, 24), 0)
+        self.assertLess(new_progress, 24)
+        self.assertEqual(grid[0], [3])
+
+    def test_zero_start_requires_full_lap(self):
+        grid = {0: [3]}
+        progress = {3: 0}
+
+        new_progress = move_single_runner(
+            grid=grid,
+            progress=progress,
+            player=3,
+            total_steps=3,
+            track_length=24,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(new_progress, 3)
+        self.assertEqual(grid[3], [3])
+        self.assertLess(new_progress, 24)
+
+    def test_crossing_zero_finishes_lap_immediately(self):
+        grid = {22: [3]}
+        progress = {3: 22}
+
+        new_progress = move_single_runner(
+            grid=grid,
+            progress=progress,
+            player=3,
+            total_steps=3,
+            track_length=24,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(new_progress, 24)
+        self.assertEqual(grid[0], [3])
+        self.assertNotIn(1, [pos for pos, cell in grid.items() if cell])
+
+    def test_carried_finish_winner_uses_zero_cell_order(self):
+        grid = {22: [4, 3], 0: [8]}
+        progress = {4: 22, 3: 22, 8: 0}
+
+        new_progress = move_runner_with_left_side(
+            grid=grid,
+            progress=progress,
+            player=3,
+            idx_in_cell=1,
+            total_steps=3,
+            track_length=24,
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(new_progress, 24)
+        self.assertEqual(grid[0], [4, 3, 8])
+        self.assertEqual(current_rank((3, 4, 8), progress, grid)[0], 4)
 
     def test_simulate_race_returns_full_ranking(self):
         config = RaceConfig(

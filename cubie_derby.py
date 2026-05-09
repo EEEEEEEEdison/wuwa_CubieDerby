@@ -5,8 +5,13 @@ import json
 import math
 import multiprocessing as mp
 import random
+import sys
 from dataclasses import dataclass
 from typing import Iterable, Sequence
+
+
+MIN_START_POSITION = -3
+DEFAULT_LAP_LENGTH = 24
 
 
 RUNNER_NAMES: dict[int, str] = {
@@ -46,7 +51,7 @@ NAME_TO_RUNNER: dict[str, int] = {name: runner for runner, name in RUNNER_NAMES.
 class RaceConfig:
     runners: tuple[int, ...]
     track_length: int
-    start_grid: tuple[tuple[int, ...], ...]
+    start_grid: dict[int, tuple[int, ...]]
     random_start_stack: bool = False
     random_start_position: int = 0
     initial_order_mode: str = "random"  # random, start, fixed
@@ -148,8 +153,8 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
         selected = tuple(runners or (1, 2, 3, 4, 5, 6))
         return RaceConfig(
             runners=selected,
-            track_length=22,
-            start_grid=empty_grid(22),
+            track_length=DEFAULT_LAP_LENGTH,
+            start_grid=empty_grid(DEFAULT_LAP_LENGTH),
             random_start_stack=True,
             initial_order_mode="random",
             name="mode1_random_order_random_start",
@@ -158,8 +163,8 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
         selected = tuple(runners or (1, 2, 3, 4, 5, 6))
         return RaceConfig(
             runners=selected,
-            track_length=22,
-            start_grid=empty_grid(22),
+            track_length=DEFAULT_LAP_LENGTH,
+            start_grid=empty_grid(DEFAULT_LAP_LENGTH),
             random_start_stack=True,
             initial_order_mode="start",
             name="mode2_start_order_random_start",
@@ -170,7 +175,7 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
         return fixed_grid_config(
             name="mode3_fixed_order_fixed_start",
             runners=selected,
-            track_length=22,
+            track_length=DEFAULT_LAP_LENGTH,
             start_cells=start,
             initial_order=(9, 10, 7, 12, 8, 11),
         )
@@ -180,7 +185,7 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
         return fixed_grid_config(
             name="mode4_random_order_fixed_start",
             runners=selected,
-            track_length=25,
+            track_length=DEFAULT_LAP_LENGTH,
             start_cells=start,
             initial_order=None,
         )
@@ -190,15 +195,16 @@ def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig
         return fixed_grid_config(
             name="mode5_fixed_order_fixed_start",
             runners=selected,
-            track_length=25,
+            track_length=DEFAULT_LAP_LENGTH,
             start_cells=start,
             initial_order=(9, 8, 11, 7, 10, 12),
         )
     raise ValueError(f"unknown preset mode: {mode}")
 
 
-def empty_grid(track_length: int) -> tuple[tuple[int, ...], ...]:
-    return tuple(() for _ in range(track_length + 1))
+def empty_grid(track_length: int) -> dict[int, tuple[int, ...]]:
+    validate_track_length(track_length)
+    return {}
 
 
 def fixed_grid_config(
@@ -236,25 +242,41 @@ def fixed_grid_config(
     )
 
 
-def make_start_grid(track_length: int, cells: dict[int, Sequence[int]]) -> tuple[tuple[int, ...], ...]:
+def validate_track_length(track_length: int) -> None:
     if track_length <= 0:
         raise ValueError("track_length must be positive")
-    grid: list[tuple[int, ...]] = [() for _ in range(track_length + 1)]
+
+
+def validate_start_position(pos: int, track_length: int) -> None:
+    if pos < MIN_START_POSITION or pos >= track_length:
+        raise ValueError(
+            f"start position {pos} is outside the track; "
+            f"expected {MIN_START_POSITION}..{track_length - 1}"
+        )
+
+
+def display_position(progress: int, track_length: int) -> int:
+    return progress if progress < 0 else progress % track_length
+
+
+def make_start_grid(track_length: int, cells: dict[int, Sequence[int]]) -> dict[int, tuple[int, ...]]:
+    validate_track_length(track_length)
+    grid: dict[int, tuple[int, ...]] = {}
     seen: set[int] = set()
     for pos, runners in cells.items():
-        if pos < 0 or pos > track_length:
-            raise ValueError(f"start position {pos} is outside the track")
+        validate_start_position(pos, track_length)
         cell = tuple(runners)
         for runner in cell:
             if runner in seen:
                 raise ValueError(f"runner {runner} appears more than once in start grid")
             seen.add(runner)
-        grid[pos] = cell
-    return tuple(grid)
+        if cell:
+            grid[pos] = cell
+    return grid
 
 
-def validate_fixed_start(runners: Sequence[int], grid: Sequence[Sequence[int]]) -> None:
-    seen = tuple(runner for cell in grid for runner in cell)
+def validate_fixed_start(runners: Sequence[int], grid: dict[int, Sequence[int]]) -> None:
+    seen = tuple(runner for _, cell in sorted(grid.items()) for runner in cell)
     validate_same_runners(runners, seen, "start grid")
 
 
@@ -275,19 +297,19 @@ def validate_same_runners(expected: Sequence[int], actual: Sequence[int], label:
 def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -> RaceResult:
     runners = config.runners
     track_length = config.track_length
-    grid = [list(cell) for cell in config.start_grid]
+    grid = {pos: list(cell) for pos, cell in config.start_grid.items() if cell}
 
     if config.random_start_stack:
+        validate_start_position(config.random_start_position, track_length)
         start_stack = list(runners)
         rng.shuffle(start_stack)
-        grid = [[] for _ in range(config.track_length + 1)]
-        grid[config.random_start_position] = start_stack
+        grid = {config.random_start_position: start_stack}
 
-    positions: dict[int, int] = {}
-    for pos, cell in enumerate(grid):
+    progress: dict[int, int] = {}
+    for pos, cell in grid.items():
         for runner in cell:
-            positions[runner] = pos
-    validate_positions(runners, positions)
+            progress[runner] = pos
+    validate_positions(runners, progress)
 
     player_order = initial_player_order(config, grid, rng)
     cantarella_state = 1
@@ -304,10 +326,10 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
 
         finished = False
         for player in list(player_order):
-            if positions[player] >= track_length:
+            if progress[player] >= track_length:
                 continue
 
-            current_pos = positions[player]
+            current_pos = display_position(progress[player], track_length)
             current_cell = grid[current_pos]
             if player not in current_cell:
                 raise RuntimeError(f"runner {player} is missing from position {current_pos}")
@@ -319,7 +341,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
             cantarella_move = False
 
             if player == 3:
-                if current_rank(runners, positions, grid)[-1] == player:
+                if current_rank(runners, progress, grid)[-1] == player:
                     extra_steps = 3
                     log(trace, "runner 3 skill: +3 because runner is last")
             elif player == 5:
@@ -360,9 +382,9 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
             log(trace, f"runner {player}: dice={dice}, total_steps={total_steps}")
 
             if cantarella_move:
-                new_pos, cantarella_state, cantarella_group = move_cantarella(
+                new_progress, cantarella_state, cantarella_group = move_cantarella(
                     grid=grid,
-                    positions=positions,
+                    progress=progress,
                     player=player,
                     total_steps=total_steps,
                     track_length=track_length,
@@ -372,18 +394,18 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
                     trace=trace,
                 )
             elif skip_carried_runners:
-                new_pos = move_single_runner(
+                new_progress = move_single_runner(
                     grid=grid,
-                    positions=positions,
+                    progress=progress,
                     player=player,
                     total_steps=total_steps,
                     track_length=track_length,
                     rng=rng,
                 )
             else:
-                new_pos = move_runner_with_left_side(
+                new_progress = move_runner_with_left_side(
                     grid=grid,
-                    positions=positions,
+                    progress=progress,
                     player=player,
                     idx_in_cell=idx_in_cell,
                     total_steps=total_steps,
@@ -392,24 +414,24 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
                 )
 
             if player == 11 and cartethyia_available:
-                if current_rank(runners, positions, grid)[-1] == player:
+                if current_rank(runners, progress, grid)[-1] == player:
                     cartethyia_extra_steps = True
                     cartethyia_available = False
 
             log_grid(trace, grid)
 
-            if new_pos >= track_length:
+            if new_progress >= track_length:
                 finished = True
                 break
 
-        ranking = current_rank(runners, positions, grid)
+        ranking = current_rank(runners, progress, grid)
         if finished:
-            second_position = positions[ranking[1]] if len(ranking) > 1 else track_length
+            second_position = progress[ranking[1]] if len(ranking) > 1 else track_length
             return RaceResult(
-                winner=ranking[0],
+                winner=grid[0][0],
                 ranking=tuple(ranking),
                 second_position=second_position,
-                winner_margin=track_length - second_position,
+                winner_margin=max(0, track_length - second_position),
             )
 
         next_turn_last = check_player2_skill(grid, rng)
@@ -427,19 +449,19 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
         round_number += 1
 
 
-def validate_positions(runners: Sequence[int], positions: dict[int, int]) -> None:
-    missing = set(runners) - set(positions)
+def validate_positions(runners: Sequence[int], progress: dict[int, int]) -> None:
+    missing = set(runners) - set(progress)
     if missing:
         raise ValueError(f"missing start positions for: {format_runner_list(sorted(missing))}")
 
 
-def initial_player_order(config: RaceConfig, grid: Sequence[Sequence[int]], rng: random.Random) -> list[int]:
+def initial_player_order(config: RaceConfig, grid: dict[int, Sequence[int]], rng: random.Random) -> list[int]:
     if config.initial_order_mode == "random":
         order = list(config.runners)
         rng.shuffle(order)
         return order
     if config.initial_order_mode == "start":
-        order = [runner for cell in grid for runner in cell]
+        order = [runner for _, cell in sorted(grid.items()) for runner in cell]
         validate_same_runners(config.runners, order, "initial start order")
         return order
     if config.initial_order_mode == "fixed":
@@ -457,46 +479,47 @@ def roll_dice(player: int, rng: random.Random) -> int:
 
 def move_single_runner(
     *,
-    grid: list[list[int]],
-    positions: dict[int, int],
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
     player: int,
     total_steps: int,
     track_length: int,
     rng: random.Random,
 ) -> int:
-    current_pos = positions[player]
+    current_progress = progress[player]
+    current_pos = display_position(current_progress, track_length)
     old_cell = list(grid[current_pos])
     grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
-    new_pos = min(current_pos + total_steps, track_length)
-    positions[player] = new_pos
-    add_group_to_position(grid, positions, [player], new_pos, old_cell, rng)
-    return new_pos
+    new_progress = move_progress(current_progress, total_steps, track_length)
+    add_group_to_position(grid, progress, [player], new_progress, old_cell, rng, track_length)
+    return new_progress
 
 
 def move_runner_with_left_side(
     *,
-    grid: list[list[int]],
-    positions: dict[int, int],
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
     player: int,
     idx_in_cell: int,
     total_steps: int,
     track_length: int,
     rng: random.Random,
 ) -> int:
-    current_pos = positions[player]
+    current_progress = progress[player]
+    current_pos = display_position(current_progress, track_length)
     old_cell = list(grid[current_pos])
     left_runners = old_cell[:idx_in_cell]
     movers = left_runners + [player]
     grid[current_pos] = [runner for runner in old_cell if runner not in movers]
-    new_pos = min(current_pos + total_steps, track_length)
-    add_group_to_position(grid, positions, movers, new_pos, old_cell, rng)
-    return new_pos
+    new_progress = move_progress(current_progress, total_steps, track_length)
+    add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, track_length)
+    return new_progress
 
 
 def move_cantarella(
     *,
-    grid: list[list[int]],
-    positions: dict[int, int],
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
     player: int,
     total_steps: int,
     track_length: int,
@@ -505,15 +528,16 @@ def move_cantarella(
     cantarella_group: list[int],
     trace: bool,
 ) -> tuple[int, int, list[int]]:
-    new_pos = positions[player]
+    new_progress = progress[player]
     group_mode = bool(cantarella_group)
     group = list(cantarella_group)
 
     for _ in range(total_steps):
-        current_pos = positions[player]
+        current_progress = progress[player]
+        current_pos = display_position(current_progress, track_length)
         old_cell = list(grid[current_pos])
         if group_mode:
-            movers = [runner for runner in group if positions[runner] == current_pos]
+            movers = [runner for runner in group if display_position(progress[runner], track_length) == current_pos]
             if not movers:
                 movers = [player]
         else:
@@ -521,8 +545,9 @@ def move_cantarella(
             movers = old_cell[:idx] + [player]
 
         grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
-        new_pos = min(current_pos + 1, track_length)
-        add_group_to_position(grid, positions, movers, new_pos, old_cell, rng)
+        new_progress = move_progress(current_progress, 1, track_length)
+        new_pos = display_position(new_progress, track_length)
+        add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, track_length)
         log_grid(trace, grid)
 
         if not group_mode:
@@ -533,27 +558,34 @@ def move_cantarella(
                 cantarella_state = 2
                 log(trace, "runner 9 skill: merged with destination group")
 
-        if new_pos >= track_length:
+        if new_progress >= track_length:
             break
 
-    return new_pos, cantarella_state, group
+    return new_progress, cantarella_state, group
 
 
 def add_group_to_position(
-    grid: list[list[int]],
-    positions: dict[int, int],
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
     movers: Sequence[int],
-    new_pos: int,
+    new_progress: int,
     old_cell: Sequence[int],
     rng: random.Random,
+    track_length: int,
 ) -> None:
+    new_pos = display_position(new_progress, track_length)
     for runner in movers:
-        positions[runner] = new_pos
-    if grid[new_pos]:
+        progress[runner] = new_progress
+    if grid.get(new_pos):
         grid[new_pos] = list(movers) + grid[new_pos]
     else:
         grid[new_pos] = list(movers)
     grid[new_pos] = check_player1_skill(grid[new_pos], old_cell, rng)
+
+
+def move_progress(current_progress: int, steps: int, track_length: int) -> int:
+    target = current_progress + steps
+    return track_length if target >= track_length else target
 
 
 def check_player1_skill(cell: list[int], old_cell: Sequence[int], rng: random.Random) -> list[int]:
@@ -566,19 +598,19 @@ def check_player1_skill(cell: list[int], old_cell: Sequence[int], rng: random.Ra
     return cell
 
 
-def check_player2_skill(grid: Sequence[Sequence[int]], rng: random.Random) -> bool:
-    for cell in grid:
+def check_player2_skill(grid: dict[int, Sequence[int]], rng: random.Random) -> bool:
+    for cell in grid.values():
         if 2 in cell and cell.index(2) < len(cell) - 1:
             return rng.random() <= 0.65
     return False
 
 
-def current_rank(runners: Sequence[int], positions: dict[int, int], grid: Sequence[Sequence[int]]) -> list[int]:
+def current_rank(runners: Sequence[int], progress: dict[int, int], grid: dict[int, Sequence[int]]) -> list[int]:
     cell_index: dict[int, int] = {}
-    for cell in grid:
+    for cell in grid.values():
         for idx, runner in enumerate(cell):
             cell_index[runner] = idx
-    return sorted(runners, key=lambda runner: (-positions[runner], cell_index.get(runner, 9999)))
+    return sorted(runners, key=lambda runner: (-progress[runner], cell_index.get(runner, 9999)))
 
 
 def run_monte_carlo(
@@ -706,8 +738,7 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
         track_length = args.track_length or base.track_length
         start_cells, random_start_position = parse_start_layout(args.start)
         if random_start_position is not None:
-            if random_start_position < 0 or random_start_position > track_length:
-                raise ValueError(f"random start position {random_start_position} is outside the track")
+            validate_start_position(random_start_position, track_length)
             if runners is None:
                 runners = base.runners
             grid = empty_grid(track_length)
@@ -740,10 +771,10 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
 
     config = preset_config(args.preset, runners)
     if args.track_length and args.track_length != config.track_length:
-        max_pos = max((pos for pos, cell in enumerate(config.start_grid) if cell), default=0)
-        if args.track_length < max_pos:
-            raise ValueError("track length is shorter than a preset start position")
-        cells = {pos: cell for pos, cell in enumerate(config.start_grid) if cell}
+        validate_track_length(args.track_length)
+        for pos in config.start_grid:
+            validate_start_position(pos, args.track_length)
+        cells = {pos: cell for pos, cell in config.start_grid.items() if cell}
         config = RaceConfig(
             runners=config.runners,
             track_length=args.track_length,
@@ -763,6 +794,7 @@ def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
         "config": {
             "name": summary.config.name,
             "runners": list(summary.config.runners),
+            "lap_length": summary.config.track_length,
             "track_length": summary.config.track_length,
             "random_start_stack": summary.config.random_start_stack,
             "random_start_position": summary.config.random_start_position,
@@ -797,7 +829,7 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
     lines = [
         f"Scenario: {summary.config.name}",
         f"Iterations: {summary.iterations:,}",
-        f"Track length: {summary.config.track_length}",
+        f"Lap length: {summary.config.track_length}",
         "",
         "runner        wins       win_rate   avg_rank   rank_var   gap/race   gap/when_win",
         "------------  ---------  ---------  ---------  ---------  ---------  ------------",
@@ -829,10 +861,10 @@ def log(enabled: bool, message: str) -> None:
         print(message)
 
 
-def log_grid(enabled: bool, grid: Sequence[Sequence[int]]) -> None:
+def log_grid(enabled: bool, grid: dict[int, Sequence[int]]) -> None:
     if not enabled:
         return
-    for pos, cell in enumerate(grid):
+    for pos, cell in sorted(grid.items()):
         if cell:
             print(f"pos {pos}: {list(cell)}")
 
@@ -844,10 +876,13 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("-n", "--iterations", type=int, default=100_000, help="number of races to simulate")
     parser.add_argument("--preset", type=int, choices=[1, 2, 3, 4, 5], default=4, help="built-in track preset")
     parser.add_argument("--runners", nargs="+", help="runner ids/names, e.g. --runners 3 4 8 10")
-    parser.add_argument("--track-length", type=int, help="override track length")
+    parser.add_argument("--track-length", "--lap-length", dest="track_length", type=int, help="override lap length")
     parser.add_argument(
         "--start",
-        help="custom zero-based start grid, e.g. '1:10;2:4,3;3:8'. Use '0:*' to randomly stack all runners in one cell.",
+        help=(
+            "custom start grid, e.g. '-3:10;-2:4,3;0:8'. "
+            "Use '0:*' to randomly stack all runners in one cell."
+        ),
     )
     parser.add_argument(
         "--initial-order",
@@ -860,9 +895,23 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def normalize_cli_args(argv: Sequence[str]) -> list[str]:
+    normalized: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--start" and i + 1 < len(argv):
+            normalized.append(f"--start={argv[i + 1]}")
+            i += 2
+        else:
+            normalized.append(arg)
+            i += 1
+    return normalized
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = make_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
     try:
         config = build_config_from_args(args)
         if args.trace:
