@@ -432,12 +432,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     log_timing(trace, "NPC行动轮到时", "从当前位置按反方向移动1~6步")
                     npc_progress = move_npc(
                         grid=grid,
+                        progress=progress,
+                        config=config,
                         npc_progress=npc_progress,
-                        track_length=track_length,
                         rng=rng,
                         trace=trace,
                     )
-                    progress[NPC_ID] = npc_progress
                     npc_rank_active = True
                     log_grid(trace, grid, title="NPC行动后位置分布：")
                 continue
@@ -886,7 +886,9 @@ def move_group_due_to_cell_effect(
         grid.pop(current_pos, None)
 
     base_progress = progress[active_movers[-1]]
-    if delta > 0:
+    if active_movers == [NPC_ID]:
+        new_progress = (base_progress + delta) % config.track_length
+    elif delta > 0:
         new_progress = move_progress(base_progress, delta, config.track_length)
     else:
         new_progress = max(MIN_START_POSITION, base_progress + delta)
@@ -918,11 +920,13 @@ def move_progress(current_progress: int, steps: int, track_length: int) -> int:
 def move_npc(
     *,
     grid: dict[int, list[int]],
+    progress: dict[int, int],
+    config: RaceConfig,
     npc_progress: int,
-    track_length: int,
     rng: random.Random,
     trace: bool | TraceLogger,
 ) -> int:
+    track_length = config.track_length
     remove_runner_from_grid(grid, NPC_ID)
     steps = rng.randint(1, 6)
     new_progress = (npc_progress - steps) % track_length
@@ -932,6 +936,7 @@ def move_npc(
         grid[new_pos] = grid[new_pos] + [NPC_ID]
     else:
         grid[new_pos] = [NPC_ID]
+    progress[NPC_ID] = new_progress
     keep_npc_rightmost(grid[new_pos])
     log_block(
         trace,
@@ -941,7 +946,8 @@ def move_npc(
         f"接触角色：{format_cell(contact_cell)}",
         f"格内顺序：{format_cell(grid[new_pos])}",
     )
-    return new_progress
+    apply_cell_effects(grid, progress, [NPC_ID], new_pos, rng, config, trace)
+    return progress[NPC_ID]
 
 
 def settle_npc_end_of_round(

@@ -530,17 +530,46 @@ class CubieDerbyTests(unittest.TestCase):
 
     def test_npc_moves_backward_and_stays_rightmost(self):
         grid = {30: [3]}
+        progress = {3: 30}
+        config = RaceConfig(runners=(3,), track_length=32, start_grid={30: (3,)})
 
         npc_progress = move_npc(
             grid=grid,
+            progress=progress,
+            config=config,
             npc_progress=0,
-            track_length=32,
             rng=random.Random(1),
             trace=False,
         )
 
         self.assertEqual(npc_progress, 30)
         self.assertEqual(grid[30], [3, -1])
+        self.assertEqual(progress[-1], 30)
+
+    def test_npc_triggers_fixed_backward_cell_after_landing(self):
+        config = RaceConfig(
+            runners=(3,),
+            track_length=32,
+            start_grid={0: (3,)},
+            season=2,
+            backward_cells=frozenset({28}),
+        )
+        grid: dict[int, list[int]] = {}
+        progress = {-1: 0}
+
+        npc_progress = move_npc(
+            grid=grid,
+            progress=progress,
+            config=config,
+            npc_progress=0,
+            rng=FixedDiceRandom(random_value=0.1, dice_value=4),
+            trace=False,
+        )
+
+        self.assertEqual(npc_progress, 27)
+        self.assertEqual(progress[-1], 27)
+        self.assertNotIn(28, grid)
+        self.assertEqual(grid[27], [-1])
 
     def test_npc_stays_rightmost_after_shuffle_cell(self):
         config = RaceConfig(
