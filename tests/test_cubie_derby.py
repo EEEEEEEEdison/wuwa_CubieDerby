@@ -1,11 +1,14 @@
 import random
+import tempfile
 import unittest
+from pathlib import Path
 
 from cubie_derby import (
     RaceConfig,
     build_config_from_args,
     current_rank,
     display_position,
+    main,
     make_start_grid,
     move_npc,
     move_runner_with_left_side,
@@ -335,6 +338,35 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(npc_progress, 0)
         self.assertEqual(grid[0], [-1])
         self.assertNotIn(-1, grid.get(30, []))
+
+    def test_trace_log_writes_one_race_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            log_path = Path(tmp_dir) / "trace.log"
+
+            exit_code = main(
+                [
+                    "--season",
+                    "2",
+                    "--trace-log",
+                    str(log_path),
+                    "--start",
+                    "-3:2;-2:1,4;-1:3,6;0:5",
+                    "--runners",
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "--seed",
+                    "42",
+                ]
+            )
+
+            text = log_path.read_text(encoding="utf-8")
+            self.assertEqual(exit_code, 0)
+            self.assertIn("npc moves backward", text)
+            self.assertIn("=== result ===", text)
 
 
 if __name__ == "__main__":

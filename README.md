@@ -46,6 +46,12 @@ Trace one race for rule debugging:
 python cubie_derby.py --preset 4 --seed 2 --trace
 ```
 
+Write one fully traced race to a log file. This is useful for checking Season 2 special cells and NPC movement without running a full Monte Carlo batch:
+
+```powershell
+python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:2;-2:1,4;-1:3,6;0:5" --runners 1 2 3 4 5 6 --seed 42
+```
+
 ## Built-In Presets
 
 - `1`: random first-round order, random start stack, 24-position lap.

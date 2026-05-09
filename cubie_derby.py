@@ -7,6 +7,7 @@ import multiprocessing as mp
 import random
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Iterable, Sequence
 
 
@@ -76,6 +77,20 @@ class RaceResult:
     ranking: tuple[int, ...]
     second_position: int
     winner_margin: int
+
+
+class TraceLogger:
+    def __init__(self, echo: bool = False) -> None:
+        self.echo = echo
+        self.lines: list[str] = []
+
+    def write_line(self, message: str) -> None:
+        self.lines.append(message)
+        if self.echo:
+            print(message)
+
+    def text(self) -> str:
+        return "\n".join(self.lines) + ("\n" if self.lines else "")
 
 
 @dataclass(frozen=True)
@@ -350,7 +365,7 @@ def validate_same_runners(expected: Sequence[int], actual: Sequence[int], label:
         raise ValueError(f"{label} does not match selected runners ({'; '.join(parts)})")
 
 
-def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -> RaceResult:
+def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLogger = False) -> RaceResult:
     runners = config.runners
     track_length = config.track_length
     grid = {pos: list(cell) for pos, cell in config.start_grid.items() if cell}
@@ -377,6 +392,13 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
     npc_active = False
 
     round_number = 1
+    log(trace, f"scenario={config.name}, season={config.season}, lap_length={track_length}")
+    log(trace, "special cells: "
+        f"forward={sorted(config.forward_cells)}, "
+        f"backward={sorted(config.backward_cells)}, "
+        f"shuffle={sorted(config.shuffle_cells)}, "
+        f"npc_enabled={config.npc_enabled}"
+    )
     while True:
         if config.npc_enabled and round_number >= config.npc_start_round:
             npc_active = True
@@ -471,6 +493,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
                     player=player,
                     total_steps=total_steps,
                     rng=rng,
+                    trace=trace,
                 )
             else:
                 new_progress = move_runner_with_left_side(
@@ -481,6 +504,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
                     idx_in_cell=idx_in_cell,
                     total_steps=total_steps,
                     rng=rng,
+                    trace=trace,
                 )
 
             if player == 11 and cartethyia_available:
@@ -497,12 +521,14 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool = False) -
         ranking = current_rank(runners, progress, grid)
         if finished:
             second_position = progress[ranking[1]] if len(ranking) > 1 else track_length
-            return RaceResult(
+            result = RaceResult(
                 winner=grid[0][0],
                 ranking=tuple(ranking),
                 second_position=second_position,
                 winner_margin=max(0, track_length - second_position),
             )
+            log(trace, f"finish: winner={format_runner(result.winner)}, ranking={list(result.ranking)}, margin={result.winner_margin}")
+            return result
 
         if npc_active:
             npc_progress = settle_npc_end_of_round(
@@ -565,6 +591,7 @@ def move_single_runner(
     player: int,
     total_steps: int,
     rng: random.Random,
+    trace: bool | TraceLogger = False,
 ) -> int:
     track_length = config.track_length
     current_progress = progress[player]
@@ -572,7 +599,7 @@ def move_single_runner(
     old_cell = list(grid[current_pos])
     grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
     new_progress = move_progress(current_progress, total_steps, track_length)
-    add_group_to_position(grid, progress, [player], new_progress, old_cell, rng, config)
+    add_group_to_position(grid, progress, [player], new_progress, old_cell, rng, config, trace)
     return progress[player]
 
 
@@ -585,6 +612,7 @@ def move_runner_with_left_side(
     idx_in_cell: int,
     total_steps: int,
     rng: random.Random,
+    trace: bool | TraceLogger = False,
 ) -> int:
     track_length = config.track_length
     current_progress = progress[player]
@@ -594,7 +622,7 @@ def move_runner_with_left_side(
     movers = left_runners + [player]
     grid[current_pos] = [runner for runner in old_cell if runner not in movers]
     new_progress = move_progress(current_progress, total_steps, track_length)
-    add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, config)
+    add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, config, trace)
     return progress[player]
 
 
@@ -608,7 +636,7 @@ def move_cantarella(
     rng: random.Random,
     cantarella_state: int,
     cantarella_group: list[int],
-    trace: bool,
+    trace: bool | TraceLogger,
 ) -> tuple[int, int, list[int]]:
     track_length = config.track_length
     new_progress = progress[player]
@@ -630,7 +658,7 @@ def move_cantarella(
         grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
         new_progress = move_progress(current_progress, 1, track_length)
         new_pos = display_position(new_progress, track_length)
-        add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, config)
+        add_group_to_position(grid, progress, movers, new_progress, old_cell, rng, config, trace)
         new_progress = progress[player]
         new_pos = display_position(new_progress, track_length)
         log_grid(trace, grid)
@@ -657,6 +685,7 @@ def add_group_to_position(
     old_cell: Sequence[int],
     rng: random.Random,
     config: RaceConfig,
+    trace: bool | TraceLogger = False,
 ) -> None:
     track_length = config.track_length
     new_pos = display_position(new_progress, track_length)
@@ -668,7 +697,8 @@ def add_group_to_position(
         grid[new_pos] = list(movers)
     grid[new_pos] = check_player1_skill(grid[new_pos], old_cell, rng)
     keep_npc_rightmost(grid[new_pos])
-    apply_cell_effects(grid, progress, movers, new_pos, old_cell, rng, config)
+    log(trace, f"land: movers={list(movers)} -> pos {new_pos}, cell={grid[new_pos]}")
+    apply_cell_effects(grid, progress, movers, new_pos, old_cell, rng, config, trace)
 
 
 def apply_cell_effects(
@@ -679,14 +709,17 @@ def apply_cell_effects(
     old_cell: Sequence[int],
     rng: random.Random,
     config: RaceConfig,
+    trace: bool | TraceLogger = False,
 ) -> None:
     if pos in config.shuffle_cells:
+        before = list(grid[pos])
         rng.shuffle(grid[pos])
         keep_npc_rightmost(grid[pos])
+        log(trace, f"cell {pos} shuffle: {before} -> {grid[pos]}")
     if pos in config.forward_cells:
-        move_group_due_to_cell_effect(grid, progress, movers, pos, old_cell, 1, rng, config)
+        move_group_due_to_cell_effect(grid, progress, movers, pos, old_cell, 1, rng, config, trace)
     elif pos in config.backward_cells:
-        move_group_due_to_cell_effect(grid, progress, movers, pos, old_cell, -1, rng, config)
+        move_group_due_to_cell_effect(grid, progress, movers, pos, old_cell, -1, rng, config, trace)
 
 
 def move_group_due_to_cell_effect(
@@ -698,6 +731,7 @@ def move_group_due_to_cell_effect(
     delta: int,
     rng: random.Random,
     config: RaceConfig,
+    trace: bool | TraceLogger = False,
 ) -> None:
     active_movers = [runner for runner in movers if runner in grid.get(current_pos, [])]
     if not active_movers:
@@ -720,6 +754,8 @@ def move_group_due_to_cell_effect(
         grid[new_pos] = active_movers
     grid[new_pos] = check_player1_skill(grid[new_pos], old_cell, rng)
     keep_npc_rightmost(grid[new_pos])
+    direction = "forward" if delta > 0 else "backward"
+    log(trace, f"cell {current_pos} {direction}: movers={active_movers} -> pos {new_pos}, cell={grid[new_pos]}")
 
 
 def move_progress(current_progress: int, steps: int, track_length: int) -> int:
@@ -733,18 +769,19 @@ def move_npc(
     npc_progress: int,
     track_length: int,
     rng: random.Random,
-    trace: bool,
+    trace: bool | TraceLogger,
 ) -> int:
     remove_runner_from_grid(grid, NPC_ID)
     steps = rng.randint(1, 6)
     new_progress = (npc_progress - steps) % track_length
     new_pos = new_progress
+    contact_cell = [runner for runner in grid.get(new_pos, []) if runner != NPC_ID]
     if grid.get(new_pos):
         grid[new_pos] = grid[new_pos] + [NPC_ID]
     else:
         grid[new_pos] = [NPC_ID]
     keep_npc_rightmost(grid[new_pos])
-    log(trace, f"npc moves backward {steps} steps to pos {new_pos}")
+    log(trace, f"npc moves backward {steps} steps: {npc_progress % track_length} -> {new_pos}, contact={contact_cell}, cell={grid[new_pos]}")
     return new_progress
 
 
@@ -755,12 +792,13 @@ def settle_npc_end_of_round(
     runners: Sequence[int],
     npc_progress: int,
     track_length: int,
-    trace: bool,
+    trace: bool | TraceLogger,
 ) -> int:
     npc_pos = npc_progress % track_length
     last_runner = current_rank(runners, progress, grid)[-1]
     last_pos = display_position(progress[last_runner], track_length)
     if npc_pos == last_pos:
+        log(trace, f"npc stays at pos {npc_pos} with last runner {format_runner(last_runner)}")
         return npc_progress
     remove_runner_from_grid(grid, NPC_ID)
     if grid.get(0):
@@ -768,7 +806,7 @@ def settle_npc_end_of_round(
     else:
         grid[0] = [NPC_ID]
     keep_npc_rightmost(grid[0])
-    log(trace, "npc returns to start")
+    log(trace, f"npc returns to start because npc_pos={npc_pos}, last_runner={format_runner(last_runner)}, last_pos={last_pos}")
     return 0
 
 
@@ -1065,17 +1103,19 @@ def format_runner(runner: int) -> str:
     return f"{runner}.{RUNNER_NAMES.get(runner, str(runner))}"
 
 
-def log(enabled: bool, message: str) -> None:
-    if enabled:
+def log(enabled: bool | TraceLogger, message: str) -> None:
+    if isinstance(enabled, TraceLogger):
+        enabled.write_line(message)
+    elif enabled:
         print(message)
 
 
-def log_grid(enabled: bool, grid: dict[int, Sequence[int]]) -> None:
+def log_grid(enabled: bool | TraceLogger, grid: dict[int, Sequence[int]]) -> None:
     if not enabled:
         return
     for pos, cell in sorted(grid.items()):
         if cell:
-            print(f"pos {pos}: {list(cell)}")
+            log(enabled, f"pos {pos}: {list(cell)}")
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -1102,6 +1142,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers", type=int, default=1, help="parallel workers; use 0 for CPU count")
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
     parser.add_argument("--trace", action="store_true", help="print one traced race and exit")
+    parser.add_argument("--trace-log", help="write one traced race to this log file and exit")
     return parser
 
 
@@ -1124,20 +1165,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
     try:
         config = build_config_from_args(args)
-        if args.trace:
-            result = simulate_race(config, random.Random(args.seed), trace=True)
-            print(
-                json.dumps(
-                    {
-                        "winner": result.winner,
-                        "ranking": list(result.ranking),
-                        "second_position": result.second_position,
-                        "winner_margin": result.winner_margin,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+        if args.trace or args.trace_log:
+            trace = TraceLogger(echo=args.trace)
+            result = simulate_race(config, random.Random(args.seed), trace=trace)
+            result_text = json.dumps(trace_result_to_dict(result), ensure_ascii=False, indent=2)
+            trace.write_line("")
+            trace.write_line("=== result ===")
+            trace.write_line(result_text)
+            if args.trace_log:
+                path = Path(args.trace_log)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(trace.text(), encoding="utf-8")
+                print(f"Trace log written to {path}")
             return 0
         summary = run_monte_carlo(config, args.iterations, seed=args.seed, workers=args.workers)
     except ValueError as exc:
@@ -1149,6 +1188,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         print(format_summary(summary))
     return 0
+
+
+def trace_result_to_dict(result: RaceResult) -> dict[str, object]:
+    return {
+        "winner": result.winner,
+        "ranking": list(result.ranking),
+        "second_position": result.second_position,
+        "winner_margin": result.winner_margin,
+    }
 
 
 if __name__ == "__main__":
