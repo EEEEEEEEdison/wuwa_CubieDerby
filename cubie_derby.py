@@ -475,10 +475,13 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 else:
                     log_block(trace, f"{format_runner(player)}技能未触发：", "原因：当前不是最后一名")
             elif player == 5:
-                log_timing(trace, "行动开始", f"{format_runner(player)}按同格其他角色数量获得额外步数，并独自移动")
-                extra_steps = len(current_cell) - 1
-                skip_carried_runners = True
-                log_block(trace, f"{format_runner(player)}技能触发：", "效果：独自行动", f"额外步数：+{extra_steps}")
+                log_timing(trace, "行动开始", f"{format_runner(player)}进行50%独自行动判定")
+                if rng.random() <= 0.5:
+                    extra_steps = len(current_cell) - 1
+                    skip_carried_runners = True
+                    log_block(trace, f"{format_runner(player)}技能触发：", "效果：独自行动", f"额外步数：+{extra_steps}")
+                else:
+                    log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
             elif player == 7:
                 log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最后行动者")
                 if player_order[-1] == player:

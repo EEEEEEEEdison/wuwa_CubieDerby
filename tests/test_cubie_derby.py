@@ -5,6 +5,7 @@ from pathlib import Path
 
 from cubie_derby import (
     RaceConfig,
+    TraceLogger,
     build_config_from_args,
     current_rank,
     display_position,
@@ -49,6 +50,25 @@ class CountingRandom(random.Random):
     def random(self) -> float:
         self.random_calls += 1
         return self.random_value
+
+
+class FixedDiceRandom(CountingRandom):
+    def __init__(self, random_value: float, dice_value: int):
+        super().__init__(random_value)
+        self.dice_value = dice_value
+
+    def randint(self, a: int, b: int) -> int:
+        if not a <= self.dice_value <= b:
+            raise ValueError(f"fixed dice {self.dice_value} is outside {a}..{b}")
+        return self.dice_value
+
+
+def first_trace_action(text: str, runner_name: str) -> str:
+    start = text.index(f"--- {runner_name}行动 ---")
+    next_start = text.find("\n--- ", start + 1)
+    if next_start == -1:
+        return text[start:]
+    return text[start:next_start]
 
 
 class CubieDerbyTests(unittest.TestCase):
@@ -368,6 +388,41 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(set(result.ranking), {3, 4})
         self.assertIn(result.winner, {3, 4})
+
+    def test_camellya_skill_triggers_at_fifty_percent_and_moves_alone(self):
+        config = RaceConfig(
+            runners=(4, 5),
+            track_length=8,
+            start_grid=make_start_grid(8, {0: (4, 5)}),
+            initial_order_mode="fixed",
+            fixed_initial_order=(5, 4),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.1, dice_value=2), trace=trace)
+        first_action = first_trace_action(trace.text(), "椿")
+
+        self.assertIn("椿技能触发：", first_action)
+        self.assertIn("移动队列：[椿]", first_action)
+        self.assertIn("到达位置：第3格", first_action)
+
+    def test_camellya_skill_failure_moves_with_left_side(self):
+        config = RaceConfig(
+            runners=(4, 5),
+            track_length=8,
+            start_grid=make_start_grid(8, {0: (4, 5)}),
+            initial_order_mode="fixed",
+            fixed_initial_order=(5, 4),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.9, dice_value=2), trace=trace)
+        first_action = first_trace_action(trace.text(), "椿")
+
+        self.assertIn("椿技能未触发：", first_action)
+        self.assertIn("移动队列：[守岸人, 椿]", first_action)
+        self.assertIn("到达位置：第2格", first_action)
+
 
     def test_season_two_default_rules(self):
         args = argparse_namespace(
