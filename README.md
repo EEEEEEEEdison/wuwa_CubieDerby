@@ -1,6 +1,6 @@
 # Wuthering Waves Cubie Derby Monte Carlo
 
-Python Monte Carlo simulator for Cubie Derby race outcomes. It ports the original MATLAB script into a reusable CLI and simulation module.
+Python Monte Carlo simulator for Cubie Derby race outcomes.
 
 ## Quick Start
 
@@ -50,10 +50,10 @@ Define the start grid. The ring cells are displayed as `0..23` in Season 1 and `
 
 Common forms:
 
-- `--start "1:*"`: all selected runners start together on cell `1`, with a fresh random left-to-right stack each simulated race.
+- `--start "1:*"`: all selected runners start together on cell `1`, with a fresh random left-to-right stack each simulated race. This is a good fit for scenarios such as the upper half of group-stage matches.
 - `--start "1:10;2:4,3;3:8"`: fixed custom layout.
 - `--start "-3:10;-2:4,3;1:8"`: custom layout with pre-start cells.
-- `--start "-3:2;-2:1,4;-1:3,6;1:5"`: custom Season 2-style layout.
+- `--start "-3:2;-2:1,4;-1:3,6;1:5"`: custom Season 2-style layout. This is a good fit for scenarios such as the lower half of group-stage matches with preset starting positions.
 
 Notes:
 
@@ -180,28 +180,30 @@ python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 1
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --skill-ablation-runners 12 16 --skill-ablation-detail --seed 42
 ```
 
-## Runner IDs
+## Runner IDs and Skills
 
-- `1` / `jinhsi`: 今汐
-- `2` / `changli`: 长离
-- `3` / `calcharo`: 卡卡罗
-- `4` / `shorekeeper`: 守岸人. Uses a special `2..3` dice range; in skill ablation, disabling her skill changes her back to the normal `1..3` dice range.
-- `5` / `camellya`: 椿
-- `6` / `potato`: 小土豆
-- `7` / `roccia`: 洛可可
-- `8` / `brant`: 布兰特
-- `9` / `cantarella`: 坎特蕾拉
-- `10` / `zani`: 赞妮
-- `11` / `cartethyia`: 卡提希娅
-- `12` / `phoebe`: 菲比
-- `13` / `sigrika`: 西格莉卡. At round start, marks up to two immediately higher-ranked runners; marked runners move 1 fewer step that round, with a minimum movement of 1. She can act in round 1 for fixed starts, but skips round 1 for random stack starts such as `--start "1:*"`.
-- `14` / `luuk_herssen`: 陆赫斯. Only on his own turn, forward special cells move his active group 4 cells total; backward special cells move his active group 2 cells backward.
-- `15` / `denia`: 达尼娅. If her dice roll matches her previous round's dice roll, she gets +2 steps.
-- `16` / `hiyuki`: 绯雪. After her movement path and the NPC intersect once, including passing through or landing on the NPC's cell, she gains a +1 step bonus for future moves. NPC movement paths are checked the same way, but the bonus does not stack.
-- `17` / `chisa`: 千咲. Dice are rolled for all round participants at round start; if her dice value is tied for the lowest value, including NPC when active, she gets +2 steps that turn.
+The notes below describe the current simulator implementation.
+
+- `1` / `jinhsi`: 今汐. After another non-NPC runner finishes their action, if that runner ends in 今汐's cell and is positioned to her left, 今汐 makes a `40%` check; on success, she moves to the far left of that cell.
+- `2` / `changli`: 长离. At round end, if she is not the rightmost runner in her current cell, she makes a `65%` check; on success, she is forced to act last next round.
+- `3` / `calcharo`: 卡卡罗. At action start, if he is currently last place, he gets `+3` steps.
+- `4` / `shorekeeper`: 守岸人. Uses a special `2..3` dice range instead of the normal `1..3`.
+- `5` / `camellya`: 椿. At action start, she makes a `50%` check to move alone; on success, she does not carry other runners this turn and gains extra steps equal to the number of other runners in her current cell.
+- `6` / `potato`: 小土豆. After rolling, makes a `28%` check to repeat the same die and add it again.
+- `7` / `roccia`: 洛可可. If she is the last actor of the round, she gets `+2` steps.
+- `8` / `brant`: 布兰特. If he is the first actor of the round, he gets `+2` steps.
+- `9` / `cantarella`: 坎特蕾拉. Starts in step-by-step movement mode. While this mode is active, she moves one cell at a time; if she reaches a cell with other runners, she merges with that cell for the remaining movement and then leaves that special mode afterward.
+- `10` / `zani`: 赞妮. Uses a special `1 or 3` dice. At action start, if she shares a cell with others, she makes a `40%` check; on success, her next action is stored with an extra `+2` steps.
+- `11` / `cartethyia`: 卡提希娅. Once per race, after her own action ends, if she is last place, she enters an empowered state. For the rest of the race, each of her later turns makes a `60%` check for `+2` steps.
+- `12` / `phoebe`: 菲比. At action start, makes a `50%` check for `+1` step.
+- `13` / `sigrika`: 西格莉卡. At round start, marks up to two immediately higher-ranked runners; marked runners move `1` fewer step that round, with a minimum movement of `1`. She can act in round `1` for fixed starts, but skips round `1` for random stack starts such as `--start "1:*"`.
+- `14` / `luuk_herssen`: 陆赫斯. Only on his own turn, forward special cells move his active group `4` cells total, and backward special cells move his active group `2` cells backward.
+- `15` / `denia`: 达尼娅. If her current dice roll matches her previous round's dice roll, she gets `+2` steps.
+- `16` / `hiyuki`: 绯雪. After round `3`, once her movement path and the active NPC path intersect, she gains a persistent `+1` step bonus for future moves. The bonus does not stack.
+- `17` / `chisa`: 千咲. Dice are rolled for all round participants at round start; if her dice value is tied for the lowest value, including NPC when active, she gets `+2` steps that turn.
 - `18` / `mornye`: 莫宁. Her dice follows a deterministic `3 -> 2 -> 1` cycle.
-- `19` / `lynae`: 琳奈. Before Sigrika's debuff is applied, she has a 60% chance to move with double dice, a 20% chance to be unable to move, and otherwise moves normally.
-- `20` / `aemeath`: 爱弥斯. Once per race, when a moving group containing Aemeath passes cell `17` in either direction and another non-NPC runner is ahead of cell `17`, only Aemeath teleports to the nearest such runner's cell and enters from the left. If another runner carries her, the original moving group removes Aemeath and continues its movement. If Aemeath is the active runner while carrying others, the carried runners stop on cell `17`, and Aemeath continues any remaining movement after teleporting. If no valid target exists, the skill is not consumed.
+- `19` / `lynae`: 琳奈. Before Sigrika's debuff is applied, she has a `60%` chance to move with double dice, a `20%` chance to be unable to move, and otherwise moves normally.
+- `20` / `aemeath`: 爱弥斯. Once per race, when a moving group containing her passes cell `17` in either direction and another non-NPC runner is ahead of cell `17`, only 爱弥斯 teleports to the nearest such runner's cell and enters from the left. If another runner carries her, the original moving group removes 爱弥斯 and continues. If 爱弥斯 is the active runner while carrying others, the carried runners stop on cell `17`, and 爱弥斯 continues any remaining movement after teleporting. If no valid target exists, the skill is not consumed.
 
 ## Season 2 Rules
 
