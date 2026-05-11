@@ -28,62 +28,156 @@ For large Monte Carlo runs, enable CPU parallelism. Use `--workers 0` to use all
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 42 --workers 0
 ```
 
-## Analysis Commands
+## Parameter Guide
 
-Randomly sample runners from the current `1..20` runner pool. `--runners random` defaults to 6 unique runners; use `random:4` or another count to choose a different size. The choice is tied to `--seed`, so the same seed is reproducible.
+### `--season`
+
+Select the ruleset.
+
+- `--season 1`: Season 1 rules, default lap length `24`.
+- `--season 2`: Season 2 rules, default lap length `32`, special cells enabled, NPC enabled from round 3.
+
+Examples:
 
 ```powershell
+python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10 --seed 42
+python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16 --seed 42
+```
+
+### `--start`
+
+Define the start grid. The ring cells are displayed as `0..23` in Season 1 and `0..31` in Season 2. By this project's naming convention, cell `1` is the usual start cell and cell `0` is the finish cell. Pre-start cells `-3..0` are also supported.
+
+Common forms:
+
+- `--start "1:*"`: all selected runners start together on cell `1`, with a fresh random left-to-right stack each simulated race.
+- `--start "1:10;2:4,3;3:8"`: fixed custom layout.
+- `--start "-3:10;-2:4,3;1:8"`: custom layout with pre-start cells.
+- `--start "-3:2;-2:1,4;-1:3,6;1:5"`: custom Season 2-style layout.
+
+Notes:
+
+- `*` cannot be mixed with fixed cells in the same `--start` string.
+- When `*` is used, `--runners` must also be provided.
+
+Examples:
+
+```powershell
+python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10 --seed 42
+python cubie_derby.py -n 100000 --lap-length 24 --start "1:10;2:4,3;3:8" --runners 3 4 8 10 --seed 42
+python cubie_derby.py --season 2 -n 100000 --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
+```
+
+### `--runners`
+
+Choose the participants. You can pass runner ids, runner names, or a random sample.
+
+Common forms:
+
+- `--runners 11 12 13 14 15 16`
+- `--runners 今汐 长离 卡卡罗 守岸人`
+- `--runners random`
+- `--runners random:4`
+
+Notes:
+
+- `random` defaults to `6` unique runners from the current `1..20` pool.
+- Random runner sampling also follows `--seed`.
+
+Examples:
+
+```powershell
+python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 42
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners random --seed 42 --workers 0
 ```
 
-Run skill ablation statistics. This first runs one all-skills-on baseline, then runs one additional simulation for each ablated runner. With 6 ablated runners and `-n 100000`, the total work is 7 groups, or 700,000 simulated races.
+### `--initial-order`
+
+Override the first-round action order only.
+
+- If omitted and `--start "1:*"` is used, the first-round order follows the randomized left-to-right stack order.
+- `--initial-order random`: reshuffle the first round independently from the stack order.
+- `--initial-order start`: force the first round to follow the current grid order.
+- `--initial-order 4,3,8,10`: fixed first-round order.
+
+Examples:
 
 ```powershell
-python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --seed 42
+python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10 --initial-order random
+python cubie_derby.py -n 100000 --lap-length 24 --start "1:10;2:4,3;3:8" --runners 3 4 8 10 --initial-order start
 ```
 
-Limit ablation to selected runners and include the detailed success-count distribution:
+### `--seed`
+
+Make random behavior reproducible. This affects Monte Carlo runs, random start stacks, and `--runners random`.
+
+Example:
 
 ```powershell
-python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --skill-ablation-runners 12 16 --skill-ablation-detail --seed 42
+python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners random --seed 42
 ```
 
-Trace one race for rule debugging. Trace output is formatted for reading: each action is separated by blank lines, and skill/special-cell checks are marked with `判定时机` labels.
+### `--track-length` / `--lap-length`
 
-```powershell
-python cubie_derby.py --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 2 --trace
-```
+Override the default lap length. This is mainly useful for custom experiments; otherwise, the default season length is used automatically.
 
-Write one fully traced race to a log file. This is useful for checking Season 2 special cells and NPC movement without running a full Monte Carlo batch:
-
-```powershell
-python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
-```
-
-## Custom Starts and Order Control
-
-Use a custom known track environment. The ring cells are displayed as `0..23` in Season 1 and `0..31` in Season 2. By the naming convention used in this project, cell `1` is treated as the start cell and cell `0` as the finish cell. Pre-start positions `-3..0` are also supported, and runners in the same position are ordered from left to right:
-
-```powershell
-python cubie_derby.py -n 100000 --lap-length 24 --start "-3:10;-2:4,3;1:8" --runners 3 4 8 10 --seed 42
-```
-
-Start all selected runners in one cell with a freshly randomized stack order in every simulated race:
+Example:
 
 ```powershell
 python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10 --seed 42
 ```
 
-When every runner starts in position `1`, the first-round action order follows the left-to-right stack order by default. Use `--initial-order random` only when you want the first-round action order to be reshuffled independently from that stack order.
+### `--workers`
+
+Enable CPU parallelism for large Monte Carlo runs.
+
+- `--workers 0`: use all CPU cores.
+- `--workers 4`: use a fixed worker count.
+
+Example:
 
 ```powershell
-python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10 --initial-order random
+python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 42 --workers 0
 ```
 
-Use `--season 2` to apply the Season 2 ruleset to a custom start. Without `--lap-length`, Season 2 defaults to a 32-position ring lap.
+### `--json`
+
+Print machine-readable output instead of the formatted text table.
+
+Example:
 
 ```powershell
-python cubie_derby.py --season 2 -n 100000 --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
+python cubie_derby.py -n 10000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --json
+```
+
+### `--trace` / `--trace-log`
+
+Trace a single race for debugging.
+
+- `--trace`: print the traced race directly to the terminal.
+- `--trace-log PATH`: write the traced race to a log file.
+
+Examples:
+
+```powershell
+python cubie_derby.py --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 2 --trace
+python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
+```
+
+### `--skill-ablation`
+
+Run skill on/off ablation statistics. This first runs one all-skills-on baseline, then runs one additional simulation for each ablated runner.
+
+Related options:
+
+- `--skill-ablation-runners`: limit ablation to selected runners.
+- `--skill-ablation-detail`: include the success-count distribution in the printed output.
+
+Examples:
+
+```powershell
+python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --seed 42
+python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --skill-ablation-runners 12 16 --skill-ablation-detail --seed 42
 ```
 
 ## Runner IDs
