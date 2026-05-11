@@ -105,6 +105,7 @@ class RaceSkillState:
     denia_last_dice: int | None = None
     mornye_next_dice: int = 3
     aemeath_available: bool = True
+    aemeath_ready: bool = False
     success_counts: dict[int, int] = field(default_factory=dict)
 
 
@@ -667,7 +668,8 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             if progress[player] >= track_length:
                 continue
 
-            current_pos = display_position(progress[player], track_length)
+            action_start_progress = progress[player]
+            current_pos = display_position(action_start_progress, track_length)
             current_cell = grid[current_pos]
             if player not in current_cell:
                 raise RuntimeError(f"runner {player} is missing from position {current_pos}")
@@ -875,6 +877,20 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     trace=trace,
                 )
 
+            if player == AEMEATH_ID:
+                maybe_trigger_aemeath_after_active_move(
+                    grid=grid,
+                    progress=progress,
+                    config=config,
+                    start_progress=action_start_progress,
+                    action_had_forward_movement=total_steps > 0,
+                    rng=rng,
+                    skill_state=skill_state,
+                    movement_state=movement_state,
+                    trace=trace,
+                )
+                new_progress = progress[player]
+
             maybe_trigger_player1_skill_after_action(
                 grid=grid,
                 progress=progress,
@@ -1051,32 +1067,13 @@ def move_single_runner(
     current_progress = progress[player]
     current_pos = display_position(current_progress, track_length)
     grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
-    aemeath_teleport = maybe_trigger_aemeath_teleport(
-        movers=[player],
-        progress=progress,
-        config=config,
-        start_progress=current_progress,
-        signed_steps=total_steps,
-        active_player=player,
-        skill_state=skill_state,
-        trace=trace,
-    )
-    if aemeath_teleport is not None:
-        teleport_progress, remaining_steps, _ = aemeath_teleport
-        new_progress = move_progress_by_delta(teleport_progress, remaining_steps, track_length)
-    else:
-        new_progress = move_progress(current_progress, total_steps, track_length)
+    new_progress = move_progress(current_progress, total_steps, track_length)
     if skill_state is not None and skill_enabled(config, HIYUKI_ID) and player == HIYUKI_ID and NPC_ID in progress:
-        hiyuki_steps = (
-            max(0, AEMEATH_TRIGGER_CELL - current_progress)
-            if aemeath_teleport is not None
-            else total_steps
-        )
         record_hiyuki_npc_path_contact(
             movers=[player],
             progress=progress,
             track_length=track_length,
-            path=forward_path_positions(current_progress, hiyuki_steps, track_length),
+            path=forward_path_positions(current_progress, total_steps, track_length),
             skill_state=skill_state,
             trace=trace,
         )
@@ -1090,6 +1087,15 @@ def move_single_runner(
         active_player=player,
         skill_state=skill_state,
         movement_state=movement_state,
+        trace=trace,
+    )
+    maybe_arm_aemeath_pending(
+        movers=[player],
+        start_progress=current_progress,
+        end_progress=progress[player],
+        moved_forward=True,
+        config=config,
+        skill_state=skill_state,
         trace=trace,
     )
     return progress[player]
@@ -1119,92 +1125,37 @@ def move_runner_with_left_side(
         grid[current_pos] = remaining
     else:
         grid.pop(current_pos, None)
-    aemeath_teleport = maybe_trigger_aemeath_teleport(
-        movers=movers,
-        progress=progress,
-        config=config,
-        start_progress=current_progress,
-        signed_steps=total_steps,
-        active_player=player,
-        skill_state=skill_state,
-        trace=trace,
-    )
-    if aemeath_teleport is not None:
-        teleport_progress, remaining_steps, signed_trigger_steps = aemeath_teleport
-        trigger_progress = move_progress_by_delta(current_progress, signed_trigger_steps, track_length)
-        aemeath_progress = (
-            move_progress_by_delta(teleport_progress, remaining_steps, track_length)
-            if player == AEMEATH_ID
-            else teleport_progress
-        )
-        rest_movers = [runner for runner in movers if runner != AEMEATH_ID]
-        if rest_movers:
-            new_progress = trigger_progress if player == AEMEATH_ID else move_progress(current_progress, total_steps, track_length)
-        else:
-            new_progress = aemeath_progress
-    else:
-        new_progress = move_progress(current_progress, total_steps, track_length)
+    new_progress = move_progress(current_progress, total_steps, track_length)
     if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
-        hiyuki_steps = (
-            max(0, AEMEATH_TRIGGER_CELL - current_progress)
-            if aemeath_teleport is not None
-            else total_steps
-        )
         record_hiyuki_npc_path_contact(
             movers=movers,
             progress=progress,
             track_length=track_length,
-            path=forward_path_positions(current_progress, hiyuki_steps, track_length),
+            path=forward_path_positions(current_progress, total_steps, track_length),
             skill_state=skill_state,
             trace=trace,
         )
-    if aemeath_teleport is not None:
-        add_group_to_position(
-            grid,
-            progress,
-            [AEMEATH_ID],
-            aemeath_progress,
-            rng,
-            config,
-            active_player=AEMEATH_ID,
-            skill_state=skill_state,
-            movement_state=movement_state,
-            trace=trace,
-            apply_effects=player == AEMEATH_ID and remaining_steps != 0,
-        )
-        if rest_movers:
-            if trace and player == AEMEATH_ID:
-                log_block(
-                    trace,
-                    f"{format_runner(AEMEATH_ID)}同行者停留：",
-                    f"停留角色：{format_cell(rest_movers)}",
-                    f"停留位置：{format_position(display_position(new_progress, track_length))}",
-                )
-            add_group_to_position(
-                grid,
-                progress,
-                rest_movers,
-                new_progress,
-                rng,
-                config,
-                active_player=player,
-                skill_state=skill_state,
-                movement_state=movement_state,
-                trace=trace,
-            )
-    else:
-        add_group_to_position(
-            grid,
-            progress,
-            movers,
-            new_progress,
-            rng,
-            config,
-            active_player=player,
-            skill_state=skill_state,
-            movement_state=movement_state,
-            trace=trace,
-        )
+    add_group_to_position(
+        grid,
+        progress,
+        movers,
+        new_progress,
+        rng,
+        config,
+        active_player=player,
+        skill_state=skill_state,
+        movement_state=movement_state,
+        trace=trace,
+    )
+    maybe_arm_aemeath_pending(
+        movers=movers,
+        start_progress=current_progress,
+        end_progress=progress[player],
+        moved_forward=True,
+        config=config,
+        skill_state=skill_state,
+        trace=trace,
+    )
     return progress[player]
 
 
@@ -1240,81 +1191,38 @@ def move_cantarella(
             movers = old_cell[:idx] + [player]
 
         grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
-        aemeath_teleport = maybe_trigger_aemeath_teleport(
-            movers=movers,
-            progress=progress,
-            config=config,
-            start_progress=current_progress,
-            signed_steps=1,
-            active_player=player,
-            skill_state=skill_state,
-            trace=trace,
-        )
-        if aemeath_teleport is not None:
-            teleport_progress, remaining_steps, _ = aemeath_teleport
-            aemeath_progress = (
-                move_progress_by_delta(teleport_progress, remaining_steps, track_length)
-                if player == AEMEATH_ID
-                else teleport_progress
-            )
-            rest_movers = [runner for runner in movers if runner != AEMEATH_ID]
-            new_progress = move_progress(current_progress, 1, track_length) if rest_movers else aemeath_progress
-        else:
-            new_progress = move_progress(current_progress, 1, track_length)
+        new_progress = move_progress(current_progress, 1, track_length)
         new_pos = display_position(new_progress, track_length)
         if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
             record_hiyuki_npc_path_contact(
                 movers=movers,
                 progress=progress,
                 track_length=track_length,
-                path=forward_path_positions(
-                    current_progress,
-                    max(0, AEMEATH_TRIGGER_CELL - current_progress) if aemeath_teleport is not None else 1,
-                    track_length,
-                ),
+                path=forward_path_positions(current_progress, 1, track_length),
                 skill_state=skill_state,
                 trace=trace,
             )
-        if aemeath_teleport is not None:
-            add_group_to_position(
-                grid,
-                progress,
-                [AEMEATH_ID],
-                aemeath_progress,
-                rng,
-                config,
-                active_player=AEMEATH_ID,
-                skill_state=skill_state,
-                movement_state=movement_state,
-                trace=trace,
-                apply_effects=player == AEMEATH_ID and remaining_steps != 0,
-            )
-            if rest_movers:
-                add_group_to_position(
-                    grid,
-                    progress,
-                    rest_movers,
-                    new_progress,
-                    rng,
-                    config,
-                    active_player=player,
-                    skill_state=skill_state,
-                    movement_state=movement_state,
-                    trace=trace,
-                )
-        else:
-            add_group_to_position(
-                grid,
-                progress,
-                movers,
-                new_progress,
-                rng,
-                config,
-                active_player=player,
-                skill_state=skill_state,
-                movement_state=movement_state,
-                trace=trace,
-            )
+        add_group_to_position(
+            grid,
+            progress,
+            movers,
+            new_progress,
+            rng,
+            config,
+            active_player=player,
+            skill_state=skill_state,
+            movement_state=movement_state,
+            trace=trace,
+        )
+        maybe_arm_aemeath_pending(
+            movers=movers,
+            start_progress=current_progress,
+            end_progress=progress[player],
+            moved_forward=True,
+            config=config,
+            skill_state=skill_state,
+            trace=trace,
+        )
         new_progress = progress[player]
         new_pos = display_position(new_progress, track_length)
         if trace:
@@ -1482,37 +1390,7 @@ def move_group_due_to_cell_effect(
         grid.pop(current_pos, None)
 
     base_progress = progress[active_movers[-1]]
-    aemeath_teleport = None
-    if active_movers != [NPC_ID]:
-        aemeath_teleport = maybe_trigger_aemeath_teleport(
-            movers=active_movers,
-            progress=progress,
-            config=config,
-            start_progress=base_progress,
-            signed_steps=delta,
-            active_player=active_player,
-            skill_state=skill_state,
-            trace=trace,
-        )
-    if aemeath_teleport is not None:
-        teleport_progress, remaining_steps, signed_trigger_steps = aemeath_teleport
-        trigger_progress = move_progress_by_delta(base_progress, signed_trigger_steps, config.track_length)
-        aemeath_progress = (
-            move_progress_by_delta(teleport_progress, remaining_steps, config.track_length)
-            if active_player == AEMEATH_ID
-            else teleport_progress
-        )
-        rest_movers = [runner for runner in active_movers if runner != AEMEATH_ID]
-        if rest_movers:
-            if active_player == AEMEATH_ID:
-                new_progress = trigger_progress
-            elif delta > 0:
-                new_progress = move_progress(base_progress, delta, config.track_length)
-            else:
-                new_progress = max(MIN_START_POSITION, base_progress + delta)
-        else:
-            new_progress = aemeath_progress
-    elif active_movers == [NPC_ID]:
+    if active_movers == [NPC_ID]:
         new_progress = (base_progress + delta) % config.track_length
     elif delta > 0:
         new_progress = move_progress(base_progress, delta, config.track_length)
@@ -1529,38 +1407,13 @@ def move_group_due_to_cell_effect(
             track_length=config.track_length,
             path=cell_effect_path_positions(
                 start_progress=base_progress,
-                delta=aemeath_teleport[2] if aemeath_teleport is not None else delta,
+                delta=delta,
                 track_length=config.track_length,
                 wrap=active_movers == [NPC_ID],
             ),
             skill_state=skill_state,
             trace=trace,
         )
-    if aemeath_teleport is not None:
-        add_group_to_position(
-            grid,
-            progress,
-            [AEMEATH_ID],
-            aemeath_progress,
-            rng,
-            config,
-            active_player=AEMEATH_ID,
-            skill_state=skill_state,
-            movement_state=movement_state,
-            trace=trace,
-            apply_effects=active_player == AEMEATH_ID and remaining_steps != 0,
-        )
-        active_movers = rest_movers
-        if not active_movers:
-            return
-        new_pos = display_position(new_progress, config.track_length)
-        if trace and active_player == AEMEATH_ID:
-            log_block(
-                trace,
-                f"{format_runner(AEMEATH_ID)}同行者停留：",
-                f"停留角色：{format_cell(active_movers)}",
-                f"停留位置：{format_position(new_pos)}",
-            )
     for runner in active_movers:
         record_movement(
             movement_state,
@@ -1575,6 +1428,15 @@ def move_group_due_to_cell_effect(
     else:
         grid[new_pos] = active_movers
     keep_npc_rightmost(grid[new_pos])
+    maybe_arm_aemeath_pending(
+        movers=active_movers,
+        start_progress=base_progress,
+        end_progress=new_progress,
+        moved_forward=delta > 0,
+        config=config,
+        skill_state=skill_state,
+        trace=trace,
+    )
     direction_text = f"前进{delta}格" if delta > 0 else f"后退{-delta}格"
     if trace:
         log_block(
@@ -1637,32 +1499,6 @@ def move_npc(
         new_pos = new_progress
         destination_before = [runner for runner in grid.get(new_pos, []) if runner != NPC_ID]
         contact_cell.extend(destination_before)
-        aemeath_teleport = maybe_trigger_aemeath_teleport(
-            movers=movers,
-            progress=progress,
-            config=config,
-            start_progress=npc_progress,
-            signed_steps=-1,
-            active_player=NPC_ID,
-            skill_state=skill_state,
-            trace=trace,
-        )
-        if aemeath_teleport is not None:
-            teleport_progress, _, _ = aemeath_teleport
-            movers = [runner for runner in movers if runner != AEMEATH_ID]
-            add_group_to_position(
-                grid,
-                progress,
-                [AEMEATH_ID],
-                teleport_progress,
-                rng,
-                config,
-                active_player=AEMEATH_ID,
-                skill_state=skill_state,
-                movement_state=movement_state,
-                trace=trace,
-                apply_effects=False,
-            )
         if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in progress:
             record_hiyuki_npc_path_contact(
                 movers=[NPC_ID],
@@ -1834,68 +1670,112 @@ def forward_path_positions(current_progress: int, steps: int, track_length: int)
         yield display_position(progress_value, track_length)
 
 
-def maybe_trigger_aemeath_teleport(
+def maybe_arm_aemeath_pending(
     *,
     movers: Sequence[int],
-    progress: dict[int, int],
-    config: RaceConfig,
     start_progress: int,
-    signed_steps: int,
-    active_player: int | None = None,
+    end_progress: int,
+    moved_forward: bool,
+    config: RaceConfig,
     skill_state: RaceSkillState | None,
     trace: bool | TraceLogger = False,
-) -> tuple[int, int, int] | None:
+) -> None:
     if (
         AEMEATH_ID not in movers
         or skill_state is None
         or not skill_state.aemeath_available
+        or skill_state.aemeath_ready
         or not skill_enabled(config, AEMEATH_ID)
-        or signed_steps == 0
+        or not moved_forward
     ):
-        return None
-    trigger_offset = aemeath_trigger_offset(start_progress, signed_steps, config.track_length)
-    if trigger_offset is None:
-        return None
-    if active_player != AEMEATH_ID:
-        if trace:
-            log_timing(trace, "移动路径经过第17格", f"{format_runner(AEMEATH_ID)}检查当前行动者是否为自己")
-            log_block(trace, f"{format_runner(AEMEATH_ID)}技能不判定：", "原因：当前行动回合不是爱弥斯")
-        return None
+        return
+    if start_progress < AEMEATH_TRIGGER_CELL and end_progress < AEMEATH_TRIGGER_CELL:
+        return
+    skill_state.aemeath_ready = True
+    if trace:
+        log_block(
+            trace,
+            f"{format_runner(AEMEATH_ID)}技能进入待判定状态：",
+            f"经过格：{format_position(AEMEATH_TRIGGER_CELL)}",
+            "效果：之后在自身主动前进结束后检查前方是否有角色",
+        )
+
+
+def maybe_trigger_aemeath_after_active_move(
+    *,
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
+    config: RaceConfig,
+    start_progress: int,
+    action_had_forward_movement: bool,
+    rng: random.Random,
+    skill_state: RaceSkillState | None,
+    movement_state: RaceMovementState | None = None,
+    trace: bool | TraceLogger = False,
+) -> None:
+    if (
+        skill_state is None
+        or not skill_state.aemeath_available
+        or not skill_state.aemeath_ready
+        or not skill_enabled(config, AEMEATH_ID)
+        or AEMEATH_ID not in progress
+        or not action_had_forward_movement
+    ):
+        return
+    end_progress = progress[AEMEATH_ID]
+    if end_progress >= config.track_length:
+        return
+    if trace:
+        log_timing(trace, "行动结束", f"{format_runner(AEMEATH_ID)}检查前方是否存在其他非NPC角色")
     target_progress = nearest_runner_progress_ahead(
         progress=progress,
-        from_progress=AEMEATH_TRIGGER_CELL,
+        from_progress=end_progress,
         track_length=config.track_length,
-        excluded=set(movers) | {NPC_ID},
+        excluded={AEMEATH_ID, NPC_ID},
     )
-    if trace:
-        log_timing(trace, "移动路径经过第17格", f"{format_runner(AEMEATH_ID)}检查前方是否存在其他非NPC角色")
     if target_progress is None:
         if trace:
-            log_block(trace, f"{format_runner(AEMEATH_ID)}技能未触发：", "原因：第17格前方没有其他非NPC角色")
-        return None
+            log_block(
+                trace,
+                f"{format_runner(AEMEATH_ID)}技能未触发：",
+                "原因：当前前方没有其他非NPC角色",
+                "效果：保留待判定状态，等待下次主动前进结束后继续检查",
+            )
+        return
+
+    current_pos = display_position(end_progress, config.track_length)
+    current_cell = grid.get(current_pos, [])
+    if AEMEATH_ID in current_cell:
+        current_cell[:] = [runner for runner in current_cell if runner != AEMEATH_ID]
+        if current_cell:
+            keep_npc_rightmost(current_cell)
+        else:
+            grid.pop(current_pos, None)
+
     skill_state.aemeath_available = False
+    skill_state.aemeath_ready = False
     record_skill_success(skill_state, AEMEATH_ID)
-    signed_trigger_steps = trigger_offset
-    remaining_steps = signed_steps - signed_trigger_steps
     if trace:
         log_block(
             trace,
             f"{format_runner(AEMEATH_ID)}技能触发：",
-            f"经过格：{format_position(AEMEATH_TRIGGER_CELL)}",
+            f"判定位置：{format_position(current_pos)}",
             f"传送目标：{format_position(display_position(target_progress, config.track_length))}",
-            f"剩余步数：{remaining_steps}",
-            "效果：仅爱弥斯传送；同行队列按后续结算规则处理",
+            "效果：同行角色停留在原行动终点，爱弥斯单独传送到目标格最左侧",
         )
-    return target_progress, remaining_steps, signed_trigger_steps
-
-
-def aemeath_trigger_offset(start_progress: int, signed_steps: int, track_length: int) -> int | None:
-    if signed_steps <= 0:
-        return None
-    final_progress = min(start_progress + signed_steps, track_length)
-    if start_progress < AEMEATH_TRIGGER_CELL <= final_progress:
-        return AEMEATH_TRIGGER_CELL - start_progress
-    return None
+    add_group_to_position(
+        grid,
+        progress,
+        [AEMEATH_ID],
+        target_progress,
+        rng,
+        config,
+        active_player=AEMEATH_ID,
+        skill_state=skill_state,
+        movement_state=movement_state,
+        trace=trace,
+        apply_effects=False,
+    )
 
 
 def nearest_runner_progress_ahead(

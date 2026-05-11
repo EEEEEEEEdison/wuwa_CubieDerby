@@ -24,6 +24,7 @@ from cubie_derby import (
     main,
     make_start_grid,
     mark_sigrika_debuffs,
+    maybe_trigger_aemeath_after_active_move,
     maybe_trigger_player1_skill_after_action,
     initial_player_order,
     move_npc,
@@ -1309,102 +1310,118 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertNotIn(19, stopped_state.success_counts)
         self.assertEqual(apply_sigrika_debuff(player=19, total_steps=0, debuffed={19}), 0)
 
-    def test_aemeath_teleports_to_nearest_runner_ahead_after_passing_cell_17(self):
-        config = RaceConfig(runners=(20, 2, 3), track_length=32, start_grid={16: (20,), 22: (2,), 25: (3,)})
-        grid = {16: [20], 22: [2], 25: [3]}
-        progress = {20: 16, 2: 22, 3: 25}
+    def test_aemeath_triggers_only_after_active_move_ends(self):
+        config = RaceConfig(runners=(20, 2, 3), track_length=32, start_grid={15: (20,), 22: (2,), 25: (3,)})
+        grid = {15: [20], 22: [2], 25: [3]}
+        progress = {20: 15, 2: 22, 3: 25}
         state = RaceSkillState()
+        rng = random.Random(1)
 
         new_progress = move_single_runner(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=20,
+            total_steps=3,
+            rng=rng,
+            skill_state=state,
+        )
+
+        self.assertEqual(new_progress, 18)
+        self.assertEqual(progress[20], 18)
+        self.assertEqual(grid[18], [20])
+        self.assertTrue(state.aemeath_available)
+        self.assertTrue(state.aemeath_ready)
+        self.assertNotIn(20, state.success_counts)
+
+        maybe_trigger_aemeath_after_active_move(
+            grid=grid,
+            progress=progress,
+            config=config,
+            start_progress=15,
+            action_had_forward_movement=True,
+            rng=rng,
+            skill_state=state,
+        )
+
+        self.assertEqual(progress[20], 22)
+        self.assertNotIn(18, grid)
+        self.assertEqual(grid[22], [20, 2])
+        self.assertFalse(state.aemeath_available)
+        self.assertFalse(state.aemeath_ready)
+        self.assertEqual(state.success_counts[20], 1)
+
+    def test_aemeath_keeps_pending_state_until_later_active_move(self):
+        config = RaceConfig(runners=(20, 2, 3), track_length=32, start_grid={16: (20,), 10: (2,), 24: (3,)})
+        grid = {16: [20], 10: [2], 24: [3]}
+        progress = {20: 16, 2: 10, 3: 24}
+        state = RaceSkillState()
+        rng = random.Random(1)
+
+        move_single_runner(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=20,
+            total_steps=2,
+            rng=rng,
+            skill_state=state,
+        )
+        self.assertEqual(progress[20], 18)
+        self.assertTrue(state.aemeath_ready)
+        self.assertTrue(state.aemeath_available)
+
+        progress.pop(3)
+        grid.pop(24)
+        maybe_trigger_aemeath_after_active_move(
+            grid=grid,
+            progress=progress,
+            config=config,
+            start_progress=16,
+            action_had_forward_movement=True,
+            rng=rng,
+            skill_state=state,
+        )
+        self.assertEqual(progress[20], 18)
+        self.assertIn(18, grid)
+        self.assertTrue(state.aemeath_ready)
+        self.assertTrue(state.aemeath_available)
+        self.assertNotIn(20, state.success_counts)
+
+        progress[3] = 24
+        grid[24] = [3]
+        move_single_runner(
             grid=grid,
             progress=progress,
             config=config,
             player=20,
             total_steps=1,
-            rng=random.Random(1),
+            rng=rng,
             skill_state=state,
         )
-
-        self.assertEqual(new_progress, 22)
-        self.assertEqual(progress[20], 22)
-        self.assertEqual(grid[22], [20, 2])
-        self.assertEqual(state.success_counts[20], 1)
-
-    def test_aemeath_continues_remaining_steps_after_teleport(self):
-        config = RaceConfig(runners=(20, 2), track_length=32, start_grid={16: (20,), 22: (2,)})
-        grid = {16: [20], 22: [2]}
-        progress = {20: 16, 2: 22}
-        state = RaceSkillState()
-
-        new_progress = move_single_runner(
+        maybe_trigger_aemeath_after_active_move(
             grid=grid,
             progress=progress,
             config=config,
-            player=20,
-            total_steps=3,
-            rng=random.Random(1),
+            start_progress=18,
+            action_had_forward_movement=True,
+            rng=rng,
             skill_state=state,
         )
 
-        self.assertEqual(new_progress, 24)
         self.assertEqual(progress[20], 24)
-        self.assertEqual(grid[22], [2])
-        self.assertEqual(grid[24], [20])
+        self.assertNotIn(19, grid)
+        self.assertEqual(grid[24], [20, 3])
+        self.assertFalse(state.aemeath_available)
+        self.assertFalse(state.aemeath_ready)
         self.assertEqual(state.success_counts[20], 1)
 
-    def test_aemeath_active_leaves_carried_runners_on_cell_17(self):
-        config = RaceConfig(runners=(2, 3, 20), track_length=32, start_grid={15: (2, 20), 24: (3,)})
-        grid = {15: [2, 20], 24: [3]}
-        progress = {2: 15, 20: 15, 3: 24}
-        state = RaceSkillState()
-
-        new_progress = move_runner_with_left_side(
-            grid=grid,
-            progress=progress,
-            config=config,
-            player=20,
-            idx_in_cell=1,
-            total_steps=3,
-            rng=random.Random(1),
-            skill_state=state,
-        )
-
-        self.assertEqual(new_progress, 25)
-        self.assertEqual(progress[2], 17)
-        self.assertEqual(progress[20], 25)
-        self.assertEqual(grid[17], [2])
-        self.assertEqual(grid[24], [3])
-        self.assertEqual(grid[25], [20])
-        self.assertEqual(state.success_counts[20], 1)
-
-    def test_aemeath_active_stopped_carried_runners_enter_cell_17_from_left(self):
-        config = RaceConfig(runners=(2, 3, 4, 20), track_length=32, start_grid={15: (2, 20), 17: (4,), 24: (3,)})
-        grid = {15: [2, 20], 17: [4], 24: [3]}
-        progress = {2: 15, 20: 15, 4: 17, 3: 24}
-        state = RaceSkillState()
-
-        move_runner_with_left_side(
-            grid=grid,
-            progress=progress,
-            config=config,
-            player=20,
-            idx_in_cell=1,
-            total_steps=3,
-            rng=random.Random(1),
-            skill_state=state,
-        )
-
-        self.assertEqual(progress[2], 17)
-        self.assertEqual(progress[20], 25)
-        self.assertEqual(grid[17], [2, 4])
-        self.assertEqual(grid[24], [3])
-        self.assertEqual(grid[25], [20])
-
-    def test_aemeath_does_not_trigger_when_carried_by_another_runner(self):
+    def test_aemeath_carried_past_midpoint_arms_but_waits_for_own_action(self):
         config = RaceConfig(runners=(20, 2, 3), track_length=32, start_grid={16: (20, 2), 22: (3,)})
         grid = {16: [20, 2], 22: [3]}
         progress = {20: 16, 2: 16, 3: 22}
         state = RaceSkillState()
+        rng = random.Random(1)
 
         new_progress = move_runner_with_left_side(
             grid=grid,
@@ -1413,47 +1430,86 @@ class CubieDerbyTests(unittest.TestCase):
             player=2,
             idx_in_cell=1,
             total_steps=3,
-            rng=random.Random(1),
+            rng=rng,
             skill_state=state,
         )
 
         self.assertEqual(new_progress, 19)
         self.assertEqual(progress[20], 19)
         self.assertEqual(progress[2], 19)
-        self.assertEqual(grid[22], [3])
         self.assertEqual(grid[19], [20, 2])
         self.assertTrue(state.aemeath_available)
+        self.assertTrue(state.aemeath_ready)
         self.assertNotIn(20, state.success_counts)
 
-    def test_aemeath_stays_in_moving_stack_when_carried_by_another_runner(self):
-        config = RaceConfig(runners=(4, 17, 18, 19, 20), track_length=32, start_grid={})
-        grid = {15: [18, 20, 4, -1], 24: [17], 25: [19]}
-        progress = {18: 15, 20: 15, 4: 15, -1: 15, 17: 24, 19: 25}
+        move_single_runner(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=20,
+            total_steps=1,
+            rng=rng,
+            skill_state=state,
+        )
+        maybe_trigger_aemeath_after_active_move(
+            grid=grid,
+            progress=progress,
+            config=config,
+            start_progress=19,
+            action_had_forward_movement=True,
+            rng=rng,
+            skill_state=state,
+        )
+
+        self.assertEqual(progress[2], 19)
+        self.assertEqual(progress[20], 22)
+        self.assertEqual(grid[19], [2])
+        self.assertEqual(grid[22], [20, 3])
+        self.assertFalse(state.aemeath_available)
+        self.assertFalse(state.aemeath_ready)
+        self.assertEqual(state.success_counts[20], 1)
+
+    def test_aemeath_teleport_leaves_carried_runners_on_action_endpoint(self):
+        config = RaceConfig(runners=(2, 3, 20), track_length=32, start_grid={15: (2, 20), 24: (3,)})
+        grid = {15: [2, 20], 24: [3]}
+        progress = {2: 15, 20: 15, 3: 24}
         state = RaceSkillState()
+        rng = random.Random(1)
 
         new_progress = move_runner_with_left_side(
             grid=grid,
             progress=progress,
             config=config,
-            player=4,
-            idx_in_cell=2,
+            player=20,
+            idx_in_cell=1,
             total_steps=3,
-            rng=random.Random(1),
+            rng=rng,
             skill_state=state,
         )
 
         self.assertEqual(new_progress, 18)
+        self.assertEqual(progress[2], 18)
         self.assertEqual(progress[20], 18)
-        self.assertEqual(progress[18], 18)
-        self.assertEqual(progress[4], 18)
-        self.assertEqual(grid[15], [-1])
-        self.assertEqual(grid[24], [17])
-        self.assertEqual(grid[18], [18, 20, 4])
-        self.assertEqual(grid[25], [19])
-        self.assertTrue(state.aemeath_available)
-        self.assertNotIn(20, state.success_counts)
+        self.assertEqual(grid[18], [2, 20])
 
-    def test_aemeath_does_not_trigger_when_moved_backward_through_cell_17(self):
+        maybe_trigger_aemeath_after_active_move(
+            grid=grid,
+            progress=progress,
+            config=config,
+            start_progress=15,
+            action_had_forward_movement=True,
+            rng=rng,
+            skill_state=state,
+        )
+
+        self.assertEqual(progress[2], 18)
+        self.assertEqual(progress[20], 24)
+        self.assertEqual(grid[18], [2])
+        self.assertEqual(grid[24], [20, 3])
+        self.assertFalse(state.aemeath_available)
+        self.assertFalse(state.aemeath_ready)
+
+    def test_aemeath_backward_movement_does_not_enter_pending_state(self):
         config = RaceConfig(runners=(20, 2), track_length=32, start_grid={18: (20,), 22: (2,)})
         grid = {18: [20], 22: [2]}
         progress = {20: 18, 2: 22}
@@ -1473,11 +1529,11 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(progress[20], 17)
         self.assertEqual(grid[17], [20])
-        self.assertEqual(grid[22], [2])
         self.assertTrue(state.aemeath_available)
+        self.assertFalse(state.aemeath_ready)
         self.assertNotIn(20, state.success_counts)
 
-    def test_aemeath_does_not_trigger_when_carried_backward_by_npc(self):
+    def test_aemeath_carried_backward_by_npc_does_not_enter_pending_state(self):
         config = RaceConfig(runners=(20, 2), track_length=32, start_grid={18: (20,), 22: (2,)}, npc_enabled=True)
         grid = {18: [20, -1], 22: [2]}
         progress = {20: 18, -1: 18, 2: 22}
@@ -1497,30 +1553,9 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(npc_progress, 17)
         self.assertEqual(progress[20], 17)
         self.assertEqual(progress[-1], 17)
-        self.assertEqual(grid[22], [2])
         self.assertEqual(grid[17], [20, -1])
         self.assertTrue(state.aemeath_available)
-        self.assertNotIn(20, state.success_counts)
-
-    def test_aemeath_does_not_consume_skill_without_runner_ahead(self):
-        config = RaceConfig(runners=(20, 2), track_length=32, start_grid={16: (20,), 10: (2,)})
-        grid = {16: [20], 10: [2]}
-        progress = {20: 16, 2: 10}
-        state = RaceSkillState()
-
-        new_progress = move_single_runner(
-            grid=grid,
-            progress=progress,
-            config=config,
-            player=20,
-            total_steps=2,
-            rng=random.Random(1),
-            skill_state=state,
-        )
-
-        self.assertEqual(new_progress, 18)
-        self.assertEqual(progress[20], 18)
-        self.assertTrue(state.aemeath_available)
+        self.assertFalse(state.aemeath_ready)
         self.assertNotIn(20, state.success_counts)
 
     def test_skill_ablation_includes_shorekeeper(self):
