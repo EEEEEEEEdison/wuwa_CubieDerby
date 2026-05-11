@@ -1697,7 +1697,7 @@ def maybe_trigger_aemeath_teleport(
         return None
     skill_state.aemeath_available = False
     record_skill_success(skill_state, AEMEATH_ID)
-    signed_trigger_steps = trigger_offset if signed_steps > 0 else -trigger_offset
+    signed_trigger_steps = trigger_offset
     remaining_steps = signed_steps - signed_trigger_steps
     if trace:
         log_block(
@@ -1712,14 +1712,11 @@ def maybe_trigger_aemeath_teleport(
 
 
 def aemeath_trigger_offset(start_progress: int, signed_steps: int, track_length: int) -> int | None:
-    if signed_steps > 0:
-        final_progress = min(start_progress + signed_steps, track_length)
-        if start_progress < AEMEATH_TRIGGER_CELL <= final_progress:
-            return AEMEATH_TRIGGER_CELL - start_progress
+    if signed_steps <= 0:
         return None
-    final_progress = max(MIN_START_POSITION, start_progress + signed_steps)
-    if start_progress > AEMEATH_TRIGGER_CELL >= final_progress:
-        return start_progress - AEMEATH_TRIGGER_CELL
+    final_progress = min(start_progress + signed_steps, track_length)
+    if start_progress < AEMEATH_TRIGGER_CELL <= final_progress:
+        return AEMEATH_TRIGGER_CELL - start_progress
     return None
 
 

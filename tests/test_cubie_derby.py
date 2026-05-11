@@ -1396,7 +1396,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertTrue(state.aemeath_available)
         self.assertNotIn(20, state.success_counts)
 
-    def test_aemeath_can_trigger_when_moved_backward_through_cell_17(self):
+    def test_aemeath_does_not_trigger_when_moved_backward_through_cell_17(self):
         config = RaceConfig(runners=(20, 2), track_length=32, start_grid={18: (20,), 22: (2,)})
         grid = {18: [20], 22: [2]}
         progress = {20: 18, 2: 22}
@@ -1414,9 +1414,11 @@ class CubieDerbyTests(unittest.TestCase):
             skill_state=state,
         )
 
-        self.assertEqual(progress[20], 22)
-        self.assertEqual(grid[22], [20, 2])
-        self.assertEqual(state.success_counts[20], 1)
+        self.assertEqual(progress[20], 17)
+        self.assertEqual(grid[17], [20])
+        self.assertEqual(grid[22], [2])
+        self.assertTrue(state.aemeath_available)
+        self.assertNotIn(20, state.success_counts)
 
     def test_aemeath_does_not_trigger_when_carried_backward_by_npc(self):
         config = RaceConfig(runners=(20, 2), track_length=32, start_grid={18: (20,), 22: (2,)}, npc_enabled=True)
