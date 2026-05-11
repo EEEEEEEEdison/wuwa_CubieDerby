@@ -8,72 +8,63 @@ import random
 import sys
 import time
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable, Sequence
+
+from cubie_derby_core.runners import (
+    AEMEATH_ID,
+    BRANT_ID,
+    CALCHARO_ID,
+    CAMELLYA_ID,
+    CANTARELLA_ID,
+    CARTETHYIA_ID,
+    CHANGLI_ID,
+    CHISA_ID,
+    DENIA_ID,
+    HIYUKI_ID,
+    JINHSI_ID,
+    LUUK_HERSSEN_ID,
+    LYNAE_ID,
+    MORNYE_ID,
+    NAME_TO_RUNNER,
+    NPC_ID,
+    PHOEBE_ID,
+    POTATO_ID,
+    RANDOM_RUNNER_ALIASES,
+    ROCCIA_ID,
+    RUNNER_ALIASES,
+    RUNNER_NAMES,
+    SHOREKEEPER_ID,
+    SIGRIKA_ID,
+    SKILL_RUNNERS,
+    ZANI_ID,
+)
+from cubie_derby_core.skills import (
+    apply_chisa_bonus,
+    apply_lynae_skill,
+    apply_sigrika_debuff,
+    check_chisa_skill,
+    check_denia_skill,
+    check_hiyuki_bonus,
+    chisa_has_lowest_dice,
+    log_chisa_round_check,
+    mark_sigrika_debuffs,
+    record_skill_success,
+    roll_dice,
+    roll_round_dice,
+    skill_enabled,
+    skill_enabled_from_set,
+)
 
 
 MIN_START_POSITION = -3
 DEFAULT_LAP_LENGTH = 24
 SEASON2_LAP_LENGTH = 32
-NPC_ID = -1
-SIGRIKA_ID = 13
-LUUK_HERSSEN_ID = 14
-DENIA_ID = 15
-HIYUKI_ID = 16
+AEMEATH_TRIGGER_CELL = 17
 SEASON2_FORWARD_CELLS = frozenset({3, 11, 16, 23})
 SEASON2_BACKWARD_CELLS = frozenset({10, 28})
 SEASON2_SHUFFLE_CELLS = frozenset({6, 20})
-CONFIG_NAME_LABELS = {
-    "custom": "自定义",
-}
-
-
-RUNNER_NAMES: dict[int, str] = {
-    1: "今汐",
-    2: "长离",
-    3: "卡卡罗",
-    4: "守岸人",
-    5: "椿",
-    6: "小土豆",
-    7: "洛可可",
-    8: "布兰特",
-    9: "坎特蕾拉",
-    10: "赞妮",
-    11: "卡提希娅",
-    12: "菲比",
-    13: "西格莉卡",
-    14: "陆赫斯",
-    15: "达尼娅",
-    16: "绯雪",
-}
-
-RUNNER_ALIASES: dict[str, int] = {
-    "jinhsi": 1,
-    "changli": 2,
-    "calcharo": 3,
-    "shorekeeper": 4,
-    "camellya": 5,
-    "potato": 6,
-    "roccia": 7,
-    "brant": 8,
-    "cantarella": 9,
-    "zani": 10,
-    "cartethyia": 11,
-    "phoebe": 12,
-    "sigrika": 13,
-    "luuk": 14,
-    "luuk herssen": 14,
-    "luuk-herssen": 14,
-    "luuk_herssen": 14,
-    "luukherssen": 14,
-    "denia": 15,
-    "hiyuki": 16,
-}
-
-NAME_TO_RUNNER: dict[str, int] = {name: runner for runner, name in RUNNER_NAMES.items()}
-
-
 @dataclass(frozen=True)
 class RaceConfig:
     runners: tuple[int, ...]
@@ -89,7 +80,8 @@ class RaceConfig:
     random_start_position: int = 0
     initial_order_mode: str = "random"  # random, start, fixed
     fixed_initial_order: tuple[int, ...] = ()
-    name: str = "custom"
+    disabled_skills: frozenset[int] = field(default_factory=frozenset)
+    name: str = "自定义"
 
 
 @dataclass(frozen=True)
@@ -98,12 +90,33 @@ class RaceResult:
     ranking: tuple[int, ...]
     second_position: int
     winner_margin: int
+    winner_carried_steps: int = 0
+    winner_total_steps: int = 0
+    movement_stats: tuple[tuple[int, int, int], ...] = ()
+    skill_success_counts: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass
 class RaceSkillState:
     hiyuki_bonus_steps: int = 0
     denia_last_dice: int | None = None
+    mornye_next_dice: int = 3
+    aemeath_available: bool = True
+    success_counts: dict[int, int] = field(default_factory=dict)
+
+
+@dataclass
+class RaceMovementState:
+    total_steps: dict[int, int] = field(default_factory=dict)
+    carried_steps: dict[int, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SkillSuccessBucket:
+    success_count: int
+    races: int
+    wins: int
+    win_rate: float
 
 
 class TraceLogger:
@@ -132,6 +145,12 @@ class RunnerSummary:
     rank_variance: float
     winner_gap_per_race: float
     average_winning_margin: float
+    lazy_win_rate: float = 0.0
+    winner_carried_steps: int = 0
+    winner_total_steps: int = 0
+    skill_average_success_count: float = 0.0
+    skill_marginal_win_rate: float | None = None
+    skill_success_distribution: tuple[SkillSuccessBucket, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -146,6 +165,27 @@ class SimulationSummary:
         return max(self.rows, key=lambda row: (row.win_rate, -row.average_rank))
 
 
+@dataclass(frozen=True)
+class SkillAblationRow:
+    runner: int
+    name: str
+    enabled_win_rate: float
+    disabled_win_rate: float
+    net_win_rate: float
+    skill_average_success_count: float
+    skill_marginal_win_rate: float | None
+    success_distribution: tuple[SkillSuccessBucket, ...]
+
+
+@dataclass(frozen=True)
+class SkillAblationSummary:
+    iterations: int
+    total_simulated_races: int
+    base_summary: SimulationSummary
+    rows: tuple[SkillAblationRow, ...]
+    elapsed_seconds: float | None = None
+
+
 class MonteCarloAccumulator:
     def __init__(self, runners: Sequence[int]) -> None:
         self.runners = tuple(runners)
@@ -157,18 +197,35 @@ class MonteCarloAccumulator:
         self.rank_sum = [0.0] * size
         self.rank_square_sum = [0.0] * size
         self.winner_gap_sum = [0.0] * size
+        self.winner_carried_step_sum = [0] * size
+        self.winner_total_step_sum = [0] * size
+        self.skill_success_sum = [0.0] * size
+        self.skill_success_square_sum = [0.0] * size
+        self.skill_success_win_cross_sum = [0.0] * size
+        self.skill_success_distribution: list[dict[int, list[int]]] = [dict() for _ in self.runners]
 
     def add(self, result: RaceResult) -> None:
         self.iterations += 1
         winner_idx = self.index[result.winner]
         self.wins[winner_idx] += 1
         self.winner_gap_sum[winner_idx] += result.winner_margin
+        self.winner_carried_step_sum[winner_idx] += result.winner_carried_steps
+        self.winner_total_step_sum[winner_idx] += result.winner_total_steps
+        skill_counts = dict(result.skill_success_counts)
         for rank, runner in enumerate(result.ranking, start=1):
             idx = self.index[runner]
             if rank <= 3:
                 self.top3[idx] += 1
             self.rank_sum[idx] += rank
             self.rank_square_sum[idx] += rank * rank
+            success_count = skill_counts.get(runner, 0)
+            won = 1 if result.winner == runner else 0
+            self.skill_success_sum[idx] += success_count
+            self.skill_success_square_sum[idx] += success_count * success_count
+            self.skill_success_win_cross_sum[idx] += success_count * won
+            bucket = self.skill_success_distribution[idx].setdefault(success_count, [0, 0])
+            bucket[0] += 1
+            bucket[1] += won
 
     def merge(self, other: "MonteCarloAccumulator") -> None:
         if self.runners != other.runners:
@@ -180,6 +237,15 @@ class MonteCarloAccumulator:
             self.rank_sum[i] += other.rank_sum[i]
             self.rank_square_sum[i] += other.rank_square_sum[i]
             self.winner_gap_sum[i] += other.winner_gap_sum[i]
+            self.winner_carried_step_sum[i] += other.winner_carried_step_sum[i]
+            self.winner_total_step_sum[i] += other.winner_total_step_sum[i]
+            self.skill_success_sum[i] += other.skill_success_sum[i]
+            self.skill_success_square_sum[i] += other.skill_success_square_sum[i]
+            self.skill_success_win_cross_sum[i] += other.skill_success_win_cross_sum[i]
+            for success_count, bucket in other.skill_success_distribution[i].items():
+                merged_bucket = self.skill_success_distribution[i].setdefault(success_count, [0, 0])
+                merged_bucket[0] += bucket[0]
+                merged_bucket[1] += bucket[1]
 
     def to_summary(self, config: RaceConfig) -> SimulationSummary:
         rows: list[RunnerSummary] = []
@@ -193,6 +259,31 @@ class MonteCarloAccumulator:
                 variance = max(0.0, variance)
             else:
                 variance = 0.0
+            skill_average_success_count = self.skill_success_sum[idx] / n if n else 0.0
+            winner_total_steps = self.winner_total_step_sum[idx]
+            winner_carried_steps = self.winner_carried_step_sum[idx]
+            if n:
+                success_mean = skill_average_success_count
+                win_mean = wins / n
+                success_square_mean = self.skill_success_square_sum[idx] / n
+                success_win_mean = self.skill_success_win_cross_sum[idx] / n
+                success_variance = success_square_mean - success_mean * success_mean
+                skill_marginal_win_rate = (
+                    (success_win_mean - success_mean * win_mean) / success_variance
+                    if success_variance > 1e-12
+                    else None
+                )
+            else:
+                skill_marginal_win_rate = None
+            distribution = tuple(
+                SkillSuccessBucket(
+                    success_count=success_count,
+                    races=bucket[0],
+                    wins=bucket[1],
+                    win_rate=bucket[1] / bucket[0] if bucket[0] else 0.0,
+                )
+                for success_count, bucket in sorted(self.skill_success_distribution[idx].items())
+            )
             rows.append(
                 RunnerSummary(
                     runner=runner,
@@ -205,63 +296,15 @@ class MonteCarloAccumulator:
                     rank_variance=variance,
                     winner_gap_per_race=self.winner_gap_sum[idx] / n if n else 0.0,
                     average_winning_margin=self.winner_gap_sum[idx] / wins if wins else 0.0,
+                    lazy_win_rate=winner_carried_steps / winner_total_steps if winner_total_steps else 0.0,
+                    winner_carried_steps=winner_carried_steps,
+                    winner_total_steps=winner_total_steps,
+                    skill_average_success_count=skill_average_success_count,
+                    skill_marginal_win_rate=skill_marginal_win_rate,
+                    skill_success_distribution=distribution,
                 )
             )
         return SimulationSummary(iterations=n, config=config, rows=tuple(rows))
-
-
-def preset_config(mode: int, runners: Sequence[int] | None = None) -> RaceConfig:
-    if mode == 1:
-        selected = tuple(runners or (1, 2, 3, 4, 5, 6))
-        return RaceConfig(
-            runners=selected,
-            track_length=DEFAULT_LAP_LENGTH,
-            start_grid=empty_grid(DEFAULT_LAP_LENGTH),
-            random_start_stack=True,
-            initial_order_mode="start",
-            name="预设1：随机顺序，随机起点",
-        )
-    if mode == 2:
-        selected = tuple(runners or (1, 2, 3, 4, 5, 6))
-        return RaceConfig(
-            runners=selected,
-            track_length=DEFAULT_LAP_LENGTH,
-            start_grid=empty_grid(DEFAULT_LAP_LENGTH),
-            random_start_stack=True,
-            initial_order_mode="start",
-            name="预设2：按起点顺序行动，随机起点",
-        )
-    if mode == 3:
-        selected = tuple(runners or (9, 10, 7, 12, 8, 11))
-        start = {0: (9, 10, 7, 12, 8, 11)}
-        return fixed_grid_config(
-            name="预设3：A组上半区固定起点",
-            runners=selected,
-            track_length=DEFAULT_LAP_LENGTH,
-            start_cells=start,
-            initial_order=(9, 10, 7, 12, 8, 11),
-        )
-    if mode == 4:
-        selected = tuple(runners or (3, 4, 8, 10))
-        start = {1: (10,), 2: (4, 3), 3: (8,)}
-        return fixed_grid_config(
-            name="预设4：决赛下半区固定起点",
-            runners=selected,
-            track_length=DEFAULT_LAP_LENGTH,
-            start_cells=start,
-            initial_order=None,
-        )
-    if mode == 5:
-        selected = tuple(runners or (7, 8, 9, 10, 11, 12))
-        start = {1: (10, 7, 9), 2: (12,), 3: (8, 11)}
-        return fixed_grid_config(
-            name="预设5：A组下半区固定起点",
-            runners=selected,
-            track_length=DEFAULT_LAP_LENGTH,
-            start_cells=start,
-            initial_order=(9, 8, 11, 7, 10, 12),
-        )
-    raise ValueError(f"unknown preset mode: {mode}")
 
 
 def season_rules(season: int) -> dict[str, object]:
@@ -284,69 +327,9 @@ def season_rules(season: int) -> dict[str, object]:
     raise ValueError(f"unknown season: {season}")
 
 
-def apply_season_rules(config: RaceConfig, season: int, track_length: int | None = None) -> RaceConfig:
-    rules = season_rules(season)
-    lap_length = track_length or int(rules["track_length"])
-    validate_track_length(lap_length)
-    for pos in config.start_grid:
-        validate_start_position(pos, lap_length)
-    validate_start_position(config.random_start_position, lap_length)
-    return RaceConfig(
-        runners=config.runners,
-        track_length=lap_length,
-        start_grid=config.start_grid,
-        season=season,
-        forward_cells=rules["forward_cells"],
-        backward_cells=rules["backward_cells"],
-        shuffle_cells=rules["shuffle_cells"],
-        npc_enabled=bool(rules["npc_enabled"]),
-        npc_start_round=config.npc_start_round,
-        random_start_stack=config.random_start_stack,
-        random_start_position=config.random_start_position,
-        initial_order_mode=config.initial_order_mode,
-        fixed_initial_order=config.fixed_initial_order,
-        name=config.name,
-    )
-
-
 def empty_grid(track_length: int) -> dict[int, tuple[int, ...]]:
     validate_track_length(track_length)
     return {}
-
-
-def fixed_grid_config(
-    *,
-    name: str,
-    runners: Sequence[int],
-    track_length: int,
-    start_cells: dict[int, Sequence[int]],
-    initial_order: Sequence[int] | None,
-) -> RaceConfig:
-    selected = tuple(runners)
-    selected_set = set(selected)
-    filtered_cells: dict[int, tuple[int, ...]] = {}
-    for pos, cell in start_cells.items():
-        filtered = tuple(runner for runner in cell if runner in selected_set)
-        if filtered:
-            filtered_cells[pos] = filtered
-    grid = make_start_grid(track_length, filtered_cells)
-    validate_fixed_start(selected, grid)
-    if initial_order is None:
-        mode = "random"
-        fixed_order: tuple[int, ...] = ()
-    else:
-        mode = "fixed"
-        fixed_order = tuple(runner for runner in initial_order if runner in selected_set)
-        validate_same_runners(selected, fixed_order, "fixed initial order")
-    return RaceConfig(
-        runners=selected,
-        track_length=track_length,
-        start_grid=grid,
-        random_start_stack=False,
-        initial_order_mode=mode,
-        fixed_initial_order=fixed_order,
-        name=name,
-    )
 
 
 def validate_track_length(track_length: int) -> None:
@@ -401,6 +384,23 @@ def validate_same_runners(expected: Sequence[int], actual: Sequence[int], label:
         raise ValueError(f"{label} does not match selected runners ({'; '.join(parts)})")
 
 
+def record_movement(
+    movement_state: RaceMovementState | None,
+    movers: Sequence[int],
+    distance: int,
+    *,
+    active_player: int | None,
+) -> None:
+    if movement_state is None or distance <= 0:
+        return
+    for runner in movers:
+        if runner <= 0:
+            continue
+        movement_state.total_steps[runner] = movement_state.total_steps.get(runner, 0) + distance
+        if active_player is not None and runner != active_player:
+            movement_state.carried_steps[runner] = movement_state.carried_steps.get(runner, 0) + distance
+
+
 def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLogger = False) -> RaceResult:
     runners = config.runners
     track_length = config.track_length
@@ -411,10 +411,14 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
         start_stack = list(runners)
         rng.shuffle(start_stack)
         grid = {config.random_start_position: start_stack}
+    if config.npc_enabled:
+        add_npc_to_start(grid)
 
     progress: dict[int, int] = {}
     for pos, cell in grid.items():
         for runner in cell:
+            if runner == NPC_ID:
+                continue
             progress[runner] = pos
     validate_positions(runners, progress)
 
@@ -425,6 +429,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
     cartethyia_available = True
     cartethyia_extra_steps = False
     skill_state = RaceSkillState()
+    movement_state = RaceMovementState()
     npc_progress = 0
     npc_active = False
     npc_rank_active = False
@@ -466,10 +471,21 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             progress=progress,
             grid=grid,
             round_number=round_number,
+            skip_first_round=config.random_start_stack,
+            disabled_skills=config.disabled_skills,
             trace=trace,
+        )
+        round_dice = roll_round_dice(player_order, rng, config=config, skill_state=skill_state)
+        chisa_bonus_active = (
+            CHISA_ID in player_order
+            and skill_enabled(config, CHISA_ID)
+            and chisa_has_lowest_dice(round_dice[CHISA_ID], round_dice)
         )
         if trace:
             log_block(trace, "本轮行动顺序：", format_runner_arrow_list(player_order))
+            log_block(trace, "本轮骰点：", format_round_dice(round_dice, player_order))
+            if CHISA_ID in player_order and skill_enabled(config, CHISA_ID):
+                log_chisa_round_check(round_dice[CHISA_ID], round_dice, chisa_bonus_active, trace)
 
         finished = False
         for player in list(player_order):
@@ -486,7 +502,9 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                         config=config,
                         npc_progress=npc_progress,
                         rng=rng,
+                        steps=round_dice[player],
                         skill_state=skill_state,
+                        movement_state=movement_state,
                         trace=trace,
                     )
                     npc_rank_active = True
@@ -513,80 +531,88 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     f"格内顺序：{format_cell(current_cell)}",
                 )
 
-            dice = roll_dice(player, rng)
+            dice = round_dice[player]
             extra_steps = 0
             skip_carried_runners = False
             cantarella_move = False
 
-            if player == DENIA_ID:
+            if player == DENIA_ID and skill_enabled(config, DENIA_ID):
                 extra_steps += check_denia_skill(skill_state, dice, trace)
+            if player == CHISA_ID and skill_enabled(config, CHISA_ID):
+                extra_steps += apply_chisa_bonus(skill_state, chisa_bonus_active, trace)
 
-            if player == 3:
+            if player == CALCHARO_ID and skill_enabled(config, CALCHARO_ID):
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为最后一名")
                 rank_for_decision = current_rank(rank_scope(runners, progress, npc_rank_active), progress, grid)
                 log_rank_decision(trace, rank_for_decision, npc_rank_active)
                 if rank_for_decision[-1] == player:
                     extra_steps = 3
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能触发：", "原因：当前最后一名", "效果：额外+3步")
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：当前不是最后一名")
-            elif player == 5:
+            elif player == CAMELLYA_ID and skill_enabled(config, CAMELLYA_ID):
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}进行50%独自行动判定")
                 if rng.random() <= 0.5:
                     extra_steps = len(current_cell) - 1
                     skip_carried_runners = True
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能触发：", "效果：独自行动", f"额外步数：+{extra_steps}")
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
-            elif player == 7:
+            elif player == ROCCIA_ID and skill_enabled(config, ROCCIA_ID):
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最后行动者")
                 if player_order[-1] == player:
                     extra_steps = 2
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能触发：", "原因：本轮最后行动", "效果：额外+2步")
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：不是本轮最后行动者")
-            elif player == 8:
+            elif player == BRANT_ID and skill_enabled(config, BRANT_ID):
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最先行动者")
                 if player_order[0] == player:
                     extra_steps = 2
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能触发：", "原因：本轮最先行动", "效果：额外+2步")
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：不是本轮最先行动者")
-            elif player == 9:
+            elif player == CANTARELLA_ID and skill_enabled(config, CANTARELLA_ID):
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}检查是否处于逐格移动状态")
                 cantarella_move = cantarella_state == 1
                 if cantarella_move:
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能生效：", "效果：本次逐格移动")
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未生效：", "原因：不处于逐格移动状态")
-            elif player == 10:
+            elif player == ZANI_ID and skill_enabled(config, ZANI_ID):
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}先结算上次保留的额外步数，再检查同格触发")
                 extra_steps = zani_extra_steps
                 if len(current_cell) > 1 and rng.random() <= 0.4:
                     zani_extra_steps = 2
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能触发：", "效果：下一次行动额外+2步")
                 else:
                     zani_extra_steps = 0
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "效果：下一次行动无额外步数")
-            elif player == 11:
+            elif player == CARTETHYIA_ID and skill_enabled(config, CARTETHYIA_ID):
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}若已进入强化状态，则检查60%额外+2步")
                 if cartethyia_extra_steps and rng.random() <= 0.6:
@@ -599,35 +625,48 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未判定：", "原因：尚未进入强化状态")
-            elif player == 12:
+            elif player == PHOEBE_ID and skill_enabled(config, PHOEBE_ID):
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}进行50%额外+1步判定")
                 if rng.random() <= 0.5:
                     extra_steps = 1
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能触发：", "效果：额外+1步")
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
-            elif player == HIYUKI_ID:
+            elif player == HIYUKI_ID and skill_enabled(config, HIYUKI_ID):
                 extra_steps += check_hiyuki_bonus(skill_state, trace)
 
             total_steps = dice + extra_steps
-            if player == 6:
+            if player == POTATO_ID and skill_enabled(config, POTATO_ID):
                 if trace:
                     log_timing(trace, "骰子后", f"{format_runner(player)}进行重复本次骰子的判定")
                 if rng.random() <= 0.28:
                     total_steps += dice
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能触发：", "效果：重复本次骰子", f"总步数：{total_steps}")
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：本次不重复骰子")
 
+            if player == LYNAE_ID and skill_enabled(config, LYNAE_ID):
+                total_steps, lynae_step_adjustment = apply_lynae_skill(
+                    skill_state,
+                    rng,
+                    dice=dice,
+                    total_steps=total_steps,
+                    trace=trace,
+                )
+                extra_steps += lynae_step_adjustment
+
             total_steps = apply_sigrika_debuff(
                 player=player,
                 total_steps=total_steps,
                 debuffed=sigrika_debuffed,
+                skill_state=skill_state,
                 trace=trace,
             )
 
@@ -640,7 +679,11 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     f"总步数：{total_steps}",
                 )
 
-            if cantarella_move:
+            if total_steps <= 0:
+                new_progress = progress[player]
+                if trace:
+                    log_block(trace, f"{format_runner(player)}本回合无法移动：", "移动结算：跳过")
+            elif cantarella_move:
                 new_progress, cantarella_state, cantarella_group = move_cantarella(
                     grid=grid,
                     progress=progress,
@@ -651,6 +694,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     cantarella_state=cantarella_state,
                     cantarella_group=cantarella_group,
                     skill_state=skill_state,
+                    movement_state=movement_state,
                     trace=trace,
                 )
             elif skip_carried_runners:
@@ -662,6 +706,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     total_steps=total_steps,
                     rng=rng,
                     skill_state=skill_state,
+                    movement_state=movement_state,
                     trace=trace,
                 )
             else:
@@ -674,6 +719,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     total_steps=total_steps,
                     rng=rng,
                     skill_state=skill_state,
+                    movement_state=movement_state,
                     trace=trace,
                 )
 
@@ -683,10 +729,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 actor=player,
                 track_length=track_length,
                 rng=rng,
+                disabled_skills=config.disabled_skills,
+                skill_state=skill_state,
                 trace=trace,
             )
 
-            if player == 11 and cartethyia_available:
+            if player == CARTETHYIA_ID and skill_enabled(config, CARTETHYIA_ID) and cartethyia_available:
                 if trace:
                     log_timing(trace, "行动结束", f"{format_runner(player)}检查是否处于最后一名，以决定本场后续强化")
                 rank_for_decision = current_rank(rank_scope(runners, progress, npc_rank_active), progress, grid)
@@ -694,6 +742,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 if rank_for_decision[-1] == player:
                     cartethyia_extra_steps = True
                     cartethyia_available = False
+                    record_skill_success(skill_state, player)
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能进入强化状态：", "效果：本场剩余回合可判定额外+2步")
                 else:
@@ -712,11 +761,19 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
         ranking = current_rank(runners, progress, grid)
         if finished:
             second_position = progress[ranking[1]] if len(ranking) > 1 else track_length
+            winner = grid[0][0]
             result = RaceResult(
-                winner=grid[0][0],
+                winner=winner,
                 ranking=tuple(ranking),
                 second_position=second_position,
                 winner_margin=max(0, track_length - second_position),
+                winner_carried_steps=movement_state.carried_steps.get(winner, 0),
+                winner_total_steps=movement_state.total_steps.get(winner, 0),
+                movement_stats=tuple(
+                    (runner, movement_state.total_steps.get(runner, 0), movement_state.carried_steps.get(runner, 0))
+                    for runner in runners
+                ),
+                skill_success_counts=tuple(sorted(skill_state.success_counts.items())),
             )
             if trace:
                 log(
@@ -735,7 +792,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
         if npc_active:
             if trace:
                 log(trace, "")
-                log_timing(trace, "回合结束", "NPC检查是否与最后一名同格，不同格则回到第0格")
+                log_timing(trace, "回合结束", "NPC检查自身位置是否小于最后一名位置，若小于则回到第0格")
             npc_progress = settle_npc_end_of_round(
                 grid=grid,
                 progress=progress,
@@ -745,18 +802,24 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 trace=trace,
             )
 
-        if 2 in runners:
+        if CHANGLI_ID in runners:
             if trace:
                 log(trace, "")
-                log_timing(trace, "回合结束", f"{format_runner(2)}检查是否在同格最右侧之外，以决定下一轮是否最后行动")
-            next_turn_last = check_player2_skill(grid, rng, trace)
+                log_timing(trace, "回合结束", f"{format_runner(CHANGLI_ID)}检查是否在同格最右侧之外，以决定下一轮是否最后行动")
+            next_turn_last = check_player2_skill(
+                grid,
+                rng,
+                disabled_skills=config.disabled_skills,
+                skill_state=skill_state,
+                trace=trace,
+            )
         else:
             next_turn_last = False
         player_order = next_round_action_order(
             runners=runners,
             rng=rng,
             include_npc=config.npc_enabled and round_number + 1 >= config.npc_start_round,
-            player2_last=next_turn_last and 2 in runners,
+            player2_last=next_turn_last and CHANGLI_ID in runners,
         )
 
         if cantarella_state == 2:
@@ -777,7 +840,7 @@ def initial_player_order(config: RaceConfig, grid: dict[int, Sequence[int]], rng
         rng.shuffle(order)
         return order
     if config.initial_order_mode == "start":
-        order = [runner for _, cell in sorted(grid.items()) for runner in cell]
+        order = [runner for _, cell in sorted(grid.items()) for runner in cell if runner != NPC_ID]
         validate_same_runners(config.runners, order, "initial start order")
         return order
     if config.initial_order_mode == "fixed":
@@ -789,108 +852,6 @@ def rank_scope(runners: Sequence[int], progress: dict[int, int], include_npc: bo
     if include_npc and NPC_ID in progress:
         return tuple(runners) + (NPC_ID,)
     return tuple(runners)
-
-
-def mark_sigrika_debuffs(
-    *,
-    runners: Sequence[int],
-    progress: dict[int, int],
-    grid: dict[int, Sequence[int]],
-    round_number: int = 2,
-    trace: bool | TraceLogger = False,
-) -> set[int]:
-    if SIGRIKA_ID not in runners:
-        return set()
-    if round_number == 1:
-        if trace:
-            log_timing(trace, "回合开始", f"{format_runner(SIGRIKA_ID)}第一轮不发动技能")
-            log_block(trace, f"{format_runner(SIGRIKA_ID)}技能不发动：", "原因：第一轮不发动")
-        return set()
-    ranking = current_rank(runners, progress, grid)
-    sigrika_index = ranking.index(SIGRIKA_ID)
-    targets = tuple(ranking[max(0, sigrika_index - 2) : sigrika_index])
-    if trace:
-        log_timing(trace, "回合开始", f"{format_runner(SIGRIKA_ID)}标记排名紧邻且高于自己的至多两名角色")
-        log_block(
-            trace,
-            f"{format_runner(SIGRIKA_ID)}技能判定：",
-            "NPC参与排名：否",
-            f"名次（前→后）：{format_runner_arrow_list(ranking)}",
-            f"标记目标：{format_cell(targets) if targets else '无'}",
-            "效果：被标记角色本轮移动总步数-1，最低为1步",
-        )
-    return set(targets)
-
-
-def apply_sigrika_debuff(
-    *,
-    player: int,
-    total_steps: int,
-    debuffed: set[int],
-    trace: bool | TraceLogger = False,
-) -> int:
-    if player not in debuffed:
-        return total_steps
-    adjusted_steps = max(1, total_steps - 1)
-    if trace:
-        log_timing(trace, "移动结算前", f"{format_runner(SIGRIKA_ID)}的减速标记对{format_runner(player)}生效")
-        log_block(
-            trace,
-            f"{format_runner(SIGRIKA_ID)}减速生效：",
-            f"原总步数：{total_steps}",
-            f"减速后总步数：{adjusted_steps}",
-        )
-    return adjusted_steps
-
-
-def check_denia_skill(
-    skill_state: RaceSkillState,
-    dice: int,
-    trace: bool | TraceLogger = False,
-) -> int:
-    if trace:
-        log_timing(trace, "骰子后", f"{format_runner(DENIA_ID)}检查本轮骰点是否与上一轮相同")
-    previous = skill_state.denia_last_dice
-    skill_state.denia_last_dice = dice
-    if previous is None:
-        if trace:
-            log_block(trace, f"{format_runner(DENIA_ID)}技能不判定：", "原因：没有上一轮骰点记录")
-        return 0
-    if previous == dice:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(DENIA_ID)}技能触发：",
-                f"上一轮骰点：{previous}",
-                f"本轮骰点：{dice}",
-                "效果：额外+2步",
-            )
-        return 2
-    if trace:
-        log_block(
-            trace,
-            f"{format_runner(DENIA_ID)}技能未触发：",
-            f"上一轮骰点：{previous}",
-            f"本轮骰点：{dice}",
-        )
-    return 0
-
-
-def check_hiyuki_bonus(skill_state: RaceSkillState, trace: bool | TraceLogger = False) -> int:
-    if trace:
-        log_timing(trace, "行动开始", f"{format_runner(HIYUKI_ID)}检查与NPC相遇后获得的额外步数")
-    if skill_state.hiyuki_bonus_steps <= 0:
-        if trace:
-            log_block(trace, f"{format_runner(HIYUKI_ID)}技能未生效：", "原因：尚未与NPC相遇")
-        return 0
-    if trace:
-        log_block(
-            trace,
-            f"{format_runner(HIYUKI_ID)}技能生效：",
-            f"当前层数：{skill_state.hiyuki_bonus_steps}",
-            f"效果：额外+{skill_state.hiyuki_bonus_steps}步",
-        )
-    return skill_state.hiyuki_bonus_steps
 
 
 def next_round_action_order(
@@ -918,12 +879,8 @@ def add_npc_to_start(grid: dict[int, list[int]]) -> None:
     keep_npc_rightmost(grid[0])
 
 
-def roll_dice(player: int, rng: random.Random) -> int:
-    if player == 4:
-        return rng.randint(2, 3)
-    if player == 10:
-        return 1 if rng.random() < 0.5 else 3
-    return rng.randint(1, 3)
+def format_round_dice(round_dice: dict[int, int], player_order: Sequence[int]) -> str:
+    return "；".join(f"{format_runner(player)}={round_dice[player]}" for player in player_order if player in round_dice)
 
 
 def move_single_runner(
@@ -935,19 +892,38 @@ def move_single_runner(
     total_steps: int,
     rng: random.Random,
     skill_state: RaceSkillState | None = None,
+    movement_state: RaceMovementState | None = None,
     trace: bool | TraceLogger = False,
 ) -> int:
     track_length = config.track_length
     current_progress = progress[player]
     current_pos = display_position(current_progress, track_length)
     grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
-    new_progress = move_progress(current_progress, total_steps, track_length)
-    if skill_state is not None and player == HIYUKI_ID and NPC_ID in progress:
+    aemeath_teleport = maybe_trigger_aemeath_teleport(
+        movers=[player],
+        progress=progress,
+        config=config,
+        start_progress=current_progress,
+        signed_steps=total_steps,
+        skill_state=skill_state,
+        trace=trace,
+    )
+    if aemeath_teleport is not None:
+        teleport_progress, remaining_steps, _ = aemeath_teleport
+        new_progress = move_progress_by_delta(teleport_progress, remaining_steps, track_length)
+    else:
+        new_progress = move_progress(current_progress, total_steps, track_length)
+    if skill_state is not None and skill_enabled(config, HIYUKI_ID) and player == HIYUKI_ID and NPC_ID in progress:
+        hiyuki_steps = (
+            max(0, AEMEATH_TRIGGER_CELL - current_progress)
+            if aemeath_teleport is not None
+            else total_steps
+        )
         record_hiyuki_npc_path_contact(
             movers=[player],
             progress=progress,
             track_length=track_length,
-            path=forward_path_positions(current_progress, total_steps, track_length),
+            path=forward_path_positions(current_progress, hiyuki_steps, track_length),
             skill_state=skill_state,
             trace=trace,
         )
@@ -960,6 +936,7 @@ def move_single_runner(
         config,
         active_player=player,
         skill_state=skill_state,
+        movement_state=movement_state,
         trace=trace,
     )
     return progress[player]
@@ -975,6 +952,7 @@ def move_runner_with_left_side(
     total_steps: int,
     rng: random.Random,
     skill_state: RaceSkillState | None = None,
+    movement_state: RaceMovementState | None = None,
     trace: bool | TraceLogger = False,
 ) -> int:
     track_length = config.track_length
@@ -984,27 +962,91 @@ def move_runner_with_left_side(
     left_runners = old_cell[:idx_in_cell]
     movers = left_runners + [player]
     grid[current_pos] = [runner for runner in old_cell if runner not in movers]
-    new_progress = move_progress(current_progress, total_steps, track_length)
-    if skill_state is not None and HIYUKI_ID in movers and NPC_ID in progress:
+    aemeath_teleport = maybe_trigger_aemeath_teleport(
+        movers=movers,
+        progress=progress,
+        config=config,
+        start_progress=current_progress,
+        signed_steps=total_steps,
+        skill_state=skill_state,
+        trace=trace,
+    )
+    if aemeath_teleport is not None:
+        teleport_progress, remaining_steps, signed_trigger_steps = aemeath_teleport
+        trigger_progress = move_progress_by_delta(current_progress, signed_trigger_steps, track_length)
+        aemeath_progress = (
+            move_progress_by_delta(teleport_progress, remaining_steps, track_length)
+            if player == AEMEATH_ID
+            else teleport_progress
+        )
+        rest_movers = [runner for runner in movers if runner != AEMEATH_ID]
+        if rest_movers:
+            new_progress = trigger_progress if player == AEMEATH_ID else move_progress(current_progress, total_steps, track_length)
+        else:
+            new_progress = aemeath_progress
+    else:
+        new_progress = move_progress(current_progress, total_steps, track_length)
+    if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
+        hiyuki_steps = (
+            max(0, AEMEATH_TRIGGER_CELL - current_progress)
+            if aemeath_teleport is not None
+            else total_steps
+        )
         record_hiyuki_npc_path_contact(
             movers=movers,
             progress=progress,
             track_length=track_length,
-            path=forward_path_positions(current_progress, total_steps, track_length),
+            path=forward_path_positions(current_progress, hiyuki_steps, track_length),
             skill_state=skill_state,
             trace=trace,
         )
-    add_group_to_position(
-        grid,
-        progress,
-        movers,
-        new_progress,
-        rng,
-        config,
-        active_player=player,
-        skill_state=skill_state,
-        trace=trace,
-    )
+    if aemeath_teleport is not None:
+        add_group_to_position(
+            grid,
+            progress,
+            [AEMEATH_ID],
+            aemeath_progress,
+            rng,
+            config,
+            active_player=AEMEATH_ID,
+            skill_state=skill_state,
+            movement_state=movement_state,
+            trace=trace,
+            apply_effects=player == AEMEATH_ID and remaining_steps != 0,
+        )
+        if rest_movers:
+            if trace and player == AEMEATH_ID:
+                log_block(
+                    trace,
+                    f"{format_runner(AEMEATH_ID)}同行者停留：",
+                    f"停留角色：{format_cell(rest_movers)}",
+                    f"停留位置：{format_position(display_position(new_progress, track_length))}",
+                )
+            add_group_to_position(
+                grid,
+                progress,
+                rest_movers,
+                new_progress,
+                rng,
+                config,
+                active_player=player,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+            )
+    else:
+        add_group_to_position(
+            grid,
+            progress,
+            movers,
+            new_progress,
+            rng,
+            config,
+            active_player=player,
+            skill_state=skill_state,
+            movement_state=movement_state,
+            trace=trace,
+        )
     return progress[player]
 
 
@@ -1020,6 +1062,7 @@ def move_cantarella(
     cantarella_group: list[int],
     trace: bool | TraceLogger,
     skill_state: RaceSkillState | None = None,
+    movement_state: RaceMovementState | None = None,
 ) -> tuple[int, int, list[int]]:
     track_length = config.track_length
     new_progress = progress[player]
@@ -1039,28 +1082,80 @@ def move_cantarella(
             movers = old_cell[:idx] + [player]
 
         grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
-        new_progress = move_progress(current_progress, 1, track_length)
+        aemeath_teleport = maybe_trigger_aemeath_teleport(
+            movers=movers,
+            progress=progress,
+            config=config,
+            start_progress=current_progress,
+            signed_steps=1,
+            skill_state=skill_state,
+            trace=trace,
+        )
+        if aemeath_teleport is not None:
+            teleport_progress, remaining_steps, _ = aemeath_teleport
+            aemeath_progress = (
+                move_progress_by_delta(teleport_progress, remaining_steps, track_length)
+                if player == AEMEATH_ID
+                else teleport_progress
+            )
+            rest_movers = [runner for runner in movers if runner != AEMEATH_ID]
+            new_progress = move_progress(current_progress, 1, track_length) if rest_movers else aemeath_progress
+        else:
+            new_progress = move_progress(current_progress, 1, track_length)
         new_pos = display_position(new_progress, track_length)
-        if skill_state is not None and HIYUKI_ID in movers and NPC_ID in progress:
+        if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
             record_hiyuki_npc_path_contact(
                 movers=movers,
                 progress=progress,
                 track_length=track_length,
-                path=forward_path_positions(current_progress, 1, track_length),
+                path=forward_path_positions(
+                    current_progress,
+                    max(0, AEMEATH_TRIGGER_CELL - current_progress) if aemeath_teleport is not None else 1,
+                    track_length,
+                ),
                 skill_state=skill_state,
                 trace=trace,
             )
-        add_group_to_position(
-            grid,
-            progress,
-            movers,
-            new_progress,
-            rng,
-            config,
-            active_player=player,
-            skill_state=skill_state,
-            trace=trace,
-        )
+        if aemeath_teleport is not None:
+            add_group_to_position(
+                grid,
+                progress,
+                [AEMEATH_ID],
+                aemeath_progress,
+                rng,
+                config,
+                active_player=AEMEATH_ID,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+                apply_effects=player == AEMEATH_ID and remaining_steps != 0,
+            )
+            if rest_movers:
+                add_group_to_position(
+                    grid,
+                    progress,
+                    rest_movers,
+                    new_progress,
+                    rng,
+                    config,
+                    active_player=player,
+                    skill_state=skill_state,
+                    movement_state=movement_state,
+                    trace=trace,
+                )
+        else:
+            add_group_to_position(
+                grid,
+                progress,
+                movers,
+                new_progress,
+                rng,
+                config,
+                active_player=player,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+            )
         new_progress = progress[player]
         new_pos = display_position(new_progress, track_length)
         if trace:
@@ -1091,10 +1186,21 @@ def add_group_to_position(
     *,
     active_player: int | None = None,
     skill_state: RaceSkillState | None = None,
+    movement_state: RaceMovementState | None = None,
     trace: bool | TraceLogger = False,
+    apply_effects: bool = True,
 ) -> None:
+    if not movers:
+        return
     track_length = config.track_length
     new_pos = display_position(new_progress, track_length)
+    for runner in movers:
+        record_movement(
+            movement_state,
+            [runner],
+            max(0, new_progress - progress[runner]),
+            active_player=active_player,
+        )
     for runner in movers:
         progress[runner] = new_progress
     if grid.get(new_pos):
@@ -1110,17 +1216,19 @@ def add_group_to_position(
             f"到达位置：{format_position(new_pos)}",
             f"格内顺序：{format_cell(grid[new_pos])}",
         )
-    apply_cell_effects(
-        grid,
-        progress,
-        movers,
-        new_pos,
-        rng,
-        config,
-        active_player=active_player,
-        skill_state=skill_state,
-        trace=trace,
-    )
+    if apply_effects:
+        apply_cell_effects(
+            grid,
+            progress,
+            movers,
+            new_pos,
+            rng,
+            config,
+            active_player=active_player,
+            skill_state=skill_state,
+            movement_state=movement_state,
+            trace=trace,
+        )
 
 
 def apply_cell_effects(
@@ -1133,6 +1241,7 @@ def apply_cell_effects(
     *,
     active_player: int | None = None,
     skill_state: RaceSkillState | None = None,
+    movement_state: RaceMovementState | None = None,
     trace: bool | TraceLogger = False,
 ) -> None:
     if trace and (pos in config.shuffle_cells or pos in config.forward_cells or pos in config.backward_cells):
@@ -1162,6 +1271,7 @@ def apply_cell_effects(
             config,
             active_player=active_player,
             skill_state=skill_state,
+            movement_state=movement_state,
             trace=trace,
         )
     elif pos in config.backward_cells:
@@ -1175,6 +1285,7 @@ def apply_cell_effects(
             config,
             active_player=active_player,
             skill_state=skill_state,
+            movement_state=movement_state,
             trace=trace,
         )
 
@@ -1190,25 +1301,61 @@ def move_group_due_to_cell_effect(
     *,
     active_player: int | None = None,
     skill_state: RaceSkillState | None = None,
+    movement_state: RaceMovementState | None = None,
     trace: bool | TraceLogger = False,
 ) -> None:
     active_movers = [runner for runner in movers if runner in grid.get(current_pos, [])]
     if not active_movers:
         return
-    delta = adjust_cell_effect_delta(active_player, delta, trace)
+    delta = adjust_cell_effect_delta(
+        active_player,
+        delta,
+        disabled_skills=config.disabled_skills,
+        skill_state=skill_state,
+        trace=trace,
+    )
     grid[current_pos] = [runner for runner in grid[current_pos] if runner not in active_movers]
     if not grid[current_pos]:
         grid.pop(current_pos, None)
 
     base_progress = progress[active_movers[-1]]
-    if active_movers == [NPC_ID]:
+    aemeath_teleport = None
+    if active_movers != [NPC_ID]:
+        aemeath_teleport = maybe_trigger_aemeath_teleport(
+            movers=active_movers,
+            progress=progress,
+            config=config,
+            start_progress=base_progress,
+            signed_steps=delta,
+            skill_state=skill_state,
+            trace=trace,
+        )
+    if aemeath_teleport is not None:
+        teleport_progress, remaining_steps, signed_trigger_steps = aemeath_teleport
+        trigger_progress = move_progress_by_delta(base_progress, signed_trigger_steps, config.track_length)
+        aemeath_progress = (
+            move_progress_by_delta(teleport_progress, remaining_steps, config.track_length)
+            if active_player == AEMEATH_ID
+            else teleport_progress
+        )
+        rest_movers = [runner for runner in active_movers if runner != AEMEATH_ID]
+        if rest_movers:
+            if active_player == AEMEATH_ID:
+                new_progress = trigger_progress
+            elif delta > 0:
+                new_progress = move_progress(base_progress, delta, config.track_length)
+            else:
+                new_progress = max(MIN_START_POSITION, base_progress + delta)
+        else:
+            new_progress = aemeath_progress
+    elif active_movers == [NPC_ID]:
         new_progress = (base_progress + delta) % config.track_length
     elif delta > 0:
         new_progress = move_progress(base_progress, delta, config.track_length)
     else:
         new_progress = max(MIN_START_POSITION, base_progress + delta)
     new_pos = display_position(new_progress, config.track_length)
-    if skill_state is not None and (
+    if skill_state is not None and skill_enabled(config, HIYUKI_ID) and (
         (HIYUKI_ID in active_movers and NPC_ID in progress)
         or (active_movers == [NPC_ID] and HIYUKI_ID in progress)
     ):
@@ -1218,12 +1365,44 @@ def move_group_due_to_cell_effect(
             track_length=config.track_length,
             path=cell_effect_path_positions(
                 start_progress=base_progress,
-                delta=delta,
+                delta=aemeath_teleport[2] if aemeath_teleport is not None else delta,
                 track_length=config.track_length,
                 wrap=active_movers == [NPC_ID],
             ),
             skill_state=skill_state,
             trace=trace,
+        )
+    if aemeath_teleport is not None:
+        add_group_to_position(
+            grid,
+            progress,
+            [AEMEATH_ID],
+            aemeath_progress,
+            rng,
+            config,
+            active_player=AEMEATH_ID,
+            skill_state=skill_state,
+            movement_state=movement_state,
+            trace=trace,
+            apply_effects=active_player == AEMEATH_ID and remaining_steps != 0,
+        )
+        active_movers = rest_movers
+        if not active_movers:
+            return
+        new_pos = display_position(new_progress, config.track_length)
+        if trace and active_player == AEMEATH_ID:
+            log_block(
+                trace,
+                f"{format_runner(AEMEATH_ID)}同行者停留：",
+                f"停留角色：{format_cell(active_movers)}",
+                f"停留位置：{format_position(new_pos)}",
+            )
+    for runner in active_movers:
+        record_movement(
+            movement_state,
+            [runner],
+            max(0, new_progress - progress[runner]),
+            active_player=active_player,
         )
     for runner in active_movers:
         progress[runner] = new_progress
@@ -1249,6 +1428,12 @@ def move_progress(current_progress: int, steps: int, track_length: int) -> int:
     return track_length if target >= track_length else target
 
 
+def move_progress_by_delta(current_progress: int, signed_steps: int, track_length: int) -> int:
+    if signed_steps >= 0:
+        return move_progress(current_progress, signed_steps, track_length)
+    return max(MIN_START_POSITION, current_progress + signed_steps)
+
+
 def move_npc(
     *,
     grid: dict[int, list[int]],
@@ -1257,48 +1442,113 @@ def move_npc(
     npc_progress: int,
     rng: random.Random,
     trace: bool | TraceLogger,
+    steps: int | None = None,
     skill_state: RaceSkillState | None = None,
+    movement_state: RaceMovementState | None = None,
 ) -> int:
     track_length = config.track_length
-    remove_runner_from_grid(grid, NPC_ID)
-    steps = rng.randint(1, 6)
-    new_progress = (npc_progress - steps) % track_length
-    new_pos = new_progress
-    destination_before = list(grid.get(new_pos, []))
-    if skill_state is not None and HIYUKI_ID in progress:
-        record_hiyuki_npc_path_contact(
-            movers=[NPC_ID],
+    steps = rng.randint(1, 6) if steps is None else steps
+    current_pos = npc_progress % track_length
+    current_cell = grid.get(current_pos, [])
+    if current_cell:
+        keep_npc_rightmost(current_cell)
+    if NPC_ID in current_cell:
+        npc_idx = current_cell.index(NPC_ID)
+        movers = current_cell[:npc_idx] + [NPC_ID]
+        grid[current_pos] = [runner for runner in current_cell if runner not in movers]
+        if not grid[current_pos]:
+            grid.pop(current_pos, None)
+    else:
+        remove_runner_from_grid(grid, NPC_ID)
+        movers = [NPC_ID]
+
+    path = [current_pos]
+    contact_cell: list[int] = []
+    final_movers = list(movers)
+    final_pos = current_pos
+    for step_index in range(steps):
+        new_progress = (npc_progress - 1) % track_length
+        new_pos = new_progress
+        destination_before = [runner for runner in grid.get(new_pos, []) if runner != NPC_ID]
+        contact_cell.extend(destination_before)
+        aemeath_teleport = maybe_trigger_aemeath_teleport(
+            movers=movers,
             progress=progress,
-            track_length=track_length,
-            path=npc_reverse_path_positions(npc_progress, steps, track_length),
+            config=config,
+            start_progress=npc_progress,
+            signed_steps=-1,
             skill_state=skill_state,
             trace=trace,
         )
-    contact_cell = [runner for runner in destination_before if runner != NPC_ID]
-    if grid.get(new_pos):
-        grid[new_pos] = grid[new_pos] + [NPC_ID]
-    else:
-        grid[new_pos] = [NPC_ID]
-    progress[NPC_ID] = new_progress
-    keep_npc_rightmost(grid[new_pos])
+        if aemeath_teleport is not None:
+            teleport_progress, _, _ = aemeath_teleport
+            movers = [runner for runner in movers if runner != AEMEATH_ID]
+            add_group_to_position(
+                grid,
+                progress,
+                [AEMEATH_ID],
+                teleport_progress,
+                rng,
+                config,
+                active_player=AEMEATH_ID,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+                apply_effects=False,
+            )
+        if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in progress:
+            record_hiyuki_npc_path_contact(
+                movers=[NPC_ID],
+                progress=progress,
+                track_length=track_length,
+                path=(new_pos,),
+                skill_state=skill_state,
+                trace=trace,
+            )
+
+        for runner in movers:
+            progress[runner] = new_progress
+        moving_without_npc = [runner for runner in movers if runner != NPC_ID]
+        if grid.get(new_pos):
+            grid[new_pos] = moving_without_npc + [runner for runner in grid[new_pos] if runner != NPC_ID] + [NPC_ID]
+        else:
+            grid[new_pos] = moving_without_npc + [NPC_ID]
+        keep_npc_rightmost(grid[new_pos])
+
+        npc_progress = new_progress
+        final_pos = new_pos
+        final_movers = list(movers)
+        path.append(new_pos)
+
+        if step_index < steps - 1:
+            current_cell = grid[new_pos]
+            keep_npc_rightmost(current_cell)
+            npc_idx = current_cell.index(NPC_ID)
+            movers = current_cell[:npc_idx] + [NPC_ID]
+            grid[new_pos] = [runner for runner in current_cell if runner not in movers]
+            if not grid[new_pos]:
+                grid.pop(new_pos, None)
+
     if trace:
         log_block(
             trace,
             "NPC行动：",
             f"后退步数：{steps}",
-            f"路径：{format_position(npc_progress % track_length)} -> {format_position(new_pos)}",
+            f"路径：{' -> '.join(format_position(pos) for pos in path)}",
             f"接触角色：{format_cell(contact_cell)}",
-            f"格内顺序：{format_cell(grid[new_pos])}",
+            f"最终移动队列：{format_cell(final_movers)}",
+            f"格内顺序：{format_cell(grid[final_pos])}",
         )
     apply_cell_effects(
         grid,
         progress,
-        [NPC_ID],
-        new_pos,
+        final_movers,
+        final_pos,
         rng,
         config,
         active_player=NPC_ID,
         skill_state=skill_state,
+        movement_state=movement_state,
         trace=trace,
     )
     return progress[NPC_ID]
@@ -1316,14 +1566,15 @@ def settle_npc_end_of_round(
     npc_pos = npc_progress % track_length
     last_runner = current_rank(runners, progress, grid)[-1]
     last_pos = display_position(progress[last_runner], track_length)
-    if npc_pos == last_pos:
+    if npc_pos >= last_pos:
         progress[NPC_ID] = npc_progress
         if trace:
             log_block(
                 trace,
                 "NPC停留：",
-                f"原因：与最后一名{format_runner(last_runner)}同格",
-                f"位置：{format_position(npc_pos)}",
+                f"原因：NPC位置不小于最后一名{format_runner(last_runner)}的位置",
+                f"NPC位置：{format_position(npc_pos)}",
+                f"最后一名位置：{format_position(last_pos)}",
             )
         return npc_progress
     remove_runner_from_grid(grid, NPC_ID)
@@ -1337,6 +1588,7 @@ def settle_npc_end_of_round(
         log_block(
             trace,
             "NPC回到起始格：",
+            "原因：NPC位置小于最后一名位置",
             f"NPC位置：{format_position(npc_pos)}",
             f"最后一名：{format_runner(last_runner)}",
             f"最后一名位置：{format_position(last_pos)}",
@@ -1372,11 +1624,15 @@ def shuffle_without_npc(cell: Sequence[int], rng: random.Random) -> list[int]:
 def adjust_cell_effect_delta(
     active_player: int | None,
     delta: int,
+    *,
+    disabled_skills: frozenset[int] = frozenset(),
+    skill_state: RaceSkillState | None = None,
     trace: bool | TraceLogger = False,
 ) -> int:
-    if active_player != LUUK_HERSSEN_ID:
+    if active_player != LUUK_HERSSEN_ID or not skill_enabled_from_set(disabled_skills, LUUK_HERSSEN_ID):
         return delta
     adjusted = 4 if delta > 0 else -2
+    record_skill_success(skill_state, LUUK_HERSSEN_ID)
     if trace:
         log_block(
             trace,
@@ -1393,6 +1649,82 @@ def forward_path_positions(current_progress: int, steps: int, track_length: int)
     final_progress = min(current_progress + steps, track_length)
     for progress_value in range(current_progress + 1, final_progress + 1):
         yield display_position(progress_value, track_length)
+
+
+def maybe_trigger_aemeath_teleport(
+    *,
+    movers: Sequence[int],
+    progress: dict[int, int],
+    config: RaceConfig,
+    start_progress: int,
+    signed_steps: int,
+    skill_state: RaceSkillState | None,
+    trace: bool | TraceLogger = False,
+) -> tuple[int, int, int] | None:
+    if (
+        AEMEATH_ID not in movers
+        or skill_state is None
+        or not skill_state.aemeath_available
+        or not skill_enabled(config, AEMEATH_ID)
+        or signed_steps == 0
+    ):
+        return None
+    trigger_offset = aemeath_trigger_offset(start_progress, signed_steps, config.track_length)
+    if trigger_offset is None:
+        return None
+    target_progress = nearest_runner_progress_ahead(
+        progress=progress,
+        from_progress=AEMEATH_TRIGGER_CELL,
+        track_length=config.track_length,
+        excluded=set(movers) | {NPC_ID},
+    )
+    if trace:
+        log_timing(trace, "移动路径经过第17格", f"{format_runner(AEMEATH_ID)}检查前方是否存在其他非NPC角色")
+    if target_progress is None:
+        if trace:
+            log_block(trace, f"{format_runner(AEMEATH_ID)}技能未触发：", "原因：第17格前方没有其他非NPC角色")
+        return None
+    skill_state.aemeath_available = False
+    record_skill_success(skill_state, AEMEATH_ID)
+    signed_trigger_steps = trigger_offset if signed_steps > 0 else -trigger_offset
+    remaining_steps = signed_steps - signed_trigger_steps
+    if trace:
+        log_block(
+            trace,
+            f"{format_runner(AEMEATH_ID)}技能触发：",
+            f"经过格：{format_position(AEMEATH_TRIGGER_CELL)}",
+            f"传送目标：{format_position(display_position(target_progress, config.track_length))}",
+            f"剩余步数：{remaining_steps}",
+            "效果：仅爱弥斯传送；同行队列按后续结算规则处理",
+        )
+    return target_progress, remaining_steps, signed_trigger_steps
+
+
+def aemeath_trigger_offset(start_progress: int, signed_steps: int, track_length: int) -> int | None:
+    if signed_steps > 0:
+        final_progress = min(start_progress + signed_steps, track_length)
+        if start_progress < AEMEATH_TRIGGER_CELL <= final_progress:
+            return AEMEATH_TRIGGER_CELL - start_progress
+        return None
+    final_progress = max(MIN_START_POSITION, start_progress + signed_steps)
+    if start_progress > AEMEATH_TRIGGER_CELL >= final_progress:
+        return start_progress - AEMEATH_TRIGGER_CELL
+    return None
+
+
+def nearest_runner_progress_ahead(
+    *,
+    progress: dict[int, int],
+    from_progress: int,
+    track_length: int,
+    excluded: set[int],
+) -> int | None:
+    candidates = [
+        runner_progress
+        for runner, runner_progress in progress.items()
+        if runner > 0 and runner not in excluded and from_progress < runner_progress < track_length
+    ]
+    return min(candidates) if candidates else None
 
 
 def cell_effect_path_positions(
@@ -1445,7 +1777,21 @@ def record_hiyuki_npc_path_contact(
         return
     if not any(pos == target_pos for pos in path):
         return
+    if skill_state.hiyuki_bonus_steps > 0:
+        if trace:
+            if contact_kind == "hiyuki_to_npc":
+                reason = f"{format_runner(HIYUKI_ID)}移动路径经过NPC所在{format_position(target_pos)}"
+            else:
+                reason = f"NPC移动路径经过{format_runner(HIYUKI_ID)}所在{format_position(target_pos)}"
+            log_block(
+                trace,
+                f"{format_runner(HIYUKI_ID)}技能不重复叠加：",
+                f"原因：{reason}",
+                "当前状态：已生效",
+            )
+        return
     skill_state.hiyuki_bonus_steps += 1
+    record_skill_success(skill_state, HIYUKI_ID)
     if trace:
         if contact_kind == "hiyuki_to_npc":
             reason = f"{format_runner(HIYUKI_ID)}移动路径经过NPC所在{format_position(target_pos)}"
@@ -1453,9 +1799,9 @@ def record_hiyuki_npc_path_contact(
             reason = f"NPC移动路径经过{format_runner(HIYUKI_ID)}所在{format_position(target_pos)}"
         log_block(
             trace,
-            f"{format_runner(HIYUKI_ID)}技能叠加：",
+            f"{format_runner(HIYUKI_ID)}技能触发：",
             f"原因：{reason}",
-            f"当前额外步数：+{skill_state.hiyuki_bonus_steps}",
+            "效果：之后移动额外+1步",
         )
 
 
@@ -1475,13 +1821,22 @@ def record_hiyuki_npc_destination_contact_legacy(
         reason = f"NPC落到{format_runner(HIYUKI_ID)}所在格"
     else:
         return
+    if skill_state.hiyuki_bonus_steps > 0:
+        if trace:
+            log_block(
+                trace,
+                f"{format_runner(HIYUKI_ID)}技能不重复叠加：",
+                f"原因：{reason}",
+                "当前状态：已生效",
+            )
+        return
     skill_state.hiyuki_bonus_steps += 1
     if trace:
         log_block(
             trace,
-            f"{format_runner(HIYUKI_ID)}技能叠加：",
+            f"{format_runner(HIYUKI_ID)}技能触发：",
             f"原因：{reason}",
-            f"当前额外步数：+{skill_state.hiyuki_bonus_steps}",
+            "效果：之后移动额外+1步",
         )
 
 
@@ -1492,33 +1847,68 @@ def maybe_trigger_player1_skill_after_action(
     actor: int,
     track_length: int,
     rng: random.Random,
+    disabled_skills: frozenset[int] = frozenset(),
+    skill_state: RaceSkillState | None = None,
     trace: bool | TraceLogger = False,
 ) -> None:
-    if actor in (1, NPC_ID) or 1 not in progress:
+    if actor in (JINHSI_ID, NPC_ID) or JINHSI_ID not in progress or not skill_enabled_from_set(disabled_skills, JINHSI_ID):
+        return
+    if actor not in progress:
         return
 
+    pos = display_position(progress[JINHSI_ID], track_length)
+    actor_pos = display_position(progress[actor], track_length)
     if trace:
-        log_timing(trace, "行动结束", f"{format_runner(1)}检查自己所在格左侧是否存在角色")
-    pos = display_position(progress[1], track_length)
-    cell = grid.get(pos)
-    if not cell or 1 not in cell:
+        log_timing(
+            trace,
+            "行动结束",
+            f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}终点是否与自己同格",
+        )
+    if actor_pos != pos:
         if trace:
             log_block(
                 trace,
-                f"{format_runner(1)}技能不判定：",
+                f"{format_runner(JINHSI_ID)}技能不判定：",
+                f"行动角色：{format_runner(actor)}",
+                f"行动角色终点：{format_position(actor_pos)}",
+                f"{format_runner(JINHSI_ID)}位置：{format_position(pos)}",
+                "原因：行动角色终点未与自己同格",
+            )
+        return
+
+    if trace:
+        log_timing(trace, "行动结束", f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}是否位于自己左侧")
+    cell = grid.get(pos)
+    if not cell or JINHSI_ID not in cell:
+        if trace:
+            log_block(
+                trace,
+                f"{format_runner(JINHSI_ID)}技能不判定：",
                 f"位置：{format_position(pos)}",
-                f"原因：{format_runner(1)}不在该格",
+                f"原因：{format_runner(JINHSI_ID)}不在该格",
             )
         return
 
     keep_npc_rightmost(cell)
-    one_idx = cell.index(1)
+    one_idx = cell.index(JINHSI_ID)
+    if actor not in cell or cell.index(actor) >= one_idx:
+        if trace:
+            log_block(
+                trace,
+                f"{format_runner(JINHSI_ID)}技能不判定：",
+                f"行动角色：{format_runner(actor)}",
+                f"位置：{format_position(pos)}",
+                f"原因：行动角色不在{format_runner(JINHSI_ID)}左侧",
+                f"格内顺序：{format_cell(cell)}",
+            )
+        return
+
     left_runners = [runner for runner in cell[:one_idx] if runner != NPC_ID]
     if not left_runners:
         if trace:
             log_block(
                 trace,
-                f"{format_runner(1)}技能不判定：",
+                f"{format_runner(JINHSI_ID)}技能不判定：",
                 f"位置：{format_position(pos)}",
                 f"原因：左侧没有角色",
                 f"格内顺序：{format_cell(cell)}",
@@ -1528,17 +1918,18 @@ def maybe_trigger_player1_skill_after_action(
     if trace:
         log_block(
             trace,
-            f"{format_runner(1)}技能进入概率判定：",
+            f"{format_runner(JINHSI_ID)}技能进入概率判定：",
             f"左侧角色：{format_cell(left_runners)}",
             f"格内顺序：{format_cell(cell)}",
         )
     if rng.random() <= 0.4:
-        cell[:] = [1] + [runner for runner in cell if runner != 1]
+        cell[:] = [JINHSI_ID] + [runner for runner in cell if runner != JINHSI_ID]
         keep_npc_rightmost(cell)
+        record_skill_success(skill_state, JINHSI_ID)
         if trace:
             log_block(
                 trace,
-                f"{format_runner(1)}技能触发：",
+                f"{format_runner(JINHSI_ID)}技能触发：",
                 f"原左侧角色：{format_cell(left_runners)}",
                 f"格内顺序：{format_cell(cell)}",
             )
@@ -1546,7 +1937,7 @@ def maybe_trigger_player1_skill_after_action(
         if trace:
             log_block(
                 trace,
-                f"{format_runner(1)}技能未触发：",
+                f"{format_runner(JINHSI_ID)}技能未触发：",
                 "原因：概率判定失败",
                 f"格内顺序：{format_cell(cell)}",
             )
@@ -1555,25 +1946,30 @@ def maybe_trigger_player1_skill_after_action(
 def check_player2_skill(
     grid: dict[int, Sequence[int]],
     rng: random.Random,
+    disabled_skills: frozenset[int] = frozenset(),
+    skill_state: RaceSkillState | None = None,
     trace: bool | TraceLogger = False,
 ) -> bool:
+    if not skill_enabled_from_set(disabled_skills, CHANGLI_ID):
+        return False
     for cell in grid.values():
-        if 2 in cell and cell.index(2) < len(cell) - 1:
+        if CHANGLI_ID in cell and cell.index(CHANGLI_ID) < len(cell) - 1:
             if trace:
                 log_block(
                     trace,
-                    f"{format_runner(2)}技能进入概率判定：",
+                    f"{format_runner(CHANGLI_ID)}技能进入概率判定：",
                     f"格内顺序：{format_cell(cell)}",
                 )
             if rng.random() <= 0.65:
+                record_skill_success(skill_state, CHANGLI_ID)
                 if trace:
-                    log_block(trace, f"{format_runner(2)}技能触发：", "效果：下一轮固定最后行动")
+                    log_block(trace, f"{format_runner(CHANGLI_ID)}技能触发：", "效果：下一轮固定最后行动")
                 return True
             if trace:
-                log_block(trace, f"{format_runner(2)}技能未触发：", "原因：概率判定失败")
+                log_block(trace, f"{format_runner(CHANGLI_ID)}技能未触发：", "原因：概率判定失败")
             return False
     if trace:
-        log_block(trace, f"{format_runner(2)}技能不判定：", "原因：当前不在同格最右侧之外")
+        log_block(trace, f"{format_runner(CHANGLI_ID)}技能不判定：", "原因：当前不在同格最右侧之外")
     return False
 
 
@@ -1618,6 +2014,80 @@ def run_monte_carlo(
     return acc.to_summary(config)
 
 
+def run_skill_ablation(
+    config: RaceConfig,
+    iterations: int,
+    *,
+    targets: Sequence[int] | None = None,
+    seed: int | None = None,
+    workers: int = 1,
+) -> SkillAblationSummary:
+    evaluated = resolve_skill_ablation_runners(config.runners, targets)
+
+    total_start = time.perf_counter()
+    base_start = time.perf_counter()
+    base_summary = with_elapsed(
+        run_monte_carlo(config, iterations, seed=seed, workers=workers),
+        time.perf_counter() - base_start,
+    )
+    base_rows = {row.runner: row for row in base_summary.rows}
+
+    seed_rng = random.Random(seed)
+    rows: list[SkillAblationRow] = []
+    for runner in evaluated:
+        disabled_seed = seed_rng.randrange(1, 2**63) if seed is not None else None
+        disabled_config = replace(
+            config,
+            disabled_skills=frozenset(set(config.disabled_skills) | {runner}),
+        )
+        disabled_summary = run_monte_carlo(disabled_config, iterations, seed=disabled_seed, workers=workers)
+        disabled_rows = {row.runner: row for row in disabled_summary.rows}
+        enabled_row = base_rows[runner]
+        disabled_row = disabled_rows[runner]
+        rows.append(
+            SkillAblationRow(
+                runner=runner,
+                name=enabled_row.name,
+                enabled_win_rate=enabled_row.win_rate,
+                disabled_win_rate=disabled_row.win_rate,
+                net_win_rate=enabled_row.win_rate - disabled_row.win_rate,
+                skill_average_success_count=enabled_row.skill_average_success_count,
+                skill_marginal_win_rate=enabled_row.skill_marginal_win_rate,
+                success_distribution=enabled_row.skill_success_distribution,
+            )
+        )
+
+    return SkillAblationSummary(
+        iterations=iterations,
+        total_simulated_races=iterations * (len(evaluated) + 1),
+        base_summary=base_summary,
+        rows=tuple(rows),
+        elapsed_seconds=time.perf_counter() - total_start,
+    )
+
+
+def resolve_skill_ablation_runners(
+    selected_runners: Sequence[int],
+    requested_runners: Sequence[int] | None,
+) -> tuple[int, ...]:
+    selected = set(selected_runners)
+    if requested_runners is None:
+        runners = tuple(runner for runner in selected_runners if runner in SKILL_RUNNERS)
+    else:
+        runners = tuple(requested_runners)
+        if len(set(runners)) != len(runners):
+            raise ValueError("skill ablation runners contain duplicates")
+        missing = set(runners) - selected
+        if missing:
+            raise ValueError(f"skill ablation runners are not selected: {format_runner_list(sorted(missing))}")
+    without_skills = [runner for runner in runners if runner not in SKILL_RUNNERS]
+    if without_skills:
+        raise ValueError(f"runners do not have implemented skill ablation: {format_runner_list(without_skills)}")
+    if not runners:
+        raise ValueError("no selected runners have implemented skills to ablate")
+    return runners
+
+
 def simulate_chunk_from_tuple(args: tuple[RaceConfig, int, int | None]) -> MonteCarloAccumulator:
     config, iterations, seed = args
     return simulate_chunk(config, iterations, seed)
@@ -1653,9 +2123,17 @@ def parse_runner(token: str) -> int:
     return runner
 
 
-def parse_runner_tokens(tokens: Sequence[str] | None) -> tuple[int, ...] | None:
+def parse_runner_tokens(
+    tokens: Sequence[str] | None,
+    rng: random.Random | None = None,
+) -> tuple[int, ...] | None:
     if not tokens:
         return None
+    random_count = parse_random_runner_count(tokens)
+    if random_count is not None:
+        selection_rng = rng or random.Random()
+        pool = sorted(runner for runner in RUNNER_NAMES if runner > 0)
+        return tuple(sorted(selection_rng.sample(pool, random_count)))
     runners: list[int] = []
     for token in tokens:
         for part in token.split(","):
@@ -1664,6 +2142,32 @@ def parse_runner_tokens(tokens: Sequence[str] | None) -> tuple[int, ...] | None:
     if len(set(runners)) != len(runners):
         raise ValueError("selected runners contain duplicates")
     return tuple(runners)
+
+
+def parse_random_runner_count(tokens: Sequence[str]) -> int | None:
+    parts = [part.strip() for token in tokens for part in token.split(",") if part.strip()]
+    if not parts:
+        return None
+    first = parts[0]
+    normalized = first.lower()
+    if normalized in RANDOM_RUNNER_ALIASES:
+        count = 6
+    elif ":" in normalized or "=" in normalized:
+        separator = ":" if ":" in normalized else "="
+        prefix, count_text = normalized.split(separator, 1)
+        if prefix not in RANDOM_RUNNER_ALIASES:
+            return None
+        if not count_text.isdigit():
+            raise ValueError(f"invalid random runner count: {first}")
+        count = int(count_text)
+    else:
+        return None
+    if len(parts) != 1:
+        raise ValueError("random runner selection cannot be mixed with explicit runners")
+    pool_size = sum(1 for runner in RUNNER_NAMES if runner > 0)
+    if count < 1 or count > pool_size:
+        raise ValueError(f"random runner count must be 1..{pool_size}")
+    return count
 
 
 def parse_start_spec(spec: str) -> dict[int, tuple[int, ...]]:
@@ -1705,59 +2209,55 @@ def parse_start_layout(spec: str) -> tuple[dict[int, tuple[int, ...]], int | Non
 
 
 def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
-    runners = parse_runner_tokens(args.runners)
+    runners = parse_runner_tokens(args.runners, rng=random.Random(args.seed))
     season = args.season
     rules = season_rules(season)
-    if args.start:
-        track_length = args.track_length or DEFAULT_LAP_LENGTH
-        if args.track_length is None:
-            track_length = int(rules["track_length"])
-        start_cells, random_start_position = parse_start_layout(args.start)
-        if random_start_position is not None:
-            validate_start_position(random_start_position, track_length)
-            if runners is None:
-                runners = preset_config(args.preset).runners
-            grid = empty_grid(track_length)
-        else:
-            if runners is None:
-                runners = tuple(runner for _, cell in sorted(start_cells.items()) for runner in cell)
-            grid = make_start_grid(track_length, start_cells)
-            validate_fixed_start(runners, grid)
-        initial_order_mode = default_initial_order_mode(grid, random_start_position)
-        fixed_order: tuple[int, ...] = ()
-        if args.initial_order:
-            if args.initial_order == "random":
-                initial_order_mode = "random"
-            elif args.initial_order == "start":
-                initial_order_mode = "start"
-            else:
-                fixed_order = parse_runner_tokens([args.initial_order]) or ()
-                validate_same_runners(runners, fixed_order, "fixed initial order")
-                initial_order_mode = "fixed"
-        return RaceConfig(
-            runners=runners,
-            track_length=track_length,
-            start_grid=grid,
-            season=season,
-            forward_cells=rules["forward_cells"],
-            backward_cells=rules["backward_cells"],
-            shuffle_cells=rules["shuffle_cells"],
-            npc_enabled=bool(rules["npc_enabled"]),
-            random_start_stack=random_start_position is not None,
-            random_start_position=random_start_position or 0,
-            initial_order_mode=initial_order_mode,
-            fixed_initial_order=fixed_order,
-            name="custom",
-        )
+    if not args.start:
+        raise ValueError("--start is required; pass a custom start grid such as '1:*' or '-3:2;-2:1,4;0:5'")
 
-    config = preset_config(args.preset, runners)
-    config = apply_season_rules(config, season, args.track_length)
-    return config
+    track_length = args.track_length or int(rules["track_length"])
+    start_cells, random_start_position = parse_start_layout(args.start)
+    if random_start_position is not None:
+        validate_start_position(random_start_position, track_length)
+        if runners is None:
+            raise ValueError("--runners is required when --start uses '*'")
+        grid = empty_grid(track_length)
+    else:
+        if runners is None:
+            runners = tuple(runner for _, cell in sorted(start_cells.items()) for runner in cell)
+        grid = make_start_grid(track_length, start_cells)
+        validate_fixed_start(runners, grid)
+    initial_order_mode = default_initial_order_mode(grid, random_start_position)
+    fixed_order: tuple[int, ...] = ()
+    if args.initial_order:
+        if args.initial_order == "random":
+            initial_order_mode = "random"
+        elif args.initial_order == "start":
+            initial_order_mode = "start"
+        else:
+            fixed_order = parse_runner_tokens([args.initial_order]) or ()
+            validate_same_runners(runners, fixed_order, "fixed initial order")
+            initial_order_mode = "fixed"
+    return RaceConfig(
+        runners=runners,
+        track_length=track_length,
+        start_grid=grid,
+        season=season,
+        forward_cells=rules["forward_cells"],
+        backward_cells=rules["backward_cells"],
+        shuffle_cells=rules["shuffle_cells"],
+        npc_enabled=bool(rules["npc_enabled"]),
+        random_start_stack=random_start_position is not None,
+        random_start_position=random_start_position or 0,
+        initial_order_mode=initial_order_mode,
+        fixed_initial_order=fixed_order,
+        name="自定义",
+    )
 
 
 def default_initial_order_mode(grid: dict[int, Sequence[int]], random_start_position: int | None) -> str:
     nonempty_positions = [pos for pos, cell in grid.items() if cell]
-    if random_start_position == 0:
+    if random_start_position is not None:
         return "start"
     if nonempty_positions == [0]:
         return "start"
@@ -1781,6 +2281,7 @@ def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
             "npc_enabled": summary.config.npc_enabled,
             "random_start_stack": summary.config.random_start_stack,
             "random_start_position": summary.config.random_start_position,
+            "disabled_skills": sorted(summary.config.disabled_skills),
         },
         "best": {
             "runner": summary.best.runner,
@@ -1800,9 +2301,55 @@ def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
                 "rank_variance": row.rank_variance,
                 "winner_gap_per_race": row.winner_gap_per_race,
                 "average_winning_margin": row.average_winning_margin,
+                "lazy_win_rate": row.lazy_win_rate,
+                "winner_carried_steps": row.winner_carried_steps,
+                "winner_total_steps": row.winner_total_steps,
+                "skill_average_success_count": row.skill_average_success_count,
+                "skill_marginal_win_rate": row.skill_marginal_win_rate,
             }
             for row in summary.rows
         ],
+    }
+
+
+def skill_ablation_to_dict(
+    summary: SkillAblationSummary,
+    *,
+    include_detail: bool = False,
+) -> dict[str, object]:
+    rows = []
+    for row in sorted(summary.rows, key=lambda item: item.net_win_rate, reverse=True):
+        row_data: dict[str, object] = {
+            "runner": row.runner,
+            "name": row.name,
+            "enabled_win_rate": row.enabled_win_rate,
+            "disabled_win_rate": row.disabled_win_rate,
+            "net_win_rate": row.net_win_rate,
+            "skill_average_success_count": row.skill_average_success_count,
+            "skill_marginal_win_rate": row.skill_marginal_win_rate,
+        }
+        if include_detail:
+            row_data["success_distribution"] = [
+                {
+                    "success_count": bucket.success_count,
+                    "races": bucket.races,
+                    "wins": bucket.wins,
+                    "win_rate": bucket.win_rate,
+                }
+                for bucket in row.success_distribution
+            ]
+        rows.append(row_data)
+    return {
+        "iterations_per_scenario": summary.iterations,
+        "scenario_count": len(summary.rows) + 1,
+        "total_simulated_races": summary.total_simulated_races,
+        "elapsed_seconds": summary.elapsed_seconds,
+        "races_per_second": (
+            summary.total_simulated_races / summary.elapsed_seconds
+            if summary.elapsed_seconds and summary.elapsed_seconds > 0
+            else None
+        ),
+        "rows": rows,
     }
 
 
@@ -1811,7 +2358,7 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
     if sort_by_win_rate:
         rows.sort(key=lambda row: (row.win_rate, -row.average_rank), reverse=True)
 
-    headers = ("角色", "夺冠率", "前三率", "平均名次", "名次方差", "场均领先", "胜时领先")
+    headers = ("角色", "夺冠率", "前三率", "平均名次", "名次方差", "场均领先", "胜时领先", "躺赢率")
     table_rows = [
         (
             format_runner(row.runner),
@@ -1821,15 +2368,16 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
             f"{row.rank_variance:.3f}",
             f"{row.winner_gap_per_race:.3f}",
             f"{row.average_winning_margin:.3f}",
+            f"{row.lazy_win_rate:.2%}",
         )
         for row in rows
     ]
     columns = [headers, *table_rows]
     widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
-    aligns = ("left", "right", "right", "right", "right", "right", "right")
+    aligns = ("left", "right", "right", "right", "right", "right", "right", "right")
 
     lines = [
-        f"赛制：{format_config_name(summary.config.name)}",
+        f"赛制：{summary.config.name}",
         f"赛季：第{summary.config.season}季",
         f"模拟次数：{summary.iterations:,}",
         f"赛道长度：{summary.config.track_length}格",
@@ -1848,6 +2396,77 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
         ]
     )
     return "\n".join(lines)
+
+
+def format_skill_ablation_summary(summary: SkillAblationSummary, *, detail: bool = False) -> str:
+    rows = sorted(summary.rows, key=lambda row: row.net_win_rate, reverse=True)
+    headers = ("角色", "开启胜率", "关闭胜率", "净胜率", "平均成功次数", "单次边际胜率")
+    table_rows = [
+        (
+            format_runner(row.runner),
+            f"{row.enabled_win_rate:.2%}",
+            f"{row.disabled_win_rate:.2%}",
+            f"{row.net_win_rate:+.2%}",
+            f"{row.skill_average_success_count:.3f}",
+            format_optional_signed_percent(row.skill_marginal_win_rate),
+        )
+        for row in rows
+    ]
+    columns = [headers, *table_rows]
+    widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
+    aligns = ("left", "right", "right", "right", "right", "right")
+    lines = [
+        "技能消融统计：",
+        f"每组模拟：{summary.iterations:,} 局",
+        f"消融组数：{len(summary.rows)} 个角色 + 1 个技能全开基准",
+        f"总模拟局数：{summary.total_simulated_races:,}",
+        f"总用时：{format_elapsed(summary.elapsed_seconds)}",
+        f"总速度：{format_rate(skill_ablation_races_per_second(summary))}",
+        "",
+        format_table_row(headers, widths, aligns),
+        format_table_separator(widths),
+    ]
+    lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
+    if detail:
+        lines.extend(format_skill_ablation_detail(rows))
+    return "\n".join(lines)
+
+
+def format_skill_ablation_detail(rows: Sequence[SkillAblationRow]) -> list[str]:
+    lines = ["", "详细统计（技能全开基准局，按成功次数分布）："]
+    for row in rows:
+        lines.append(f"{format_runner(row.runner)}：{format_success_distribution(row.success_distribution)}")
+    return lines
+
+
+def format_success_distribution(distribution: Sequence[SkillSuccessBucket]) -> str:
+    grouped: dict[str, list[int]] = {
+        "0次": [0, 0],
+        "1次": [0, 0],
+        "2次": [0, 0],
+        "3次及以上": [0, 0],
+    }
+    for bucket in distribution:
+        label = "3次及以上" if bucket.success_count >= 3 else f"{bucket.success_count}次"
+        grouped[label][0] += bucket.races
+        grouped[label][1] += bucket.wins
+    parts = []
+    for label, (races, wins) in grouped.items():
+        if races:
+            parts.append(f"{label} {races:,}局/{wins / races:.2%}")
+    return "；".join(parts) if parts else "无数据"
+
+
+def format_optional_signed_percent(value: float | None) -> str:
+    if value is None:
+        return "无数据"
+    return f"{value:+.2%}"
+
+
+def skill_ablation_races_per_second(summary: SkillAblationSummary) -> float | None:
+    if summary.elapsed_seconds is None or summary.elapsed_seconds <= 0:
+        return None
+    return summary.total_simulated_races / summary.elapsed_seconds
 
 
 def with_elapsed(summary: SimulationSummary, elapsed_seconds: float) -> SimulationSummary:
@@ -1877,10 +2496,6 @@ def format_rate(rate: float | None) -> str:
     if rate is None:
         return "未统计"
     return f"{rate:,.0f} 局/秒"
-
-
-def format_config_name(name: str) -> str:
-    return CONFIG_NAME_LABELS.get(name, name)
 
 
 def format_table_row(cells: Sequence[str], widths: Sequence[int], aligns: Sequence[str]) -> str:
@@ -2004,8 +2619,11 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-n", "--iterations", type=int, default=100_000, help="number of races to simulate")
     parser.add_argument("--season", type=int, choices=[1, 2], default=1, help="season ruleset")
-    parser.add_argument("--preset", type=int, choices=[1, 2, 3, 4, 5], default=4, help="built-in track preset")
-    parser.add_argument("--runners", nargs="+", help="runner ids/names, e.g. --runners 3 4 8 10")
+    parser.add_argument(
+        "--runners",
+        nargs="+",
+        help="runner ids/names, e.g. --runners 3 4 8 10; use 'random' or 'random:6' to sample runners",
+    )
     parser.add_argument("--track-length", "--lap-length", dest="track_length", type=int, help="override lap length")
     parser.add_argument(
         "--start",
@@ -2019,10 +2637,21 @@ def make_parser() -> argparse.ArgumentParser:
         help="custom first-round order: 'random', 'start', or comma-separated runner ids",
     )
     parser.add_argument("--seed", type=int, help="random seed for reproducible output")
-    parser.add_argument("--workers", type=int, default=1, help="parallel workers; use 0 for CPU count")
+    parser.add_argument("--workers", "--worker", dest="workers", type=int, default=1, help="parallel workers; use 0 for CPU count")
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
     parser.add_argument("--trace", action="store_true", help="print one traced race and exit")
     parser.add_argument("--trace-log", help="write one traced race to this log file and exit")
+    parser.add_argument("--skill-ablation", action="store_true", help="run skill on/off ablation statistics")
+    parser.add_argument(
+        "--skill-ablation-runners",
+        nargs="+",
+        help="runner ids/names to ablate; defaults to all selected runners with implemented skills",
+    )
+    parser.add_argument(
+        "--skill-ablation-detail",
+        action="store_true",
+        help="include skill success-count distribution in ablation output",
+    )
     return parser
 
 
@@ -2043,6 +2672,7 @@ def normalize_cli_args(argv: Sequence[str]) -> list[str]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = make_parser()
     args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
+    ablation_summary: SkillAblationSummary | None = None
     try:
         config = build_config_from_args(args)
         if args.trace or args.trace_log:
@@ -2058,21 +2688,57 @@ def main(argv: Sequence[str] | None = None) -> int:
                 path.write_text(trace.text(), encoding="utf-8")
                 print(f"过程日志已写入：{path}")
             return 0
-        start_time = time.perf_counter()
-        summary = run_monte_carlo(config, args.iterations, seed=args.seed, workers=args.workers)
-        summary = with_elapsed(summary, time.perf_counter() - start_time)
+        if args.skill_ablation:
+            targets = parse_runner_tokens(args.skill_ablation_runners)
+            ablation_summary = run_skill_ablation(
+                config,
+                args.iterations,
+                targets=targets,
+                seed=args.seed,
+                workers=args.workers,
+            )
+            summary = ablation_summary.base_summary
+        else:
+            start_time = time.perf_counter()
+            summary = run_monte_carlo(config, args.iterations, seed=args.seed, workers=args.workers)
+            summary = with_elapsed(summary, time.perf_counter() - start_time)
     except ValueError as exc:
         parser.error(str(exc))
         return 2
 
     if args.json:
-        print(json.dumps(summary_to_dict(summary), ensure_ascii=False, indent=2))
+        data = summary_to_dict(summary)
+        if ablation_summary is not None:
+            data["skill_ablation"] = skill_ablation_to_dict(
+                ablation_summary,
+                include_detail=args.skill_ablation_detail,
+            )
+        print(json.dumps(data, ensure_ascii=False, indent=2))
     else:
-        print(format_summary(summary))
+        text = format_summary(summary)
+        if ablation_summary is not None:
+            text += "\n\n" + format_skill_ablation_summary(
+                ablation_summary,
+                detail=args.skill_ablation_detail,
+            )
+        print(text)
     return 0
 
 
 def trace_result_to_dict(result: RaceResult) -> dict[str, object]:
+    movement_stats = [
+        {
+            "runner": runner,
+            "name": format_runner(runner),
+            "total_forward_steps": total_steps,
+            "carried_forward_steps": carried_steps,
+            "lazy_rate": carried_steps / total_steps if total_steps else 0.0,
+        }
+        for runner, total_steps, carried_steps in sorted(
+            result.movement_stats,
+            key=lambda item: result.ranking.index(item[0]) if item[0] in result.ranking else len(result.ranking),
+        )
+    ]
     return {
         "winner": format_runner(result.winner),
         "winner_id": result.winner,
@@ -2080,6 +2746,20 @@ def trace_result_to_dict(result: RaceResult) -> dict[str, object]:
         "ranking_ids": list(result.ranking),
         "second_position": result.second_position,
         "winner_margin": result.winner_margin,
+        "winner_lazy_stats": {
+            "carried_forward_steps": result.winner_carried_steps,
+            "total_forward_steps": result.winner_total_steps,
+            "lazy_rate": (
+                result.winner_carried_steps / result.winner_total_steps
+                if result.winner_total_steps
+                else 0.0
+            ),
+        },
+        "movement_stats": movement_stats,
+        "skill_success_counts": {
+            format_runner(runner): count for runner, count in result.skill_success_counts
+        },
+        "skill_success_count_ids": dict(result.skill_success_counts),
     }
 
 
