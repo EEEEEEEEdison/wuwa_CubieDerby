@@ -147,20 +147,6 @@ Example:
 python cubie_derby.py -n 10000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --json
 ```
 
-### `--trace` / `--trace-log`
-
-Trace a single race for debugging.
-
-- `--trace`: print the traced race directly to the terminal.
-- `--trace-log PATH`: write the traced race to a log file.
-
-Examples:
-
-```powershell
-python cubie_derby.py --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 2 --trace
-python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
-```
-
 ### `--skill-ablation`
 
 Run skill on/off ablation statistics. This first runs one all-skills-on baseline, then runs one additional simulation for each ablated runner.
@@ -175,6 +161,28 @@ Examples:
 ```powershell
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --seed 42
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --skill-ablation-runners 12 16 --skill-ablation-detail --seed 42
+```
+
+## Debugging
+
+### `--trace`
+
+Trace a single race directly in the terminal. This is useful when you want to inspect action order, skill timing, NPC movement, special-cell effects, or final ranking resolution step by step.
+
+Example:
+
+```powershell
+python cubie_derby.py --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 2 --trace
+```
+
+### `--trace-log`
+
+Write one traced race to a log file instead of only printing it to the terminal. This is useful when you want to save a full readable process log for later checking or sharing.
+
+Example:
+
+```powershell
+python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
 ```
 
 ## Runner IDs and Skills
