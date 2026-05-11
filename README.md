@@ -2,6 +2,14 @@
 
 Python Monte Carlo simulator for Cubie Derby race outcomes.
 
+Core things this project can simulate:
+
+- Season 1 and Season 2 race rules.
+- Custom runner lineups and runner counts.
+- Custom start layouts, including pre-start cells and random same-cell stacks.
+- Runner skills, Season 2 special cells, and the reverse-moving NPC.
+- Monte Carlo win-rate statistics, skill ablation, and single-race trace logs.
+
 ## Quick Start
 
 Run a basic Season 1 simulation. In this project, cell `1` is the usual start cell and cell `0` is the finish cell.
