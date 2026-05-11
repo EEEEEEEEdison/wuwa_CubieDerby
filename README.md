@@ -80,7 +80,18 @@ Use `--season 2` to apply the Season 2 ruleset to a custom start. Without `--lap
 
 ## Runner IDs
 
+- `1` / `jinhsi`: 今汐
+- `2` / `changli`: 长离
+- `3` / `calcharo`: 卡卡罗
 - `4` / `shorekeeper`: 守岸人. Uses a special `2..3` dice range; in skill ablation, disabling her skill changes her back to the normal `1..3` dice range.
+- `5` / `camellya`: 椿
+- `6` / `potato`: 小土豆
+- `7` / `roccia`: 洛可可
+- `8` / `brant`: 布兰特
+- `9` / `cantarella`: 坎特蕾拉
+- `10` / `zani`: 赞妮
+- `11` / `cartethyia`: 卡提希娅
+- `12` / `phoebe`: 菲比
 - `13` / `sigrika`: 西格莉卡. At round start, marks up to two immediately higher-ranked runners; marked runners move 1 fewer step that round, with a minimum movement of 1. She can act in round 1 for fixed starts, but skips round 1 for random stack starts such as `--start "1:*"`.
 - `14` / `luuk_herssen`: 陆赫斯. Only on his own turn, forward special cells move his active group 4 cells total; backward special cells move his active group 2 cells backward.
 - `15` / `denia`: 达尼娅. If her dice roll matches her previous round's dice roll, she gets +2 steps.
