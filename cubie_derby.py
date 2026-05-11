@@ -2213,7 +2213,7 @@ def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
     season = args.season
     rules = season_rules(season)
     if not args.start:
-        raise ValueError("--start is required; pass a custom start grid such as '1:*' or '-3:2;-2:1,4;0:5'")
+        raise ValueError("--start is required; pass a custom start grid such as '1:*' or '-3:2;-2:1,4;1:5'")
 
     track_length = args.track_length or int(rules["track_length"])
     start_cells, random_start_position = parse_start_layout(args.start)
@@ -2628,8 +2628,8 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--start",
         help=(
-            "custom start grid, e.g. '-3:10;-2:4,3;0:8'. "
-            "Use '0:*' to randomly stack all runners in one cell."
+            "custom start grid, e.g. '-3:10;-2:4,3;1:8'. "
+            "Use '1:*' to randomly stack all runners in one cell."
         ),
     )
     parser.add_argument(
