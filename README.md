@@ -200,7 +200,7 @@ The notes below describe the current simulator implementation.
 - `17` / `chisa`: 千咲. Dice are rolled for all round participants at round start; if her dice value is tied for the lowest value, including NPC when active, she gets `+2` steps that turn.
 - `18` / `mornye`: 莫宁. Her dice follows a deterministic `3 -> 2 -> 1` cycle.
 - `19` / `lynae`: 琳奈. Before Sigrika's debuff is applied, she has a `60%` chance to move with double dice, a `20%` chance to be unable to move, and otherwise moves normally.
-- `20` / `aemeath`: 爱弥斯. Once per race, when a moving group containing her passes cell `17` in either direction and another non-NPC runner is ahead of cell `17`, only 爱弥斯 teleports to the nearest such runner's cell and enters from the left. If another runner carries her, the original moving group removes 爱弥斯 and continues. If 爱弥斯 is the active runner while carrying others, the carried runners stop on cell `17`, and 爱弥斯 continues any remaining movement after teleporting. If no valid target exists, the skill is not consumed.
+- `20` / `aemeath`: 爱弥斯. Once per race, only during 爱弥斯's own action, if her moving group passes cell `17` in either direction and another non-NPC runner is ahead of cell `17`, only 爱弥斯 teleports to the nearest such runner's cell and enters from the left. If another runner carries her through cell `17`, her skill does not trigger. If 爱弥斯 is the active runner while carrying others, the carried runners stop on cell `17`, and 爱弥斯 continues any remaining movement after teleporting. If no valid target exists, the skill is not consumed.
 
 ## Season 2 Rules
 

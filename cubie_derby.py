@@ -905,6 +905,7 @@ def move_single_runner(
         config=config,
         start_progress=current_progress,
         signed_steps=total_steps,
+        active_player=player,
         skill_state=skill_state,
         trace=trace,
     )
@@ -968,6 +969,7 @@ def move_runner_with_left_side(
         config=config,
         start_progress=current_progress,
         signed_steps=total_steps,
+        active_player=player,
         skill_state=skill_state,
         trace=trace,
     )
@@ -1088,6 +1090,7 @@ def move_cantarella(
             config=config,
             start_progress=current_progress,
             signed_steps=1,
+            active_player=player,
             skill_state=skill_state,
             trace=trace,
         )
@@ -1327,6 +1330,7 @@ def move_group_due_to_cell_effect(
             config=config,
             start_progress=base_progress,
             signed_steps=delta,
+            active_player=active_player,
             skill_state=skill_state,
             trace=trace,
         )
@@ -1477,6 +1481,7 @@ def move_npc(
             config=config,
             start_progress=npc_progress,
             signed_steps=-1,
+            active_player=NPC_ID,
             skill_state=skill_state,
             trace=trace,
         )
@@ -1658,6 +1663,7 @@ def maybe_trigger_aemeath_teleport(
     config: RaceConfig,
     start_progress: int,
     signed_steps: int,
+    active_player: int | None = None,
     skill_state: RaceSkillState | None,
     trace: bool | TraceLogger = False,
 ) -> tuple[int, int, int] | None:
@@ -1671,6 +1677,11 @@ def maybe_trigger_aemeath_teleport(
         return None
     trigger_offset = aemeath_trigger_offset(start_progress, signed_steps, config.track_length)
     if trigger_offset is None:
+        return None
+    if active_player != AEMEATH_ID:
+        if trace:
+            log_timing(trace, "移动路径经过第17格", f"{format_runner(AEMEATH_ID)}检查当前行动者是否为自己")
+            log_block(trace, f"{format_runner(AEMEATH_ID)}技能不判定：", "原因：当前行动回合不是爱弥斯")
         return None
     target_progress = nearest_runner_progress_ahead(
         progress=progress,

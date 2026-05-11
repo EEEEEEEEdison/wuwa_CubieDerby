@@ -1343,7 +1343,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(grid[24], [3])
         self.assertEqual(grid[25], [20])
 
-    def test_aemeath_teleports_alone_when_carried_by_another_runner(self):
+    def test_aemeath_does_not_trigger_when_carried_by_another_runner(self):
         config = RaceConfig(runners=(20, 2, 3), track_length=32, start_grid={16: (20, 2), 22: (3,)})
         grid = {16: [20, 2], 22: [3]}
         progress = {20: 16, 2: 16, 3: 22}
@@ -1361,13 +1361,14 @@ class CubieDerbyTests(unittest.TestCase):
         )
 
         self.assertEqual(new_progress, 19)
-        self.assertEqual(progress[20], 22)
+        self.assertEqual(progress[20], 19)
         self.assertEqual(progress[2], 19)
-        self.assertEqual(grid[22], [20, 3])
-        self.assertEqual(grid[19], [2])
-        self.assertEqual(state.success_counts[20], 1)
+        self.assertEqual(grid[22], [3])
+        self.assertEqual(grid[19], [20, 2])
+        self.assertTrue(state.aemeath_available)
+        self.assertNotIn(20, state.success_counts)
 
-    def test_aemeath_removed_from_moving_stack_after_teleport(self):
+    def test_aemeath_stays_in_moving_stack_when_carried_by_another_runner(self):
         config = RaceConfig(runners=(4, 17, 18, 19, 20), track_length=32, start_grid={})
         grid = {15: [18, 20, 4, -1], 24: [17], 25: [19]}
         progress = {18: 15, 20: 15, 4: 15, -1: 15, 17: 24, 19: 25}
@@ -1385,13 +1386,15 @@ class CubieDerbyTests(unittest.TestCase):
         )
 
         self.assertEqual(new_progress, 18)
-        self.assertEqual(progress[20], 24)
+        self.assertEqual(progress[20], 18)
         self.assertEqual(progress[18], 18)
         self.assertEqual(progress[4], 18)
         self.assertEqual(grid[15], [-1])
-        self.assertEqual(grid[24], [20, 17])
-        self.assertEqual(grid[18], [18, 4])
+        self.assertEqual(grid[24], [17])
+        self.assertEqual(grid[18], [18, 20, 4])
         self.assertEqual(grid[25], [19])
+        self.assertTrue(state.aemeath_available)
+        self.assertNotIn(20, state.success_counts)
 
     def test_aemeath_can_trigger_when_moved_backward_through_cell_17(self):
         config = RaceConfig(runners=(20, 2), track_length=32, start_grid={18: (20,), 22: (2,)})
@@ -1415,7 +1418,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(grid[22], [20, 2])
         self.assertEqual(state.success_counts[20], 1)
 
-    def test_aemeath_teleports_alone_when_carried_backward_by_npc(self):
+    def test_aemeath_does_not_trigger_when_carried_backward_by_npc(self):
         config = RaceConfig(runners=(20, 2), track_length=32, start_grid={18: (20,), 22: (2,)}, npc_enabled=True)
         grid = {18: [20, -1], 22: [2]}
         progress = {20: 18, -1: 18, 2: 22}
@@ -1433,11 +1436,12 @@ class CubieDerbyTests(unittest.TestCase):
         )
 
         self.assertEqual(npc_progress, 17)
-        self.assertEqual(progress[20], 22)
+        self.assertEqual(progress[20], 17)
         self.assertEqual(progress[-1], 17)
-        self.assertEqual(grid[22], [20, 2])
-        self.assertEqual(grid[17], [-1])
-        self.assertEqual(state.success_counts[20], 1)
+        self.assertEqual(grid[22], [2])
+        self.assertEqual(grid[17], [20, -1])
+        self.assertTrue(state.aemeath_available)
+        self.assertNotIn(20, state.success_counts)
 
     def test_aemeath_does_not_consume_skill_without_runner_ahead(self):
         config = RaceConfig(runners=(20, 2), track_length=32, start_grid={16: (20,), 10: (2,)})
