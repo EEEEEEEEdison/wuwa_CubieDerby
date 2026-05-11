@@ -28,6 +28,16 @@ python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 1
 
 ## Parameter Guide
 
+### `-n` / `--iterations`
+
+Set how many simulated races to run. Larger values give more stable Monte Carlo estimates, but take longer to finish.
+
+Example:
+
+```powershell
+python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
+```
+
 ### `--season`
 
 Select the ruleset.
