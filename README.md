@@ -47,6 +47,7 @@ Notes:
 
 - `*` cannot be mixed with fixed cells in the same `--start` string.
 - When `*` is used, `--runners` must also be provided.
+- Within the same cell, runners are ordered from left to right, and the runner on the left ranks higher.
 - `--start "-3:2;-2:1,4;-1:3,6;1:5"` means: runner `2` starts on `-3`; runners `1` and `4` start together on `-2` from left to right; runners `3` and `6` start together on `-1` from left to right; runner `5` starts alone on cell `1`.
 
 Examples:
