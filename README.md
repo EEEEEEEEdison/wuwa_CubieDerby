@@ -41,20 +41,18 @@ Define the start grid. The ring cells are displayed as `0..23` in Season 1 and `
 Common forms:
 
 - `--start "1:*"`: all selected runners start together on cell `1`, with a fresh random left-to-right stack each simulated race. This is a good fit for scenarios such as the upper half of group-stage matches.
-- `--start "1:10;2:4,3;3:8"`: fixed custom layout.
-- `--start "-3:10;-2:4,3;1:8"`: custom layout with pre-start cells.
-- `--start "-3:2;-2:1,4;-1:3,6;1:5"`: custom Season 2-style layout. This is a good fit for scenarios such as the lower half of group-stage matches with preset starting positions.
+- `--start "-3:2;-2:1,4;-1:3,6;1:5"`: custom layout with pre-start cells. This is a good fit for scenarios such as the lower half of group-stage matches with preset starting positions.
 
 Notes:
 
 - `*` cannot be mixed with fixed cells in the same `--start` string.
 - When `*` is used, `--runners` must also be provided.
+- `--start "-3:2;-2:1,4;-1:3,6;1:5"` means: runner `2` starts on `-3`; runners `1` and `4` start together on `-2` from left to right; runners `3` and `6` start together on `-1` from left to right; runner `5` starts alone on cell `1`.
 
 Examples:
 
 ```powershell
 python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10 --seed 42
-python cubie_derby.py -n 100000 --lap-length 24 --start "1:10;2:4,3;3:8" --runners 3 4 8 10 --seed 42
 python cubie_derby.py --season 2 -n 100000 --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
 ```
 
