@@ -6,6 +6,7 @@ Core things this project can simulate:
 
 - Season 1 and Season 2 race rules.
 - Custom runner lineups and runner counts.
+- Full season-roster combination scans for a fixed field size.
 - Custom start layouts, including pre-start cells and random same-cell stacks.
 - Runner skills, Season 2 special cells, and the reverse-moving NPC.
 - Monte Carlo win-rate statistics, skill ablation, and single-race trace logs.
@@ -32,6 +33,8 @@ python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 1
 
 Set how many simulated races to run. Larger values give more stable Monte Carlo estimates, but take longer to finish.
 
+When `--season-roster-scan` is enabled, `-n` means races per combination, not total races. For example, Season 2 has `15` runners in its actual roster, so a 6-runner scan uses `C(15, 6) = 5005` combinations. With `-n 10`, the total workload is `5005 * 10 = 50050` races.
+
 Example:
 
 ```powershell
@@ -52,6 +55,35 @@ python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10 --se
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16 --seed 42
 ```
 
+### `--season-roster-scan`
+
+Enumerate every same-size combination from the selected season roster, run the simulator for each combination, and then aggregate the normal summary metrics back onto each runner.
+
+This is useful when you want answers such as "in Season 2 six-runner matches, who has the highest overall win rate across all possible lineups?".
+
+Notes:
+
+- Do not combine this mode with `--runners`; the season roster is chosen automatically from `--season`.
+- The current Season 1 scan pool is runners `1..12`.
+- The current Season 2 scan pool is `1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20`.
+- The printed table is aggregated per runner across every combination they appear in.
+- `--trace` and `--skill-ablation` are not used in this mode.
+
+Example:
+
+```powershell
+python cubie_derby.py --season 2 --season-roster-scan --field-size 6 -n 10000 --start "1:*" --workers 0
+```
+
+### `--field-size`
+
+Used together with `--season-roster-scan`. It sets the number of runners in each enumerated combination.
+
+Examples:
+
+- `--field-size 6`: scan all 6-runner combinations in the chosen season roster.
+- `--field-size 4`: scan all 4-runner combinations in the chosen season roster.
+
 ### `--start`
 
 Define the start grid. The ring cells are displayed as `0..23` in Season 1 and `0..31` in Season 2. By this project's naming convention, cell `1` is the usual start cell and cell `0` is the finish cell. Pre-start cells `-3..0` are also supported.
@@ -64,7 +96,8 @@ Common forms:
 Notes:
 
 - `*` cannot be mixed with fixed cells in the same `--start` string.
-- When `*` is used, `--runners` must also be provided.
+- In normal simulation mode, when `*` is used, `--runners` must also be provided.
+- When `--season-roster-scan` is used, `--start` must be a reusable `*` form such as `--start "1:*"` or `--start "-1:*"`.
 - Within the same cell, runners are ordered from left to right, and the runner on the left ranks higher.
 - `--start "-3:2;-2:1,4;-1:3,6;1:5"` means: runner `2` starts on `-3`; runners `1` and `4` start together on `-2` from left to right; runners `3` and `6` start together on `-1` from left to right; runner `5` starts alone on cell `1`.
 
@@ -106,6 +139,7 @@ Override the first-round action order only.
 - `--initial-order random`: reshuffle the first round independently from the stack order.
 - `--initial-order start`: force the first round to follow the current grid order.
 - `--initial-order 4,3,8,10`: fixed first-round order.
+- In `--season-roster-scan` mode, only `random` and `start` are supported, because fixed runner-id orders are not reusable across all combinations.
 
 Examples:
 
@@ -116,7 +150,7 @@ python cubie_derby.py -n 100000 --lap-length 24 --start "1:10;2:4,3;3:8" --runne
 
 ### `--seed`
 
-Make random behavior reproducible. This affects Monte Carlo runs, random start stacks, and `--runners random`.
+Make random behavior reproducible. This affects Monte Carlo runs, random start stacks, `--runners random`, and season-roster scans when you want to rerun the same full traversal.
 
 Example:
 
@@ -140,6 +174,8 @@ Enable CPU parallelism for large Monte Carlo runs.
 
 - `--workers 0`: use all CPU cores.
 - `--workers 4`: use a fixed worker count.
+- In normal simulation mode, this parallelizes race batches within one lineup.
+- In `--season-roster-scan` mode, this parallelizes across different lineup combinations.
 
 Example:
 
@@ -149,7 +185,7 @@ python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 1
 
 ### `--json`
 
-Print machine-readable output instead of the formatted text table.
+Print machine-readable output instead of the formatted text table. In `--season-roster-scan` mode, the JSON output contains the aggregated scan result rather than a single-lineup summary.
 
 Example:
 

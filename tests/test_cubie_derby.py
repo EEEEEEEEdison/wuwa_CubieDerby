@@ -19,6 +19,7 @@ from cubie_derby import (
     display_position,
     display_width,
     format_summary,
+    format_season_roster_scan_summary,
     summary_to_dict,
     main,
     make_start_grid,
@@ -37,7 +38,11 @@ from cubie_derby import (
     rank_scope,
     run_skill_ablation,
     run_monte_carlo,
+    run_season_roster_scan,
     season_rules,
+    season_roster_combination_count,
+    season_roster_scan_to_dict,
+    season_runner_pool,
     settle_npc_end_of_round,
     simulate_race,
     skill_ablation_to_dict,
@@ -55,6 +60,16 @@ def argparse_namespace(**kwargs):
         "start": None,
         "initial_order": None,
         "seed": None,
+        "iterations": 100,
+        "field_size": None,
+        "workers": 1,
+        "json": False,
+        "trace": False,
+        "trace_log": None,
+        "season_roster_scan": False,
+        "skill_ablation": False,
+        "skill_ablation_runners": None,
+        "skill_ablation_detail": False,
     }
     defaults.update(kwargs)
     return type("Args", (), defaults)()
@@ -381,6 +396,48 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(first.runners, second.runners)
         self.assertEqual(len(first.runners), 6)
         self.assertEqual(first.track_length, 32)
+
+    def test_season_runner_pool_matches_expected_rosters(self):
+        self.assertEqual(season_runner_pool(1), tuple(range(1, 13)))
+        self.assertEqual(season_runner_pool(2), (1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20))
+
+    def test_season_roster_combination_count_matches_expected_value(self):
+        self.assertEqual(season_roster_combination_count(2, 6), 5005)
+
+    def test_season_roster_scan_aggregates_all_combinations(self):
+        args = argparse_namespace(
+            season=1,
+            start="1:*",
+            field_size=2,
+            iterations=3,
+            workers=1,
+        )
+
+        summary = run_season_roster_scan(args)
+        text = format_season_roster_scan_summary(summary)
+        data = season_roster_scan_to_dict(summary)
+
+        self.assertEqual(summary.combination_count, 66)
+        self.assertEqual(summary.total_simulated_races, 198)
+        self.assertEqual({row.runner for row in summary.rows}, set(range(1, 13)))
+        self.assertTrue(all(row.combination_count == 11 for row in summary.rows))
+        self.assertEqual(sum(row.wins for row in summary.rows), summary.total_simulated_races)
+        self.assertIn("赛季角色池遍历统计：", text)
+        self.assertIn("参赛组合", text)
+        self.assertIn("综合推荐：", text)
+        self.assertEqual(data["combination_count"], 66)
+        self.assertEqual(data["total_simulated_races"], 198)
+        self.assertEqual(len(data["rows"]), 12)
+
+    def test_season_roster_scan_requires_reusable_star_start(self):
+        args = argparse_namespace(
+            season=2,
+            start="-3:11;-2:16,14;-1:12,13;1:15",
+            field_size=6,
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires a reusable '\\*' start"):
+            run_season_roster_scan(args)
 
     def test_fixed_start_at_zero_defaults_to_left_to_right_order(self):
         args = argparse_namespace(

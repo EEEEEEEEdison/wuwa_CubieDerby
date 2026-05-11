@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from itertools import combinations
 import json
 import math
 import multiprocessing as mp
@@ -35,6 +36,8 @@ from cubie_derby_core.runners import (
     ROCCIA_ID,
     RUNNER_ALIASES,
     RUNNER_NAMES,
+    SEASON1_RUNNER_POOL,
+    SEASON2_RUNNER_POOL,
     SHOREKEEPER_ID,
     SIGRIKA_ID,
     SKILL_RUNNERS,
@@ -186,6 +189,44 @@ class SkillAblationSummary:
     elapsed_seconds: float | None = None
 
 
+@dataclass(frozen=True)
+class SeasonRosterScanRow:
+    runner: int
+    name: str
+    combination_count: int
+    race_count: int
+    wins: int
+    win_rate: float
+    qualify_count: int
+    qualify_rate: float
+    average_rank: float
+    rank_variance: float
+    winner_gap_per_race: float
+    average_winning_margin: float
+    lazy_win_rate: float = 0.0
+    winner_carried_steps: int = 0
+    winner_total_steps: int = 0
+
+
+@dataclass(frozen=True)
+class SeasonRosterScanSummary:
+    season: int
+    roster: tuple[int, ...]
+    field_size: int
+    iterations_per_combination: int
+    combination_count: int
+    total_simulated_races: int
+    start_spec: str
+    track_length: int
+    initial_order_mode: str
+    rows: tuple[SeasonRosterScanRow, ...]
+    elapsed_seconds: float | None = None
+
+    @property
+    def best(self) -> SeasonRosterScanRow:
+        return max(self.rows, key=lambda row: (row.win_rate, -row.average_rank))
+
+
 class MonteCarloAccumulator:
     def __init__(self, runners: Sequence[int]) -> None:
         self.runners = tuple(runners)
@@ -307,6 +348,109 @@ class MonteCarloAccumulator:
         return SimulationSummary(iterations=n, config=config, rows=tuple(rows))
 
 
+class SeasonRosterScanAccumulator:
+    def __init__(self, roster: Sequence[int]) -> None:
+        self.roster = tuple(roster)
+        self.index = {runner: i for i, runner in enumerate(self.roster)}
+        size = len(self.roster)
+        self.combination_count = [0] * size
+        self.race_count = [0] * size
+        self.wins = [0] * size
+        self.qualify = [0] * size
+        self.rank_sum = [0.0] * size
+        self.rank_square_sum = [0.0] * size
+        self.winner_gap_sum = [0.0] * size
+        self.winner_carried_step_sum = [0] * size
+        self.winner_total_step_sum = [0] * size
+
+    def add_summary(self, summary: SimulationSummary) -> None:
+        n = summary.iterations
+        for row in summary.rows:
+            idx = self.index[row.runner]
+            self.combination_count[idx] += 1
+            self.race_count[idx] += n
+            self.wins[idx] += row.wins
+            self.qualify[idx] += row.qualify_count
+            self.rank_sum[idx] += row.average_rank * n
+            if n > 1:
+                rank_square_sum = row.rank_variance * (n - 1) + ((row.average_rank * n) ** 2) / n
+            else:
+                rank_square_sum = row.average_rank * row.average_rank
+            self.rank_square_sum[idx] += rank_square_sum
+            self.winner_gap_sum[idx] += row.winner_gap_per_race * n
+            self.winner_carried_step_sum[idx] += row.winner_carried_steps
+            self.winner_total_step_sum[idx] += row.winner_total_steps
+
+    def to_summary(
+        self,
+        *,
+        season: int,
+        field_size: int,
+        iterations_per_combination: int,
+        combination_count: int,
+        start_spec: str,
+        track_length: int,
+        initial_order_mode: str,
+        elapsed_seconds: float | None = None,
+    ) -> SeasonRosterScanSummary:
+        rows: list[SeasonRosterScanRow] = []
+        for runner in self.roster:
+            idx = self.index[runner]
+            race_count = self.race_count[idx]
+            wins = self.wins[idx]
+            rank_sum = self.rank_sum[idx]
+            if race_count:
+                average_rank = rank_sum / race_count
+                if race_count > 1:
+                    variance = (self.rank_square_sum[idx] - (rank_sum * rank_sum) / race_count) / (race_count - 1)
+                    variance = max(0.0, variance)
+                else:
+                    variance = 0.0
+                win_rate = wins / race_count
+                qualify_rate = self.qualify[idx] / race_count
+                winner_gap_per_race = self.winner_gap_sum[idx] / race_count
+            else:
+                average_rank = math.nan
+                variance = math.nan
+                win_rate = 0.0
+                qualify_rate = 0.0
+                winner_gap_per_race = 0.0
+            winner_total_steps = self.winner_total_step_sum[idx]
+            winner_carried_steps = self.winner_carried_step_sum[idx]
+            rows.append(
+                SeasonRosterScanRow(
+                    runner=runner,
+                    name=RUNNER_NAMES.get(runner, str(runner)),
+                    combination_count=self.combination_count[idx],
+                    race_count=race_count,
+                    wins=wins,
+                    win_rate=win_rate,
+                    qualify_count=self.qualify[idx],
+                    qualify_rate=qualify_rate,
+                    average_rank=average_rank,
+                    rank_variance=variance,
+                    winner_gap_per_race=winner_gap_per_race,
+                    average_winning_margin=self.winner_gap_sum[idx] / wins if wins else 0.0,
+                    lazy_win_rate=winner_carried_steps / winner_total_steps if winner_total_steps else 0.0,
+                    winner_carried_steps=winner_carried_steps,
+                    winner_total_steps=winner_total_steps,
+                )
+            )
+        return SeasonRosterScanSummary(
+            season=season,
+            roster=self.roster,
+            field_size=field_size,
+            iterations_per_combination=iterations_per_combination,
+            combination_count=combination_count,
+            total_simulated_races=combination_count * iterations_per_combination,
+            start_spec=start_spec,
+            track_length=track_length,
+            initial_order_mode=initial_order_mode,
+            rows=tuple(rows),
+            elapsed_seconds=elapsed_seconds,
+        )
+
+
 def season_rules(season: int) -> dict[str, object]:
     if season == 1:
         return {
@@ -324,6 +468,14 @@ def season_rules(season: int) -> dict[str, object]:
             "shuffle_cells": SEASON2_SHUFFLE_CELLS,
             "npc_enabled": True,
         }
+    raise ValueError(f"unknown season: {season}")
+
+
+def season_runner_pool(season: int) -> tuple[int, ...]:
+    if season == 1:
+        return SEASON1_RUNNER_POOL
+    if season == 2:
+        return SEASON2_RUNNER_POOL
     raise ValueError(f"unknown season: {season}")
 
 
@@ -959,10 +1111,14 @@ def move_runner_with_left_side(
     track_length = config.track_length
     current_progress = progress[player]
     current_pos = display_position(current_progress, track_length)
-    old_cell = list(grid[current_pos])
+    old_cell = grid[current_pos]
     left_runners = old_cell[:idx_in_cell]
     movers = left_runners + [player]
-    grid[current_pos] = [runner for runner in old_cell if runner not in movers]
+    remaining = old_cell[idx_in_cell + 1 :]
+    if remaining:
+        grid[current_pos] = remaining
+    else:
+        grid.pop(current_pos, None)
     aemeath_teleport = maybe_trigger_aemeath_teleport(
         movers=movers,
         progress=progress,
@@ -1197,19 +1353,23 @@ def add_group_to_position(
         return
     track_length = config.track_length
     new_pos = display_position(new_progress, track_length)
-    for runner in movers:
-        record_movement(
-            movement_state,
-            [runner],
-            max(0, new_progress - progress[runner]),
-            active_player=active_player,
-        )
+    movers_list = list(movers)
+    if movement_state is not None:
+        for runner in movers_list:
+            if runner <= 0:
+                continue
+            distance = max(0, new_progress - progress[runner])
+            if distance <= 0:
+                continue
+            movement_state.total_steps[runner] = movement_state.total_steps.get(runner, 0) + distance
+            if active_player is not None and runner != active_player:
+                movement_state.carried_steps[runner] = movement_state.carried_steps.get(runner, 0) + distance
     for runner in movers:
         progress[runner] = new_progress
     if grid.get(new_pos):
-        grid[new_pos] = list(movers) + grid[new_pos]
+        grid[new_pos] = movers_list + grid[new_pos]
     else:
-        grid[new_pos] = list(movers)
+        grid[new_pos] = movers_list
     keep_npc_rightmost(grid[new_pos])
     if trace:
         log_block(
@@ -1459,8 +1619,10 @@ def move_npc(
     if NPC_ID in current_cell:
         npc_idx = current_cell.index(NPC_ID)
         movers = current_cell[:npc_idx] + [NPC_ID]
-        grid[current_pos] = [runner for runner in current_cell if runner not in movers]
-        if not grid[current_pos]:
+        remaining = current_cell[npc_idx + 1 :]
+        if remaining:
+            grid[current_pos] = remaining
+        else:
             grid.pop(current_pos, None)
     else:
         remove_runner_from_grid(grid, NPC_ID)
@@ -1530,8 +1692,10 @@ def move_npc(
             keep_npc_rightmost(current_cell)
             npc_idx = current_cell.index(NPC_ID)
             movers = current_cell[:npc_idx] + [NPC_ID]
-            grid[new_pos] = [runner for runner in current_cell if runner not in movers]
-            if not grid[new_pos]:
+            remaining = current_cell[npc_idx + 1 :]
+            if remaining:
+                grid[new_pos] = remaining
+            else:
                 grid.pop(new_pos, None)
 
     if trace:
@@ -1613,15 +1777,29 @@ def remove_runner_from_grid(grid: dict[int, list[int]], runner: int) -> None:
 
 
 def keep_npc_rightmost(cell: list[int]) -> None:
-    if NPC_ID not in cell:
+    if not cell or NPC_ID not in cell:
         return
-    npc_count = cell.count(NPC_ID)
-    cell[:] = [runner for runner in cell if runner != NPC_ID] + [NPC_ID] * npc_count
+    if cell[-1] == NPC_ID and NPC_ID not in cell[:-1]:
+        return
+    write = 0
+    npc_count = 0
+    for runner in cell:
+        if runner == NPC_ID:
+            npc_count += 1
+        else:
+            cell[write] = runner
+            write += 1
+    cell[write:] = [NPC_ID] * npc_count
 
 
 def shuffle_without_npc(cell: Sequence[int], rng: random.Random) -> list[int]:
-    runners = [runner for runner in cell if runner != NPC_ID]
-    npc_count = sum(1 for runner in cell if runner == NPC_ID)
+    runners: list[int] = []
+    npc_count = 0
+    for runner in cell:
+        if runner == NPC_ID:
+            npc_count += 1
+        else:
+            runners.append(runner)
     rng.shuffle(runners)
     return runners + [NPC_ID] * npc_count
 
@@ -1727,12 +1905,13 @@ def nearest_runner_progress_ahead(
     track_length: int,
     excluded: set[int],
 ) -> int | None:
-    candidates = [
-        runner_progress
-        for runner, runner_progress in progress.items()
-        if runner > 0 and runner not in excluded and from_progress < runner_progress < track_length
-    ]
-    return min(candidates) if candidates else None
+    best: int | None = None
+    for runner, runner_progress in progress.items():
+        if runner <= 0 or runner in excluded or runner_progress <= from_progress or runner_progress >= track_length:
+            continue
+        if best is None or runner_progress < best:
+            best = runner_progress
+    return best
 
 
 def cell_effect_path_positions(
@@ -1783,7 +1962,12 @@ def record_hiyuki_npc_path_contact(
         contact_kind = "npc_to_hiyuki"
     else:
         return
-    if not any(pos == target_pos for pos in path):
+    found = False
+    for pos in path:
+        if pos == target_pos:
+            found = True
+            break
+    if not found:
         return
     if skill_state.hiyuki_bonus_steps > 0:
         if trace:
@@ -1982,10 +2166,11 @@ def check_player2_skill(
 
 
 def current_rank(runners: Sequence[int], progress: dict[int, int], grid: dict[int, Sequence[int]]) -> list[int]:
+    selected = set(runners)
     cell_index: dict[int, int] = {}
     for cell in grid.values():
         for idx, runner in enumerate(cell):
-            if runner != NPC_ID:
+            if runner != NPC_ID and runner in selected:
                 cell_index[runner] = idx
     return sorted(runners, key=lambda runner: (-progress[runner], cell_index.get(runner, 9999)))
 
@@ -2070,6 +2255,86 @@ def run_skill_ablation(
         total_simulated_races=iterations * (len(evaluated) + 1),
         base_summary=base_summary,
         rows=tuple(rows),
+        elapsed_seconds=time.perf_counter() - total_start,
+    )
+
+
+def validate_season_roster_scan_args(args: argparse.Namespace) -> tuple[int, ...]:
+    if args.field_size is None:
+        raise ValueError("--field-size is required when --season-roster-scan is enabled")
+    if args.runners:
+        raise ValueError("--season-roster-scan enumerates the season roster automatically; do not combine it with --runners")
+    if args.trace or args.trace_log:
+        raise ValueError("--season-roster-scan cannot be combined with --trace or --trace-log")
+    if args.skill_ablation or args.skill_ablation_runners or args.skill_ablation_detail:
+        raise ValueError("--season-roster-scan cannot be combined with skill ablation options")
+    if args.initial_order and args.initial_order not in {"random", "start"}:
+        raise ValueError("--season-roster-scan only supports --initial-order random or --initial-order start")
+    if not args.start:
+        raise ValueError("--start is required; pass a reusable start such as '1:*'")
+
+    roster = season_runner_pool(args.season)
+    if args.field_size < 1 or args.field_size > len(roster):
+        raise ValueError(f"--field-size must be between 1 and {len(roster)} for season {args.season}")
+
+    start_cells, random_start_position = parse_start_layout(args.start)
+    if random_start_position is None or start_cells:
+        raise ValueError("--season-roster-scan currently requires a reusable '*' start such as '1:*' or '-1:*'")
+    track_length = args.track_length or int(season_rules(args.season)["track_length"])
+    validate_start_position(random_start_position, track_length)
+    return roster
+
+
+def run_season_roster_scan_task(args: tuple[RaceConfig, int, int | None]) -> SimulationSummary:
+    config, iterations, seed = args
+    return run_monte_carlo(config, iterations, seed=seed, workers=1)
+
+
+def season_roster_combination_count(season: int, field_size: int) -> int:
+    roster = season_runner_pool(season)
+    if field_size < 0 or field_size > len(roster):
+        raise ValueError(f"field_size must be between 0 and {len(roster)} for season {season}")
+    return math.comb(len(roster), field_size)
+
+
+def run_season_roster_scan(args: argparse.Namespace) -> SeasonRosterScanSummary:
+    roster = validate_season_roster_scan_args(args)
+    combo_list = list(combinations(roster, args.field_size))
+    total_start = time.perf_counter()
+    acc = SeasonRosterScanAccumulator(roster)
+    seed_rng = random.Random(args.seed)
+    task_args = [
+        (
+            build_config_from_args(args, runners_override=combo),
+            args.iterations,
+            seed_rng.randrange(1, 2**63) if args.seed is not None else None,
+        )
+        for combo in combo_list
+    ]
+
+    workers = args.workers
+    if workers == 0:
+        workers = mp.cpu_count()
+    workers = max(1, min(workers, len(task_args)))
+
+    if workers == 1:
+        for task in task_args:
+            acc.add_summary(run_season_roster_scan_task(task))
+    else:
+        chunksize = max(1, len(task_args) // (workers * 4))
+        with mp.Pool(processes=workers) as pool:
+            for summary in pool.imap_unordered(run_season_roster_scan_task, task_args, chunksize=chunksize):
+                acc.add_summary(summary)
+
+    template_config = build_config_from_args(args, runners_override=combo_list[0])
+    return acc.to_summary(
+        season=args.season,
+        field_size=args.field_size,
+        iterations_per_combination=args.iterations,
+        combination_count=len(combo_list),
+        start_spec=args.start,
+        track_length=template_config.track_length,
+        initial_order_mode=template_config.initial_order_mode,
         elapsed_seconds=time.perf_counter() - total_start,
     )
 
@@ -2216,8 +2481,16 @@ def parse_start_layout(spec: str) -> tuple[dict[int, tuple[int, ...]], int | Non
     return cells, random_start_position
 
 
-def build_config_from_args(args: argparse.Namespace) -> RaceConfig:
-    runners = parse_runner_tokens(args.runners, rng=random.Random(args.seed))
+def build_config_from_args(
+    args: argparse.Namespace,
+    *,
+    runners_override: Sequence[int] | None = None,
+) -> RaceConfig:
+    runners = (
+        tuple(runners_override)
+        if runners_override is not None
+        else parse_runner_tokens(args.runners, rng=random.Random(args.seed))
+    )
     season = args.season
     rules = season_rules(season)
     if not args.start:
@@ -2361,6 +2634,48 @@ def skill_ablation_to_dict(
     }
 
 
+def season_roster_scan_to_dict(summary: SeasonRosterScanSummary) -> dict[str, object]:
+    return {
+        "season": summary.season,
+        "roster": list(summary.roster),
+        "field_size": summary.field_size,
+        "iterations_per_combination": summary.iterations_per_combination,
+        "combination_count": summary.combination_count,
+        "total_simulated_races": summary.total_simulated_races,
+        "start": summary.start_spec,
+        "track_length": summary.track_length,
+        "initial_order_mode": summary.initial_order_mode,
+        "elapsed_seconds": summary.elapsed_seconds,
+        "races_per_second": season_roster_scan_races_per_second(summary),
+        "best": {
+            "runner": summary.best.runner,
+            "name": summary.best.name,
+            "win_rate": summary.best.win_rate,
+            "average_rank": summary.best.average_rank,
+        },
+        "rows": [
+            {
+                "runner": row.runner,
+                "name": row.name,
+                "combination_count": row.combination_count,
+                "race_count": row.race_count,
+                "wins": row.wins,
+                "win_rate": row.win_rate,
+                "qualify_count": row.qualify_count,
+                "qualify_rate": row.qualify_rate,
+                "average_rank": row.average_rank,
+                "rank_variance": row.rank_variance,
+                "winner_gap_per_race": row.winner_gap_per_race,
+                "average_winning_margin": row.average_winning_margin,
+                "lazy_win_rate": row.lazy_win_rate,
+                "winner_carried_steps": row.winner_carried_steps,
+                "winner_total_steps": row.winner_total_steps,
+            }
+            for row in summary.rows
+        ],
+    }
+
+
 def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) -> str:
     rows = list(summary.rows)
     if sort_by_win_rate:
@@ -2401,6 +2716,54 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
         [
             "",
             f"推荐选择：{format_runner(best.runner)}，夺冠概率 {best.win_rate:.2%}。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_season_roster_scan_summary(summary: SeasonRosterScanSummary) -> str:
+    rows = sorted(summary.rows, key=lambda row: (row.win_rate, -row.average_rank), reverse=True)
+    headers = ("角色", "参赛组合", "夺冠率", "晋级率", "平均名次", "名次方差", "场均领先", "胜时领先", "躺赢率")
+    table_rows = [
+        (
+            format_runner(row.runner),
+            f"{row.combination_count:,}",
+            f"{row.win_rate:.2%}",
+            f"{row.qualify_rate:.2%}",
+            f"{row.average_rank:.3f}",
+            f"{row.rank_variance:.3f}",
+            f"{row.winner_gap_per_race:.3f}",
+            f"{row.average_winning_margin:.3f}",
+            f"{row.lazy_win_rate:.2%}",
+        )
+        for row in rows
+    ]
+    columns = [headers, *table_rows]
+    widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
+    aligns = ("left", "right", "right", "right", "right", "right", "right", "right", "right")
+    lines = [
+        "赛季角色池遍历统计：",
+        f"赛季：第{summary.season}季",
+        f"角色池：{len(summary.roster)}人（{format_runner_list(summary.roster)}）",
+        f"每组人数：{summary.field_size}人",
+        f"起点配置：{summary.start_spec}",
+        f"首轮顺序：{format_initial_order_mode(summary.initial_order_mode)}",
+        f"组合数：{summary.combination_count:,}组",
+        f"每组模拟：{summary.iterations_per_combination:,}局",
+        f"总模拟局数：{summary.total_simulated_races:,}局",
+        f"赛道长度：{summary.track_length}格",
+        f"用时：{format_elapsed(summary.elapsed_seconds)}",
+        f"速度：{format_rate(season_roster_scan_races_per_second(summary))}",
+        "",
+        format_table_row(headers, widths, aligns),
+        format_table_separator(widths),
+    ]
+    lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
+    best = summary.best
+    lines.extend(
+        [
+            "",
+            f"综合推荐：{format_runner(best.runner)}，综合夺冠率 {best.win_rate:.2%}。",
         ]
     )
     return "\n".join(lines)
@@ -2477,6 +2840,12 @@ def skill_ablation_races_per_second(summary: SkillAblationSummary) -> float | No
     return summary.total_simulated_races / summary.elapsed_seconds
 
 
+def season_roster_scan_races_per_second(summary: SeasonRosterScanSummary) -> float | None:
+    if summary.elapsed_seconds is None or summary.elapsed_seconds <= 0:
+        return None
+    return summary.total_simulated_races / summary.elapsed_seconds
+
+
 def with_elapsed(summary: SimulationSummary, elapsed_seconds: float) -> SimulationSummary:
     return SimulationSummary(
         iterations=summary.iterations,
@@ -2548,6 +2917,15 @@ def format_runner(runner: int) -> str:
     if runner == NPC_ID:
         return "NPC"
     return RUNNER_NAMES.get(runner, str(runner))
+
+
+def format_initial_order_mode(mode: str) -> str:
+    labels = {
+        "start": "按起点顺序",
+        "random": "随机",
+        "fixed": "固定顺序",
+    }
+    return labels.get(mode, mode)
 
 
 def format_cell(cell: Iterable[int]) -> str:
@@ -2628,6 +3006,16 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("-n", "--iterations", type=int, default=100_000, help="number of races to simulate")
     parser.add_argument("--season", type=int, choices=[1, 2], default=1, help="season ruleset")
     parser.add_argument(
+        "--season-roster-scan",
+        action="store_true",
+        help="enumerate every same-size combination from the selected season roster and aggregate the results",
+    )
+    parser.add_argument(
+        "--field-size",
+        type=int,
+        help="lineup size used by --season-roster-scan, e.g. 6 for all 6-runner combinations",
+    )
+    parser.add_argument(
         "--runners",
         nargs="+",
         help="runner ids/names, e.g. --runners 3 4 8 10; use 'random' or 'random:6' to sample runners",
@@ -2681,7 +3069,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = make_parser()
     args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
     ablation_summary: SkillAblationSummary | None = None
+    season_scan_summary: SeasonRosterScanSummary | None = None
     try:
+        if args.season_roster_scan:
+            season_scan_summary = run_season_roster_scan(args)
+            if args.json:
+                print(json.dumps(season_roster_scan_to_dict(season_scan_summary), ensure_ascii=False, indent=2))
+            else:
+                print(format_season_roster_scan_summary(season_scan_summary))
+            return 0
         config = build_config_from_args(args)
         if args.trace or args.trace_log:
             trace = TraceLogger(echo=args.trace)

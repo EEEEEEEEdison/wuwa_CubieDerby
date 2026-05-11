@@ -23,6 +23,38 @@ MORNYE_ID = 18
 LYNAE_ID = 19
 AEMEATH_ID = 20
 
+SEASON1_RUNNER_POOL = (
+    JINHSI_ID,
+    CHANGLI_ID,
+    CALCHARO_ID,
+    SHOREKEEPER_ID,
+    CAMELLYA_ID,
+    POTATO_ID,
+    ROCCIA_ID,
+    BRANT_ID,
+    CANTARELLA_ID,
+    ZANI_ID,
+    CARTETHYIA_ID,
+    PHOEBE_ID,
+)
+SEASON2_RUNNER_POOL = (
+    JINHSI_ID,
+    CHANGLI_ID,
+    CALCHARO_ID,
+    SHOREKEEPER_ID,
+    POTATO_ID,
+    CARTETHYIA_ID,
+    PHOEBE_ID,
+    SIGRIKA_ID,
+    LUUK_HERSSEN_ID,
+    DENIA_ID,
+    HIYUKI_ID,
+    CHISA_ID,
+    MORNYE_ID,
+    LYNAE_ID,
+    AEMEATH_ID,
+)
+
 SKILL_RUNNERS = frozenset(
     {
         JINHSI_ID,
@@ -100,4 +132,3 @@ RUNNER_ALIASES: dict[str, int] = {
 }
 
 NAME_TO_RUNNER: dict[str, int] = {name: runner for runner, name in RUNNER_NAMES.items()}
-
