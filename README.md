@@ -7,26 +7,16 @@ Python Monte Carlo simulator for Cubie Derby race outcomes.
 Run a basic Season 1 simulation. In this project, cell `1` is the usual start cell and cell `0` is the finish cell.
 
 ```powershell
-python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10 --seed 42
+python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10
 ```
 
 Run with Season 2 rules. Season 2 uses a 32-position ring lap, special cells, and the reverse-moving NPC from round 3:
 
 ```powershell
-python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16 --seed 42
+python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
 ```
 
-Print machine-readable output:
-
-```powershell
-python cubie_derby.py -n 10000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --json
-```
-
-For large Monte Carlo runs, enable CPU parallelism. Use `--workers 0` to use all CPU cores, or pass a fixed worker count such as `--workers 4`:
-
-```powershell
-python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 42 --workers 0
-```
+`--runners` selects the participants. You can freely change both the runner combination and the number of participants; see [Runner IDs and Skills](#runner-ids-and-skills) for the available ids, names, and skill notes.
 
 ## Parameter Guide
 
