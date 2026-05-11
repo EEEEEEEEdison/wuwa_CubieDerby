@@ -181,6 +181,15 @@ python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 1
 
 The notes below describe the current simulator implementation.
 
+Season grouping in this project's numbering scheme:
+
+- Season 1 roster: `1 今汐`, `2 长离`, `3 卡卡罗`, `4 守岸人`, `5 椿`, `6 小土豆`, `7 洛可可`, `8 布兰特`, `9 坎特蕾拉`, `10 赞妮`, `11 卡提希娅`, `12 菲比`
+- Season 2 roster: `1 今汐`, `2 长离`, `3 卡卡罗`, `4 守岸人`, `6 小土豆`, `11 卡提希娅`, `12 菲比`, `13 西格莉卡`, `14 陆赫斯`, `15 达尼娅`, `16 绯雪`, `17 千咲`, `18 莫宁`, `19 琳奈`, `20 爱弥斯`
+
+So in the actual Season 2 competition pool, runners `5 椿`, `7 洛可可`, `8 布兰特`, `9 坎特蕾拉`, and `10 赞妮` are not included.
+
+`--season` switches the race ruleset, not the allowed runner list, so you can still choose any custom runner mix in `--runners` when you want custom experiments.
+
 - `1` / `jinhsi`: 今汐. After another non-NPC runner finishes their action, if that runner ends in 今汐's cell and is positioned to her left, 今汐 makes a `40%` check; on success, she moves to the far left of that cell.
 - `2` / `changli`: 长离. At round end, if she is not the rightmost runner in her current cell, she makes a `65%` check; on success, she is forced to act last next round.
 - `3` / `calcharo`: 卡卡罗. At action start, if he is currently last place, he gets `+3` steps.
