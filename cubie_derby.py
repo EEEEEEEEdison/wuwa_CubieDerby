@@ -15,6 +15,7 @@ from typing import Iterable, Sequence, TextIO
 
 from cubie_derby_core.runners import (
     AEMEATH_ID,
+    AUGUSTA_ID,
     BRANT_ID,
     CALCHARO_ID,
     CAMELLYA_ID,
@@ -25,12 +26,14 @@ from cubie_derby_core.runners import (
     DENIA_ID,
     HIYUKI_ID,
     JINHSI_ID,
+    LUNO_ID,
     LUUK_HERSSEN_ID,
     LYNAE_ID,
     MORNYE_ID,
     NAME_TO_RUNNER,
     NPC_ID,
     PHOEBE_ID,
+    PHROLOVA_ID,
     POTATO_ID,
     RANDOM_RUNNER_ALIASES,
     ROCCIA_ID,
@@ -106,6 +109,8 @@ class RaceSkillState:
     mornye_next_dice: int = 3
     aemeath_available: bool = True
     aemeath_ready: bool = False
+    augusta_force_last_next_round: bool = False
+    luno_available: bool = True
     success_counts: dict[int, int] = field(default_factory=dict)
 
 
@@ -749,6 +754,40 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             extra_steps = 0
             skip_carried_runners = False
             cantarella_move = False
+            augusta_skip_turn = False
+
+            if player == AUGUSTA_ID and skill_enabled(config, AUGUSTA_ID):
+                non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
+                if skill_state.augusta_force_last_next_round:
+                    skill_state.augusta_force_last_next_round = False
+                    if trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能本回合不判定：",
+                            "原因：上一回合已触发停行动作",
+                            "效果：本回合仅保留固定最后行动",
+                        )
+                else:
+                    if trace:
+                        log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最左侧且同格存在其他角色")
+                    if len(non_npc_cell) > 1 and non_npc_cell[0] == player:
+                        augusta_skip_turn = True
+                        skill_state.augusta_force_last_next_round = True
+                        record_skill_success(skill_state, player)
+                        if trace:
+                            log_block(
+                                trace,
+                                f"{format_runner(player)}技能触发：",
+                                "原因：自己位于同格最左侧，且同格存在其他角色",
+                                "效果：本回合不行动，下回合固定最后行动且不再判定自身技能",
+                            )
+                    elif trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能未触发：",
+                            "原因：当前不满足最左侧且同格有其他角色",
+                            f"格内顺序：{format_cell(current_cell)}",
+                        )
 
             if player == DENIA_ID and skill_enabled(config, DENIA_ID):
                 extra_steps += check_denia_skill(skill_state, dice, trace)
@@ -876,6 +915,32 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 )
                 extra_steps += lynae_step_adjustment
 
+            if player == PHROLOVA_ID and skill_enabled(config, PHROLOVA_ID):
+                non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最右侧且同格存在其他角色")
+                if len(non_npc_cell) > 1 and non_npc_cell[-1] == player:
+                    extra_steps += 3
+                    total_steps += 3
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能触发：",
+                            "原因：自己位于同格最右侧，且同格存在其他角色",
+                            "效果：本回合额外前进3格",
+                        )
+                elif trace:
+                    log_block(
+                        trace,
+                        f"{format_runner(player)}技能未触发：",
+                        "原因：当前不满足最右侧且同格有其他角色",
+                        f"格内顺序：{format_cell(current_cell)}",
+                    )
+
+            if augusta_skip_turn:
+                total_steps = 0
+
             total_steps = apply_sigrika_debuff(
                 player=player,
                 total_steps=total_steps,
@@ -958,6 +1023,16 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     rng=rng,
                     skill_state=skill_state,
                     movement_state=movement_state,
+                    trace=trace,
+                )
+                new_progress = progress[player]
+
+            if player == LUNO_ID:
+                maybe_trigger_luno_after_action(
+                    grid=grid,
+                    progress=progress,
+                    config=config,
+                    skill_state=skill_state,
                     trace=trace,
                 )
                 new_progress = progress[player]
@@ -1058,7 +1133,14 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             runners=runners,
             rng=rng,
             include_npc=config.npc_enabled and round_number + 1 >= config.npc_start_round,
-            player2_last=next_turn_last and CHANGLI_ID in runners,
+            forced_last_runners=tuple(
+                runner
+                for runner in (CHANGLI_ID, AUGUSTA_ID)
+                if (
+                    (runner == CHANGLI_ID and next_turn_last and CHANGLI_ID in runners)
+                    or (runner == AUGUSTA_ID and skill_state.augusta_force_last_next_round and AUGUSTA_ID in runners)
+                )
+            ),
         )
 
         if cantarella_state == 2:
@@ -1098,14 +1180,15 @@ def next_round_action_order(
     runners: Sequence[int],
     rng: random.Random,
     include_npc: bool,
-    player2_last: bool,
+    forced_last_runners: Sequence[int] = (),
 ) -> list[int]:
     order = list(runners)
     if include_npc:
         order.append(NPC_ID)
     rng.shuffle(order)
-    if player2_last and 2 in order:
-        order = [runner for runner in order if runner != 2] + [2]
+    trailing = [runner for runner in order if runner in forced_last_runners]
+    if trailing:
+        order = [runner for runner in order if runner not in forced_last_runners] + trailing
     return order
 
 
@@ -1858,6 +1941,55 @@ def maybe_trigger_aemeath_after_active_move(
     )
 
 
+def maybe_trigger_luno_after_action(
+    *,
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
+    config: RaceConfig,
+    skill_state: RaceSkillState | None,
+    trace: bool | TraceLogger = False,
+) -> None:
+    if (
+        skill_state is None
+        or not skill_state.luno_available
+        or not skill_enabled(config, LUNO_ID)
+        or LUNO_ID not in progress
+    ):
+        return
+    end_progress = progress[LUNO_ID]
+    current_pos = display_position(end_progress, config.track_length)
+    if trace:
+        log_timing(trace, "行动结束", f"{format_runner(LUNO_ID)}检查自己是否已经经过第17格")
+    if end_progress < AEMEATH_TRIGGER_CELL:
+        if trace:
+            log_block(
+                trace,
+                f"{format_runner(LUNO_ID)}技能未触发：",
+                f"原因：当前尚未经过{format_position(AEMEATH_TRIGGER_CELL)}",
+                f"判定位置：{format_position(current_pos)}",
+            )
+        return
+
+    ranking = current_rank(config.runners, progress, grid)
+    skill_state.luno_available = False
+    record_skill_success(skill_state, LUNO_ID)
+    gather_runners_to_luno_cell(
+        grid=grid,
+        progress=progress,
+        ranking=ranking,
+        target_progress=end_progress,
+        track_length=config.track_length,
+    )
+    if trace:
+        log_block(
+            trace,
+            f"{format_runner(LUNO_ID)}技能触发：",
+            f"判定位置：{format_position(current_pos)}",
+            f"汇集顺序：{format_cell(ranking)}",
+            f"格内顺序：{format_cell(grid[display_position(end_progress, config.track_length)])}",
+        )
+
+
 def nearest_runner_progress_ahead(
     *,
     progress: dict[int, int],
@@ -1872,6 +2004,24 @@ def nearest_runner_progress_ahead(
         if best is None or runner_progress < best:
             best = runner_progress
     return best
+
+
+def gather_runners_to_luno_cell(
+    *,
+    grid: dict[int, list[int]],
+    progress: dict[int, int],
+    ranking: Sequence[int],
+    target_progress: int,
+    track_length: int,
+) -> None:
+    target_pos = display_position(target_progress, track_length)
+    npc_present = NPC_ID in grid.get(target_pos, [])
+    for runner in ranking:
+        remove_runner_from_grid(grid, runner)
+    for runner in ranking:
+        progress[runner] = target_progress
+    grid[target_pos] = list(ranking) + ([NPC_ID] if npc_present else [])
+    keep_npc_rightmost(grid[target_pos])
 
 
 def cell_effect_path_positions(

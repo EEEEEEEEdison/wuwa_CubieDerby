@@ -22,6 +22,9 @@ CHISA_ID = 17
 MORNYE_ID = 18
 LYNAE_ID = 19
 AEMEATH_ID = 20
+AUGUSTA_ID = 21
+LUNO_ID = 22
+PHROLOVA_ID = 23
 
 SEASON1_RUNNER_POOL = (
     JINHSI_ID,
@@ -53,6 +56,9 @@ SEASON2_RUNNER_POOL = (
     MORNYE_ID,
     LYNAE_ID,
     AEMEATH_ID,
+    AUGUSTA_ID,
+    LUNO_ID,
+    PHROLOVA_ID,
 )
 
 SKILL_RUNNERS = frozenset(
@@ -77,6 +83,9 @@ SKILL_RUNNERS = frozenset(
         MORNYE_ID,
         LYNAE_ID,
         AEMEATH_ID,
+        AUGUSTA_ID,
+        LUNO_ID,
+        PHROLOVA_ID,
     }
 )
 RANDOM_RUNNER_ALIASES = frozenset({"random", "rand", "随机"})
@@ -102,6 +111,9 @@ RUNNER_NAMES: dict[int, str] = {
     MORNYE_ID: "莫宁",
     LYNAE_ID: "琳奈",
     AEMEATH_ID: "爱弥斯",
+    AUGUSTA_ID: "奥古斯塔",
+    LUNO_ID: "尤诺",
+    PHROLOVA_ID: "弗洛洛",
 }
 
 RUNNER_ALIASES: dict[str, int] = {
@@ -129,6 +141,9 @@ RUNNER_ALIASES: dict[str, int] = {
     "mornye": MORNYE_ID,
     "lynae": LYNAE_ID,
     "aemeath": AEMEATH_ID,
+    "augusta": AUGUSTA_ID,
+    "luno": LUNO_ID,
+    "phrolova": PHROLOVA_ID,
 }
 
 NAME_TO_RUNNER: dict[str, int] = {name: runner for runner, name in RUNNER_NAMES.items()}

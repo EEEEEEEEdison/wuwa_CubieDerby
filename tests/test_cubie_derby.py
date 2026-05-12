@@ -28,6 +28,7 @@ from cubie_derby import (
     make_start_grid,
     mark_sigrika_debuffs,
     maybe_trigger_aemeath_after_active_move,
+    maybe_trigger_luno_after_action,
     maybe_trigger_player1_skill_after_action,
     initial_player_order,
     move_npc,
@@ -408,6 +409,9 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(parse_runner("mornye"), 18)
         self.assertEqual(parse_runner("lynae"), 19)
         self.assertEqual(parse_runner("aemeath"), 20)
+        self.assertEqual(parse_runner("augusta"), 21)
+        self.assertEqual(parse_runner("luno"), 22)
+        self.assertEqual(parse_runner("phrolova"), 23)
         self.assertEqual(parse_runner("西格莉卡"), 13)
         self.assertEqual(parse_runner("陆赫斯"), 14)
         self.assertEqual(parse_runner("达尼娅"), 15)
@@ -416,13 +420,16 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(parse_runner("莫宁"), 18)
         self.assertEqual(parse_runner("琳奈"), 19)
         self.assertEqual(parse_runner("爱弥斯"), 20)
+        self.assertEqual(parse_runner("奥古斯塔"), 21)
+        self.assertEqual(parse_runner("尤诺"), 22)
+        self.assertEqual(parse_runner("弗洛洛"), 23)
 
     def test_parse_random_runners_defaults_to_six_unique_ids(self):
         runners = parse_runner_tokens(["random"], rng=random.Random(42))
 
         self.assertEqual(len(runners), 6)
         self.assertEqual(len(set(runners)), 6)
-        self.assertTrue(all(1 <= runner <= 20 for runner in runners))
+        self.assertTrue(all(1 <= runner <= 23 for runner in runners))
         self.assertEqual(runners, parse_runner_tokens(["random"], rng=random.Random(42)))
 
     def test_parse_random_runners_supports_custom_count(self):
@@ -454,10 +461,10 @@ class CubieDerbyTests(unittest.TestCase):
 
     def test_season_runner_pool_matches_expected_rosters(self):
         self.assertEqual(season_runner_pool(1), tuple(range(1, 13)))
-        self.assertEqual(season_runner_pool(2), (1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20))
+        self.assertEqual(season_runner_pool(2), (1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23))
 
     def test_season_roster_combination_count_matches_expected_value(self):
-        self.assertEqual(season_roster_combination_count(2, 6), 5005)
+        self.assertEqual(season_roster_combination_count(2, 6), 18564)
 
     def test_season_roster_scan_aggregates_all_combinations(self):
         args = argparse_namespace(
@@ -1383,6 +1390,84 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("检查第6格是否为打乱顺序格", first_action)
         self.assertIn("效果：随机打乱格内顺序", first_action)
         self.assertEqual(apply_sigrika_debuff(player=19, total_steps=0, debuffed={19}), 0)
+
+    def test_augusta_skips_turn_when_leftmost_and_is_forced_last_next_round(self):
+        config = RaceConfig(
+            runners=(21, 12),
+            track_length=8,
+            start_grid={0: (21, 12)},
+            initial_order_mode="start",
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.9, dice_value=1), trace=trace)
+        text = trace.text()
+        first_action = first_trace_action(text, "奥古斯塔")
+
+        self.assertIn("奥古斯塔技能触发：", first_action)
+        self.assertIn("本回合不行动，下回合固定最后行动且不再判定自身技能", first_action)
+        self.assertIn("奥古斯塔本回合无法移动：", first_action)
+
+        round_two = text[text.index("=== 第2轮 ===") :]
+        lines = round_two.splitlines()
+        order_index = next(i for i, line in enumerate(lines) if line.startswith("本轮行动顺序："))
+        order_text = lines[order_index + 1].strip()
+        self.assertTrue(order_text.endswith("奥古斯塔"))
+        self.assertIn("奥古斯塔技能本回合不判定：", round_two)
+
+    def test_phrolova_gets_plus_three_when_rightmost_with_other_runners(self):
+        config = RaceConfig(
+            runners=(3, 23),
+            track_length=8,
+            start_grid={0: (3, 23)},
+            initial_order_mode="fixed",
+            fixed_initial_order=(23, 3),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.9, dice_value=1), trace=trace)
+        first_action = first_trace_action(trace.text(), "弗洛洛")
+
+        self.assertIn("弗洛洛技能触发：", first_action)
+        self.assertIn("效果：本回合额外前进3格", first_action)
+        self.assertIn("总步数：4", first_action)
+        self.assertIn("到达位置：第4格", first_action)
+
+    def test_luno_gathers_all_non_npc_runners_to_own_cell_in_rank_order(self):
+        config = RaceConfig(
+            runners=(22, 1, 3, 5, 7),
+            track_length=32,
+            start_grid={17: (22,), 25: (1,), 21: (3,), 14: (5,), 9: (7,)},
+        )
+        grid = {17: [22], 25: [1], 21: [3], 14: [5], 9: [7]}
+        progress = {22: 17, 1: 25, 3: 21, 5: 14, 7: 9}
+        state = RaceSkillState()
+        rng = random.Random(1)
+
+        move_single_runner(
+            grid=grid,
+            progress=progress,
+            config=config,
+            player=22,
+            total_steps=1,
+            rng=rng,
+            skill_state=state,
+        )
+        maybe_trigger_luno_after_action(
+            grid=grid,
+            progress=progress,
+            config=config,
+            skill_state=state,
+        )
+
+        self.assertEqual(grid[18], [1, 3, 22, 5, 7])
+        self.assertEqual(progress[22], 18)
+        self.assertEqual(progress[1], 18)
+        self.assertEqual(progress[3], 18)
+        self.assertEqual(progress[5], 18)
+        self.assertEqual(progress[7], 18)
+        self.assertFalse(state.luno_available)
+        self.assertEqual(state.success_counts[22], 1)
 
     def test_aemeath_triggers_only_after_active_move_ends(self):
         config = RaceConfig(runners=(20, 2, 3), track_length=32, start_grid={15: (20,), 22: (2,), 25: (3,)})
