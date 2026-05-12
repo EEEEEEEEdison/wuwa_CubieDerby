@@ -271,6 +271,22 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertIn("赛制：自定义", text)
 
+    def test_format_summary_includes_custom_start_layout(self):
+        config = RaceConfig(
+            runners=(3, 4, 8, 10),
+            track_length=24,
+            start_grid=make_start_grid(24, {1: (10,), 2: (4, 3), 3: (8,)}),
+            name="自定义",
+        )
+        summary = run_monte_carlo(config, 10, seed=1)
+
+        text = format_summary(summary)
+        data = summary_to_dict(summary)
+
+        self.assertIn("自定义站位：第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]", text)
+        self.assertEqual(data["config"]["start_layout"], "第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]")
+        self.assertEqual(data["config"]["start_grid"], {"1": [10], "2": [4, 3], "3": [8]})
+
     def test_parse_custom_start_spec(self):
         self.assertEqual(parse_start_spec("1:10;2:4,3;3:8"), {1: (10,), 2: (4, 3), 3: (8,)})
 
@@ -1308,6 +1324,26 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(doubled_state.success_counts[19], 1)
         self.assertEqual((stopped_steps, stopped_adjustment), (0, -3))
         self.assertNotIn(19, stopped_state.success_counts)
+
+    def test_lynae_cannot_move_on_shuffle_cell_still_triggers_shuffle(self):
+        config = RaceConfig(
+            runners=(19, 3),
+            track_length=32,
+            start_grid={6: (19,), 1: (3,)},
+            season=2,
+            shuffle_cells=frozenset({6}),
+            initial_order_mode="fixed",
+            fixed_initial_order=(19, 3),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.7, dice_value=1), trace=trace)
+        first_action = first_trace_action(trace.text(), "琳奈")
+
+        self.assertIn("琳奈本回合无法移动：", first_action)
+        self.assertIn("后续：若当前停留格是打乱格，则触发打乱效果", first_action)
+        self.assertIn("检查第6格是否为打乱顺序格", first_action)
+        self.assertIn("效果：随机打乱格内顺序", first_action)
         self.assertEqual(apply_sigrika_debuff(player=19, total_steps=0, debuffed={19}), 0)
 
     def test_aemeath_triggers_only_after_active_move_ends(self):

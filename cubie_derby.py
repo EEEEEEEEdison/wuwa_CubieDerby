@@ -835,8 +835,19 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
 
             if total_steps <= 0:
                 new_progress = progress[player]
+                current_pos = display_position(new_progress, track_length)
                 if trace:
-                    log_block(trace, f"{format_runner(player)}本回合无法移动：", "移动结算：跳过")
+                    log_block(
+                        trace,
+                        f"{format_runner(player)}本回合无法移动：",
+                        "移动结算：原地停留",
+                        "后续：若当前停留格是打乱格，则触发打乱效果",
+                    )
+                if current_pos in config.shuffle_cells:
+                    if trace:
+                        log_timing(trace, "行动结束", f"检查{format_position(current_pos)}是否为打乱顺序格")
+                    apply_shuffle_cell_effect(grid, current_pos, rng, trace=trace)
+                new_progress = progress[player]
             elif cantarella_move:
                 new_progress, cantarella_state, cantarella_group = move_cantarella(
                     grid=grid,
@@ -1318,19 +1329,7 @@ def apply_cell_effects(
     if trace and (pos in config.shuffle_cells or pos in config.forward_cells or pos in config.backward_cells):
         log_timing(trace, "落点结算后", f"检查{format_position(pos)}的赛道特殊格效果")
     if pos in config.shuffle_cells:
-        before = list(grid[pos])
-        shuffled = shuffle_without_npc(grid[pos], rng)
-        grid[pos] = shuffled
-        if trace:
-            log_block(
-                trace,
-                f"特殊格 {format_position(pos)}：",
-                "效果：随机打乱格内顺序",
-                f"打乱对象：{format_cell([runner for runner in before if runner != NPC_ID])}",
-                "NPC处理：不参与打乱，结算后固定最右",
-                f"打乱前：{format_cell(before)}",
-                f"打乱后：{format_cell(grid[pos])}",
-            )
+        apply_shuffle_cell_effect(grid, pos, rng, trace=trace)
     if pos in config.forward_cells:
         move_group_due_to_cell_effect(
             grid,
@@ -1638,6 +1637,27 @@ def shuffle_without_npc(cell: Sequence[int], rng: random.Random) -> list[int]:
             runners.append(runner)
     rng.shuffle(runners)
     return runners + [NPC_ID] * npc_count
+
+
+def apply_shuffle_cell_effect(
+    grid: dict[int, list[int]],
+    pos: int,
+    rng: random.Random,
+    *,
+    trace: bool | TraceLogger = False,
+) -> None:
+    before = list(grid[pos])
+    grid[pos] = shuffle_without_npc(grid[pos], rng)
+    if trace:
+        log_block(
+            trace,
+            f"特殊格 {format_position(pos)}：",
+            "效果：随机打乱格内顺序",
+            f"打乱对象：{format_cell([runner for runner in before if runner != NPC_ID])}",
+            "NPC处理：不参与打乱，结算后固定最右",
+            f"打乱前：{format_cell(before)}",
+            f"打乱后：{format_cell(grid[pos])}",
+        )
 
 
 def adjust_cell_effect_delta(
@@ -2442,6 +2462,12 @@ def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
             "npc_enabled": summary.config.npc_enabled,
             "random_start_stack": summary.config.random_start_stack,
             "random_start_position": summary.config.random_start_position,
+            "start_grid": {str(pos): list(cell) for pos, cell in sorted(summary.config.start_grid.items()) if cell},
+            "start_layout": (
+                None
+                if summary.config.random_start_stack
+                else format_start_layout(summary.config.start_grid)
+            ),
             "disabled_skills": sorted(summary.config.disabled_skills),
         },
         "best": {
@@ -2586,10 +2612,16 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
         f"赛道长度：{summary.config.track_length}格",
         f"用时：{format_elapsed(summary.elapsed_seconds)}",
         f"速度：{format_rate(races_per_second(summary))}",
-        "",
-        format_table_row(headers, widths, aligns),
-        format_table_separator(widths),
     ]
+    if not summary.config.random_start_stack and summary.config.start_grid:
+        lines.append(f"自定义站位：{format_start_layout(summary.config.start_grid)}")
+    lines.extend(
+        [
+            "",
+            format_table_row(headers, widths, aligns),
+            format_table_separator(widths),
+        ]
+    )
     lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
     best = summary.best
     lines.extend(
@@ -2823,6 +2855,14 @@ def format_position_list(positions: Iterable[int]) -> str:
     if not items:
         return "无"
     return "[" + ", ".join(format_position(pos) for pos in items) + "]"
+
+
+def format_start_layout(start_grid: dict[int, Sequence[int]]) -> str:
+    parts = []
+    for pos, cell in sorted(start_grid.items()):
+        if cell:
+            parts.append(f"{format_position(pos)}：{format_cell(cell)}")
+    return "；".join(parts) if parts else "无"
 
 
 def log(enabled: bool | TraceLogger, message: str) -> None:
