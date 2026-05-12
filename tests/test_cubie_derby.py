@@ -1,3 +1,4 @@
+import io
 import random
 import tempfile
 import unittest
@@ -5,6 +6,7 @@ from pathlib import Path
 
 from cubie_derby import (
     MonteCarloAccumulator,
+    ProgressBar,
     RaceSkillState,
     RaceConfig,
     RaceMovementState,
@@ -20,6 +22,7 @@ from cubie_derby import (
     display_width,
     format_summary,
     format_season_roster_scan_summary,
+    format_simulation_overview_lines,
     summary_to_dict,
     main,
     make_start_grid,
@@ -286,6 +289,41 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("自定义站位：第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]", text)
         self.assertEqual(data["config"]["start_layout"], "第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]")
         self.assertEqual(data["config"]["start_grid"], {"1": [10], "2": [4, 3], "3": [8]})
+
+    def test_format_simulation_overview_lines_supports_pending_status(self):
+        config = RaceConfig(
+            runners=(3, 4, 8, 10),
+            track_length=24,
+            start_grid=make_start_grid(24, {1: (10,), 2: (4, 3), 3: (8,)}),
+            season=2,
+            name="自定义",
+        )
+
+        lines = format_simulation_overview_lines(config, 1_000_000, pending=True)
+
+        self.assertEqual(
+            lines,
+            [
+                "赛制：自定义",
+                "赛季：第2季",
+                "模拟次数：1,000,000",
+                "赛道长度：24格",
+                "用时：进行中",
+                "速度：计算中",
+                "自定义站位：第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]",
+            ],
+        )
+
+    def test_progress_bar_renders_zero_percent_immediately(self):
+        stream = io.StringIO()
+
+        progress = ProgressBar(100, "模拟进度", stream=stream)
+
+        output = stream.getvalue()
+        self.assertIn("模拟进度", output)
+        self.assertIn("0/100", output)
+        self.assertIn("0.00%", output)
+        progress.close()
 
     def test_parse_custom_start_spec(self):
         self.assertEqual(parse_start_spec("1:10;2:4,3;3:8"), {1: (10,), 2: (4, 3), 3: (8,)})

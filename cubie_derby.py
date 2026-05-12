@@ -11,7 +11,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, TextIO
 
 from cubie_derby_core.runners import (
     AEMEATH_ID,
@@ -135,6 +135,66 @@ class TraceLogger:
 
     def text(self) -> str:
         return "\n".join(self.lines) + ("\n" if self.lines else "")
+
+
+class ProgressBar:
+    def __init__(
+        self,
+        total: int,
+        label: str,
+        *,
+        enabled: bool = True,
+        stream: TextIO | None = None,
+    ) -> None:
+        self.total = max(1, total)
+        self.label = label
+        self.enabled = enabled
+        self.stream = stream or sys.stderr
+        self.current = 0
+        self.started_at = time.perf_counter()
+        self.last_render_at = 0.0
+        self.last_message_width = 0
+        self.closed = False
+        if self.enabled:
+            self.render(now=self.started_at)
+
+    def advance(self, amount: int) -> None:
+        if not self.enabled or self.closed or amount <= 0:
+            return
+        self.current = min(self.total, self.current + amount)
+        now = time.perf_counter()
+        if self.current < self.total and now - self.last_render_at < 0.1:
+            return
+        self.render(now)
+
+    def render(self, now: float | None = None) -> None:
+        if not self.enabled or self.closed:
+            return
+        now = time.perf_counter() if now is None else now
+        ratio = self.current / self.total
+        width = 28
+        filled = min(width, int(ratio * width))
+        bar = "#" * filled + "-" * (width - filled)
+        elapsed = max(now - self.started_at, 1e-9)
+        speed = self.current / elapsed
+        message = (
+            f"\r{self.label} [{bar}] {ratio:6.2%} "
+            f"({self.current:,}/{self.total:,}) {speed:,.0f} 局/秒"
+        )
+        padding = " " * max(0, self.last_message_width - len(message))
+        self.stream.write(message + padding)
+        self.stream.flush()
+        self.last_message_width = len(message)
+        self.last_render_at = now
+
+    def close(self) -> None:
+        if not self.enabled or self.closed:
+            return
+        self.current = self.total
+        self.render()
+        self.stream.write("\n")
+        self.stream.flush()
+        self.closed = True
 
 
 @dataclass(frozen=True)
@@ -2081,6 +2141,8 @@ def run_monte_carlo(
     *,
     seed: int | None = None,
     workers: int = 1,
+    show_progress: bool = False,
+    progress: ProgressBar | None = None,
 ) -> SimulationSummary:
     if iterations <= 0:
         raise ValueError("iterations must be positive")
@@ -2088,23 +2150,37 @@ def run_monte_carlo(
         workers = mp.cpu_count()
     workers = max(1, min(workers, iterations))
 
-    if workers == 1:
-        acc = simulate_chunk(config, iterations, seed)
-        return acc.to_summary(config)
+    owned_progress: ProgressBar | None = None
+    if progress is None and show_progress:
+        owned_progress = ProgressBar(iterations, "模拟进度")
+        progress = owned_progress
 
-    master_rng = random.Random(seed)
-    chunk_sizes = split_iterations(iterations, workers)
-    chunk_args = [
-        (config, chunk_size, master_rng.randrange(1, 2**63))
-        for chunk_size in chunk_sizes
-        if chunk_size > 0
-    ]
-    with mp.Pool(processes=len(chunk_args)) as pool:
-        parts = pool.map(simulate_chunk_from_tuple, chunk_args)
-    acc = MonteCarloAccumulator(config.runners)
-    for part in parts:
-        acc.merge(part)
-    return acc.to_summary(config)
+    try:
+        if workers == 1:
+            acc = simulate_chunk(config, iterations, seed, progress=progress)
+            return acc.to_summary(config)
+
+        master_rng = random.Random(seed)
+        chunk_sizes = split_iterations(iterations, workers)
+        chunk_args = [
+            (config, chunk_size, master_rng.randrange(1, 2**63))
+            for chunk_size in chunk_sizes
+            if chunk_size > 0
+        ]
+        acc = MonteCarloAccumulator(config.runners)
+        with mp.Pool(processes=len(chunk_args)) as pool:
+            if progress is None:
+                parts = pool.map(simulate_chunk_from_tuple, chunk_args)
+                for part in parts:
+                    acc.merge(part)
+            else:
+                for part in pool.imap_unordered(simulate_chunk_from_tuple, chunk_args):
+                    acc.merge(part)
+                    progress.advance(part.iterations)
+        return acc.to_summary(config)
+    finally:
+        if owned_progress is not None:
+            owned_progress.close()
 
 
 def run_skill_ablation(
@@ -2114,49 +2190,71 @@ def run_skill_ablation(
     targets: Sequence[int] | None = None,
     seed: int | None = None,
     workers: int = 1,
+    show_progress: bool = False,
 ) -> SkillAblationSummary:
     evaluated = resolve_skill_ablation_runners(config.runners, targets)
 
     total_start = time.perf_counter()
-    base_start = time.perf_counter()
-    base_summary = with_elapsed(
-        run_monte_carlo(config, iterations, seed=seed, workers=workers),
-        time.perf_counter() - base_start,
-    )
-    base_rows = {row.runner: row for row in base_summary.rows}
-
-    seed_rng = random.Random(seed)
-    rows: list[SkillAblationRow] = []
-    for runner in evaluated:
-        disabled_seed = seed_rng.randrange(1, 2**63) if seed is not None else None
-        disabled_config = replace(
-            config,
-            disabled_skills=frozenset(set(config.disabled_skills) | {runner}),
-        )
-        disabled_summary = run_monte_carlo(disabled_config, iterations, seed=disabled_seed, workers=workers)
-        disabled_rows = {row.runner: row for row in disabled_summary.rows}
-        enabled_row = base_rows[runner]
-        disabled_row = disabled_rows[runner]
-        rows.append(
-            SkillAblationRow(
-                runner=runner,
-                name=enabled_row.name,
-                enabled_win_rate=enabled_row.win_rate,
-                disabled_win_rate=disabled_row.win_rate,
-                net_win_rate=enabled_row.win_rate - disabled_row.win_rate,
-                skill_average_success_count=enabled_row.skill_average_success_count,
-                skill_marginal_win_rate=enabled_row.skill_marginal_win_rate,
-                success_distribution=enabled_row.skill_success_distribution,
+    if show_progress:
+        emit_progress_overview(
+            format_skill_ablation_overview_lines(
+                config,
+                iterations=iterations,
+                scenario_count=len(evaluated) + 1,
+                total_simulated_races=iterations * (len(evaluated) + 1),
+                pending=True,
             )
         )
+    progress = ProgressBar(iterations * (len(evaluated) + 1), "技能消融", enabled=show_progress) if show_progress else None
+    base_start = time.perf_counter()
+    try:
+        base_summary = with_elapsed(
+            run_monte_carlo(config, iterations, seed=seed, workers=workers, progress=progress),
+            time.perf_counter() - base_start,
+        )
+        base_rows = {row.runner: row for row in base_summary.rows}
 
-    return SkillAblationSummary(
-        iterations=iterations,
-        total_simulated_races=iterations * (len(evaluated) + 1),
-        base_summary=base_summary,
-        rows=tuple(rows),
-        elapsed_seconds=time.perf_counter() - total_start,
-    )
+        seed_rng = random.Random(seed)
+        rows: list[SkillAblationRow] = []
+        for runner in evaluated:
+            disabled_seed = seed_rng.randrange(1, 2**63) if seed is not None else None
+            disabled_config = replace(
+                config,
+                disabled_skills=frozenset(set(config.disabled_skills) | {runner}),
+            )
+            disabled_summary = run_monte_carlo(
+                disabled_config,
+                iterations,
+                seed=disabled_seed,
+                workers=workers,
+                progress=progress,
+            )
+            disabled_rows = {row.runner: row for row in disabled_summary.rows}
+            enabled_row = base_rows[runner]
+            disabled_row = disabled_rows[runner]
+            rows.append(
+                SkillAblationRow(
+                    runner=runner,
+                    name=enabled_row.name,
+                    enabled_win_rate=enabled_row.win_rate,
+                    disabled_win_rate=disabled_row.win_rate,
+                    net_win_rate=enabled_row.win_rate - disabled_row.win_rate,
+                    skill_average_success_count=enabled_row.skill_average_success_count,
+                    skill_marginal_win_rate=enabled_row.skill_marginal_win_rate,
+                    success_distribution=enabled_row.skill_success_distribution,
+                )
+            )
+
+        return SkillAblationSummary(
+            iterations=iterations,
+            total_simulated_races=iterations * (len(evaluated) + 1),
+            base_summary=base_summary,
+            rows=tuple(rows),
+            elapsed_seconds=time.perf_counter() - total_start,
+        )
+    finally:
+        if progress is not None:
+            progress.close()
 
 
 def validate_season_roster_scan_args(args: argparse.Namespace) -> tuple[int, ...]:
@@ -2197,7 +2295,7 @@ def season_roster_combination_count(season: int, field_size: int) -> int:
     return math.comb(len(roster), field_size)
 
 
-def run_season_roster_scan(args: argparse.Namespace) -> SeasonRosterScanSummary:
+def run_season_roster_scan(args: argparse.Namespace, *, show_progress: bool = False) -> SeasonRosterScanSummary:
     roster = validate_season_roster_scan_args(args)
     combo_list = list(combinations(roster, args.field_size))
     total_start = time.perf_counter()
@@ -2217,26 +2315,57 @@ def run_season_roster_scan(args: argparse.Namespace) -> SeasonRosterScanSummary:
         workers = mp.cpu_count()
     workers = max(1, min(workers, len(task_args)))
 
-    if workers == 1:
-        for task in task_args:
-            acc.add_summary(run_season_roster_scan_task(task))
-    else:
-        chunksize = max(1, len(task_args) // (workers * 4))
-        with mp.Pool(processes=workers) as pool:
-            for summary in pool.imap_unordered(run_season_roster_scan_task, task_args, chunksize=chunksize):
-                acc.add_summary(summary)
-
     template_config = build_config_from_args(args, runners_override=combo_list[0])
-    return acc.to_summary(
-        season=args.season,
-        field_size=args.field_size,
-        iterations_per_combination=args.iterations,
-        combination_count=len(combo_list),
-        start_spec=args.start,
-        track_length=template_config.track_length,
-        initial_order_mode=template_config.initial_order_mode,
-        elapsed_seconds=time.perf_counter() - total_start,
-    )
+    if show_progress:
+        emit_progress_overview(
+            format_season_roster_scan_overview_lines(
+                season=args.season,
+                roster=roster,
+                field_size=args.field_size,
+                start_spec=args.start,
+                initial_order_mode=template_config.initial_order_mode,
+                combination_count=len(combo_list),
+                iterations_per_combination=args.iterations,
+                total_simulated_races=len(combo_list) * args.iterations,
+                track_length=template_config.track_length,
+                pending=True,
+            )
+        )
+    progress = ProgressBar(len(combo_list) * args.iterations, "阵容遍历", enabled=show_progress) if show_progress else None
+
+    try:
+        if workers == 1:
+            for config, iterations, seed in task_args:
+                acc.add_summary(
+                    run_monte_carlo(
+                        config,
+                        iterations,
+                        seed=seed,
+                        workers=1,
+                        progress=progress,
+                    )
+                )
+        else:
+            chunksize = max(1, len(task_args) // (workers * 4))
+            with mp.Pool(processes=workers) as pool:
+                for summary in pool.imap_unordered(run_season_roster_scan_task, task_args, chunksize=chunksize):
+                    acc.add_summary(summary)
+                    if progress is not None:
+                        progress.advance(summary.iterations)
+
+        return acc.to_summary(
+            season=args.season,
+            field_size=args.field_size,
+            iterations_per_combination=args.iterations,
+            combination_count=len(combo_list),
+            start_spec=args.start,
+            track_length=template_config.track_length,
+            initial_order_mode=template_config.initial_order_mode,
+            elapsed_seconds=time.perf_counter() - total_start,
+        )
+    finally:
+        if progress is not None:
+            progress.close()
 
 
 def resolve_skill_ablation_runners(
@@ -2266,17 +2395,35 @@ def simulate_chunk_from_tuple(args: tuple[RaceConfig, int, int | None]) -> Monte
     return simulate_chunk(config, iterations, seed)
 
 
-def simulate_chunk(config: RaceConfig, iterations: int, seed: int | None) -> MonteCarloAccumulator:
+def simulate_chunk(
+    config: RaceConfig,
+    iterations: int,
+    seed: int | None,
+    *,
+    progress: ProgressBar | None = None,
+) -> MonteCarloAccumulator:
     rng = random.Random(seed)
     acc = MonteCarloAccumulator(config.runners)
-    for _ in range(iterations):
+    progress_batch = progress_batch_size(iterations)
+    pending_progress = 0
+    for index in range(iterations):
         acc.add(simulate_race(config, rng))
+        pending_progress += 1
+        if progress is not None and (pending_progress >= progress_batch or index == iterations - 1):
+            progress.advance(pending_progress)
+            pending_progress = 0
     return acc
 
 
 def split_iterations(iterations: int, workers: int) -> list[int]:
     base, remainder = divmod(iterations, workers)
     return [base + (1 if i < remainder else 0) for i in range(workers)]
+
+
+def progress_batch_size(iterations: int) -> int:
+    if iterations <= 200:
+        return 1
+    return max(1, min(5_000, iterations // 200))
 
 
 def parse_runner(token: str) -> int:
@@ -2605,16 +2752,12 @@ def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) ->
     widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
     aligns = ("left", "right", "right", "right", "right", "right", "right", "right")
 
-    lines = [
-        f"赛制：{summary.config.name}",
-        f"赛季：第{summary.config.season}季",
-        f"模拟次数：{summary.iterations:,}",
-        f"赛道长度：{summary.config.track_length}格",
-        f"用时：{format_elapsed(summary.elapsed_seconds)}",
-        f"速度：{format_rate(races_per_second(summary))}",
-    ]
-    if not summary.config.random_start_stack and summary.config.start_grid:
-        lines.append(f"自定义站位：{format_start_layout(summary.config.start_grid)}")
+    lines = format_simulation_overview_lines(
+        summary.config,
+        summary.iterations,
+        elapsed_seconds=summary.elapsed_seconds,
+        rate=races_per_second(summary),
+    )
     lines.extend(
         [
             "",
@@ -2653,23 +2796,26 @@ def format_season_roster_scan_summary(summary: SeasonRosterScanSummary) -> str:
     columns = [headers, *table_rows]
     widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
     aligns = ("left", "right", "right", "right", "right", "right", "right", "right", "right")
-    lines = [
-        "赛季角色池遍历统计：",
-        f"赛季：第{summary.season}季",
-        f"角色池：{len(summary.roster)}人（{format_runner_list(summary.roster)}）",
-        f"每组人数：{summary.field_size}人",
-        f"起点配置：{summary.start_spec}",
-        f"首轮顺序：{format_initial_order_mode(summary.initial_order_mode)}",
-        f"组合数：{summary.combination_count:,}组",
-        f"每组模拟：{summary.iterations_per_combination:,}局",
-        f"总模拟局数：{summary.total_simulated_races:,}局",
-        f"赛道长度：{summary.track_length}格",
-        f"用时：{format_elapsed(summary.elapsed_seconds)}",
-        f"速度：{format_rate(season_roster_scan_races_per_second(summary))}",
-        "",
-        format_table_row(headers, widths, aligns),
-        format_table_separator(widths),
-    ]
+    lines = format_season_roster_scan_overview_lines(
+        season=summary.season,
+        roster=summary.roster,
+        field_size=summary.field_size,
+        start_spec=summary.start_spec,
+        initial_order_mode=summary.initial_order_mode,
+        combination_count=summary.combination_count,
+        iterations_per_combination=summary.iterations_per_combination,
+        total_simulated_races=summary.total_simulated_races,
+        track_length=summary.track_length,
+        elapsed_seconds=summary.elapsed_seconds,
+        rate=season_roster_scan_races_per_second(summary),
+    )
+    lines.extend(
+        [
+            "",
+            format_table_row(headers, widths, aligns),
+            format_table_separator(widths),
+        ]
+    )
     lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
     best = summary.best
     lines.extend(
@@ -2785,6 +2931,93 @@ def format_rate(rate: float | None) -> str:
     if rate is None:
         return "未统计"
     return f"{rate:,.0f} 局/秒"
+
+
+def format_runtime_status_line(label: str, value: str) -> str:
+    return f"{label}：{value}"
+
+
+def format_simulation_overview_lines(
+    config: RaceConfig,
+    iterations: int,
+    *,
+    elapsed_seconds: float | None = None,
+    rate: float | None = None,
+    pending: bool = False,
+) -> list[str]:
+    lines = [
+        format_runtime_status_line("赛制", config.name),
+        format_runtime_status_line("赛季", f"第{config.season}季"),
+        format_runtime_status_line("模拟次数", f"{iterations:,}"),
+        format_runtime_status_line("赛道长度", f"{config.track_length}格"),
+        format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
+        format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
+    ]
+    if not config.random_start_stack and config.start_grid:
+        lines.append(format_runtime_status_line("自定义站位", format_start_layout(config.start_grid)))
+    return lines
+
+
+def format_skill_ablation_overview_lines(
+    config: RaceConfig,
+    *,
+    iterations: int,
+    scenario_count: int,
+    total_simulated_races: int,
+    elapsed_seconds: float | None = None,
+    rate: float | None = None,
+    pending: bool = False,
+) -> list[str]:
+    lines = [
+        format_runtime_status_line("赛制", config.name),
+        format_runtime_status_line("赛季", f"第{config.season}季"),
+        format_runtime_status_line("每组模拟", f"{iterations:,}局"),
+        format_runtime_status_line("消融组数", f"{scenario_count - 1}个角色 + 1个技能全开基准"),
+        format_runtime_status_line("总模拟局数", f"{total_simulated_races:,}局"),
+        format_runtime_status_line("赛道长度", f"{config.track_length}格"),
+        format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
+        format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
+    ]
+    if not config.random_start_stack and config.start_grid:
+        lines.append(format_runtime_status_line("自定义站位", format_start_layout(config.start_grid)))
+    return lines
+
+
+def format_season_roster_scan_overview_lines(
+    *,
+    season: int,
+    roster: Sequence[int],
+    field_size: int,
+    start_spec: str,
+    initial_order_mode: str,
+    combination_count: int,
+    iterations_per_combination: int,
+    total_simulated_races: int,
+    track_length: int,
+    elapsed_seconds: float | None = None,
+    rate: float | None = None,
+    pending: bool = False,
+) -> list[str]:
+    return [
+        "赛季角色池遍历统计：",
+        format_runtime_status_line("赛季", f"第{season}季"),
+        format_runtime_status_line("角色池", f"{len(roster)}人（{format_runner_list(roster)}）"),
+        format_runtime_status_line("每组人数", f"{field_size}人"),
+        format_runtime_status_line("起点配置", start_spec),
+        format_runtime_status_line("首轮顺序", format_initial_order_mode(initial_order_mode)),
+        format_runtime_status_line("组合数", f"{combination_count:,}组"),
+        format_runtime_status_line("每组模拟", f"{iterations_per_combination:,}局"),
+        format_runtime_status_line("总模拟局数", f"{total_simulated_races:,}局"),
+        format_runtime_status_line("赛道长度", f"{track_length}格"),
+        format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
+        format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
+    ]
+
+
+def emit_progress_overview(lines: Sequence[str], *, stream: TextIO | None = None) -> None:
+    output = stream or sys.stderr
+    output.write("\n".join(lines) + "\n")
+    output.flush()
 
 
 def format_table_row(cells: Sequence[str], widths: Sequence[int], aligns: Sequence[str]) -> str:
@@ -2990,9 +3223,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
     ablation_summary: SkillAblationSummary | None = None
     season_scan_summary: SeasonRosterScanSummary | None = None
+    show_progress = sys.stderr.isatty() and not args.json
     try:
         if args.season_roster_scan:
-            season_scan_summary = run_season_roster_scan(args)
+            season_scan_summary = run_season_roster_scan(args, show_progress=show_progress)
             if args.json:
                 print(json.dumps(season_roster_scan_to_dict(season_scan_summary), ensure_ascii=False, indent=2))
             else:
@@ -3020,11 +3254,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 targets=targets,
                 seed=args.seed,
                 workers=args.workers,
+                show_progress=show_progress,
             )
             summary = ablation_summary.base_summary
         else:
             start_time = time.perf_counter()
-            summary = run_monte_carlo(config, args.iterations, seed=args.seed, workers=args.workers)
+            if show_progress:
+                emit_progress_overview(
+                    format_simulation_overview_lines(
+                        config,
+                        args.iterations,
+                        pending=True,
+                    )
+                )
+            summary = run_monte_carlo(
+                config,
+                args.iterations,
+                seed=args.seed,
+                workers=args.workers,
+                show_progress=show_progress,
+            )
             summary = with_elapsed(summary, time.perf_counter() - start_time)
     except ValueError as exc:
         parser.error(str(exc))
