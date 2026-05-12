@@ -1,5 +1,10 @@
 # Wuthering Waves Cubie Derby Monte Carlo
 
+<p align="right">
+  <a href="README.md"><img src="https://img.shields.io/badge/Language-English-blue" alt="English" /></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/语言-中文-red" alt="Chinese" /></a>
+</p>
+
 Python Monte Carlo simulator for Cubie Derby race outcomes.
 
 Core things this project can simulate:
