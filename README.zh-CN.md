@@ -1,8 +1,8 @@
 # Wuthering Waves Cubie Derby Monte Carlo
 
 <p align="right">
-  <a href="README.md"><img src="https://img.shields.io/badge/Language-English-blue" alt="English" /></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/语言-中文-red" alt="Chinese" /></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/语言-中文-red" alt="Chinese" /></a>
+  <a href="README.en.md"><img src="https://img.shields.io/badge/Language-English-blue" alt="English" /></a>
 </p>
 
 这是一个用于模拟团子赛跑结果的 Python 蒙特卡洛工具。

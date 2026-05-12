@@ -1,46 +1,46 @@
 # Wuthering Waves Cubie Derby Monte Carlo
 
 <p align="right">
-  <a href="README.md"><img src="https://img.shields.io/badge/Language-English-blue" alt="English" /></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/语言-中文-red" alt="Chinese" /></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/语言-中文-red" alt="Chinese" /></a>
+  <a href="README.en.md"><img src="https://img.shields.io/badge/Language-English-blue" alt="English" /></a>
 </p>
 
-Python Monte Carlo simulator for Cubie Derby race outcomes.
+这是一个用于模拟团子赛跑结果的 Python 蒙特卡洛工具。
 
-Core things this project can simulate:
+这个项目当前可以模拟的核心内容包括：
 
-- Season 1 and Season 2 race rules.
-- Custom runner lineups and runner counts.
-- Full season-roster combination scans for a fixed field size.
-- Custom start layouts, including pre-start cells and random same-cell stacks.
-- Runner skills, Season 2 special cells, and the reverse-moving NPC.
-- Monte Carlo win-rate statistics, skill ablation, and single-race trace logs.
+- 第 1 季和第 2 季的赛道规则。
+- 自定义参赛角色组合和参赛人数。
+- 固定人数下，对整季角色池做全组合遍历统计。
+- 自定义起始站位，包括负格预起跑区和同格随机堆叠。
+- 角色技能、第 2 季特殊格、以及反向移动的 NPC。
+- 胜率统计、技能消融统计，以及单局逐过程 trace 日志。
 
-## Quick Start
+## 快速开始
 
-Run a basic Season 1 simulation. In this project, cell `1` is the usual start cell and cell `0` is the finish cell.
+运行一个基础的第 1 季模拟。在本项目的命名习惯中，第 `1` 格通常视为起点，第 `0` 格视为终点。
 
 ```powershell
 python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10
 ```
 
-Run with Season 2 rules. Season 2 uses a 32-position ring lap, special cells, and the reverse-moving NPC from round 3:
+运行第 2 季规则。第 2 季使用 32 格环形赛道，包含特殊格，并会在第 3 回合引入反向移动 NPC：
 
 ```powershell
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
 ```
 
-`--runners` selects the participants. You can freely change both the runner combination and the number of participants; see [Runner IDs and Skills](#runner-ids-and-skills) for the available ids, names, and skill notes.
+`--runners` 用于选择参赛角色。你可以自由更改角色组合和参赛人数；可用编号、名称和技能说明见下方的[角色编号与技能](#角色编号与技能)。
 
-## Parameter Guide
+## 参数说明
 
 ### `-n` / `--iterations`
 
-Set how many simulated races to run. Larger values give more stable Monte Carlo estimates, but take longer to finish.
+设置模拟局数。数值越大，蒙特卡洛结果越稳定，但运行时间也越长。
 
-When `--season-roster-scan` is enabled, `-n` means races per combination, not total races. For example, Season 2 has `15` runners in its actual roster, so a 6-runner scan uses `C(15, 6) = 5005` combinations. With `-n 10`, the total workload is `5005 * 10 = 50050` races.
+当启用 `--season-roster-scan` 时，`-n` 表示“每个组合跑多少局”，而不是总局数。比如第 2 季当前实际角色池有 `15` 名角色，做 6 人局全组合扫描时，一共有 `C(15, 6) = 5005` 个组合。若 `-n 10`，总模拟量就是 `5005 * 10 = 50050` 局。
 
-Example:
+示例：
 
 ```powershell
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
@@ -48,12 +48,12 @@ python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 1
 
 ### `--season`
 
-Select the ruleset.
+选择赛季规则。
 
-- `--season 1`: Season 1 rules, default lap length `24`.
-- `--season 2`: Season 2 rules, default lap length `32`, special cells enabled, NPC enabled from round 3.
+- `--season 1`：第 1 季规则，默认圈长 `24`。
+- `--season 2`：第 2 季规则，默认圈长 `32`，启用特殊格，并从第 3 回合开始启用 NPC。
 
-Examples:
+示例：
 
 ```powershell
 python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10 --seed 42
@@ -62,19 +62,19 @@ python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 1
 
 ### `--season-roster-scan`
 
-Enumerate every same-size combination from the selected season roster, run the simulator for each combination, and then aggregate the normal summary metrics back onto each runner.
+对所选赛季的角色池做“同人数全组合遍历”，每个组合都跑模拟，然后再把常规统计指标汇总回每名角色身上。
 
-This is useful when you want answers such as "in Season 2 six-runner matches, who has the highest overall win rate across all possible lineups?".
+这个模式适合回答类似这样的问题：“在第 2 季六人局里，跨越所有可能阵容后，谁的综合胜率最高？”
 
-Notes:
+说明：
 
-- Do not combine this mode with `--runners`; the season roster is chosen automatically from `--season`.
-- The current Season 1 scan pool is runners `1..12`.
-- The current Season 2 scan pool is `1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20`.
-- The printed table is aggregated per runner across every combination they appear in.
-- `--trace` and `--skill-ablation` are not used in this mode.
+- 该模式不要和 `--runners` 一起使用；角色池会根据 `--season` 自动选择。
+- 当前第 1 季扫描池是 `1..12`。
+- 当前第 2 季扫描池是 `1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20`。
+- 输出表会按角色汇总其出现在所有组合中的整体表现。
+- 该模式下不会使用 `--trace` 和 `--skill-ablation`。
 
-Example:
+示例：
 
 ```powershell
 python cubie_derby.py --season 2 --season-roster-scan --field-size 6 -n 10000 --start "1:*" --workers 0
@@ -82,31 +82,31 @@ python cubie_derby.py --season 2 --season-roster-scan --field-size 6 -n 10000 --
 
 ### `--field-size`
 
-Used together with `--season-roster-scan`. It sets the number of runners in each enumerated combination.
+与 `--season-roster-scan` 配合使用，用于指定每个组合里包含多少名参赛角色。
 
-Examples:
+示例：
 
-- `--field-size 6`: scan all 6-runner combinations in the chosen season roster.
-- `--field-size 4`: scan all 4-runner combinations in the chosen season roster.
+- `--field-size 6`：扫描该赛季角色池中的全部 6 人组合。
+- `--field-size 4`：扫描该赛季角色池中的全部 4 人组合。
 
 ### `--start`
 
-Define the start grid. The ring cells are displayed as `0..23` in Season 1 and `0..31` in Season 2. By this project's naming convention, cell `1` is the usual start cell and cell `0` is the finish cell. Pre-start cells `-3..0` are also supported.
+定义起始站位。第 1 季显示格为 `0..23`，第 2 季显示格为 `0..31`。按本项目的命名习惯，第 `1` 格通常视为起点，第 `0` 格视为终点。也支持 `-3..0` 的预起跑格。
 
-Common forms:
+常见写法：
 
-- `--start "1:*"`: all selected runners start together on cell `1`, with a fresh random left-to-right stack each simulated race. This is a good fit for scenarios such as the upper half of group-stage matches.
-- `--start "-3:2;-2:1,4;-1:3,6;1:5"`: custom layout with pre-start cells. This is a good fit for scenarios such as the lower half of group-stage matches with preset starting positions.
+- `--start "1:*"`：所有参赛角色都从第 `1` 格同格出发，每一局都会重新随机生成从左到右的堆叠顺序。这个写法很适合小组赛上半这种统一起点场景。
+- `--start "-3:2;-2:1,4;-1:3,6;1:5"`：带有预起跑格的自定义站位。这个写法很适合小组赛下半这种存在固定初始站位的场景。
 
-Notes:
+说明：
 
-- `*` cannot be mixed with fixed cells in the same `--start` string.
-- In normal simulation mode, when `*` is used, `--runners` must also be provided.
-- When `--season-roster-scan` is used, `--start` must be a reusable `*` form such as `--start "1:*"` or `--start "-1:*"`.
-- Within the same cell, runners are ordered from left to right, and the runner on the left ranks higher.
-- `--start "-3:2;-2:1,4;-1:3,6;1:5"` means: runner `2` starts on `-3`; runners `1` and `4` start together on `-2` from left to right; runners `3` and `6` start together on `-1` from left to right; runner `5` starts alone on cell `1`.
+- `*` 不能和固定格写法混在同一个 `--start` 字符串里。
+- 普通模拟模式下，如果用了 `*`，则必须同时提供 `--runners`。
+- `--season-roster-scan` 模式下，`--start` 必须是可复用的 `*` 形式，例如 `--start "1:*"` 或 `--start "-1:*"`。
+- 同一格内角色的顺序是从左到右，越靠左排名越高。
+- `--start "-3:2;-2:1,4;-1:3,6;1:5"` 的实际含义是：`2` 号角色起始在 `-3` 格；`1` 和 `4` 号角色一起从 `-2` 格出发，顺序从左到右；`3` 和 `6` 号角色一起从 `-1` 格出发，顺序从左到右；`5` 号角色单独从第 `1` 格出发。
 
-Examples:
+示例：
 
 ```powershell
 python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10 --seed 42
@@ -115,21 +115,21 @@ python cubie_derby.py --season 2 -n 100000 --start "-3:2;-2:1,4;-1:3,6;1:5" --ru
 
 ### `--runners`
 
-Choose the participants. You can pass runner ids, runner names, or a random sample.
+选择参赛角色。你可以传角色编号、角色名称，或让程序随机抽样。
 
-Common forms:
+常见写法：
 
 - `--runners 11 12 13 14 15 16`
 - `--runners 今汐 长离 卡卡罗 守岸人`
 - `--runners random`
 - `--runners random:4`
 
-Notes:
+说明：
 
-- `random` defaults to `6` unique runners from the current `1..20` pool.
-- Random runner sampling also follows `--seed`.
+- `random` 默认会从当前 `1..20` 编号池中随机抽取 `6` 个不重复角色。
+- 角色随机抽样同样会受到 `--seed` 影响。
 
-Examples:
+示例：
 
 ```powershell
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 42
@@ -138,15 +138,15 @@ python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners random --seed
 
 ### `--initial-order`
 
-Override the first-round action order only.
+只覆盖第一回合的行动顺序。
 
-- If omitted and `--start "1:*"` is used, the first-round order follows the randomized left-to-right stack order.
-- `--initial-order random`: reshuffle the first round independently from the stack order.
-- `--initial-order start`: force the first round to follow the current grid order.
-- `--initial-order 4,3,8,10`: fixed first-round order.
-- In `--season-roster-scan` mode, only `random` and `start` are supported, because fixed runner-id orders are not reusable across all combinations.
+- 若不填写，并且使用的是 `--start "1:*"`，则第一回合默认按该局随机堆叠后的从左到右顺序行动。
+- `--initial-order random`：第一回合行动顺序与堆叠顺序独立，单独再随机一次。
+- `--initial-order start`：强制第一回合按当前棋盘顺序行动。
+- `--initial-order 4,3,8,10`：指定固定的第一回合行动顺序。
+- 在 `--season-roster-scan` 模式里，只支持 `random` 和 `start`，因为固定角色编号顺序无法复用于全部组合。
 
-Examples:
+示例：
 
 ```powershell
 python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10 --initial-order random
@@ -155,9 +155,9 @@ python cubie_derby.py -n 100000 --lap-length 24 --start "1:10;2:4,3;3:8" --runne
 
 ### `--seed`
 
-Make random behavior reproducible. This affects Monte Carlo runs, random start stacks, `--runners random`, and season-roster scans when you want to rerun the same full traversal.
+用于让随机过程可复现。它会影响蒙特卡洛模拟、随机起始堆叠、`--runners random`，以及 `--season-roster-scan` 模式下的整套遍历结果。
 
-Example:
+示例：
 
 ```powershell
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners random --seed 42
@@ -165,9 +165,9 @@ python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners random --seed
 
 ### `--track-length` / `--lap-length`
 
-Override the default lap length. This is mainly useful for custom experiments; otherwise, the default season length is used automatically.
+覆盖默认圈长。这个参数主要用于做自定义实验；如果只是按赛季规则模拟，一般直接使用赛季默认值即可。
 
-Example:
+示例：
 
 ```powershell
 python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10 --seed 42
@@ -175,14 +175,14 @@ python cubie_derby.py -n 100000 --lap-length 24 --start "1:*" --runners 3 4 8 10
 
 ### `--workers`
 
-Enable CPU parallelism for large Monte Carlo runs.
+为大规模蒙特卡洛模拟启用 CPU 并行。
 
-- `--workers 0`: use all CPU cores.
-- `--workers 4`: use a fixed worker count.
-- In normal simulation mode, this parallelizes race batches within one lineup.
-- In `--season-roster-scan` mode, this parallelizes across different lineup combinations.
+- `--workers 0`：使用全部 CPU 核心。
+- `--workers 4`：固定使用 4 个 worker。
+- 普通模拟模式下，它会把同一阵容的模拟批次拆开并行。
+- `--season-roster-scan` 模式下，它会把不同组合拆开并行。
 
-Example:
+示例：
 
 ```powershell
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 42 --workers 0
@@ -190,9 +190,9 @@ python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 1
 
 ### `--json`
 
-Print machine-readable output instead of the formatted text table. In `--season-roster-scan` mode, the JSON output contains the aggregated scan result rather than a single-lineup summary.
+输出机器可读的 JSON，而不是格式化文本表格。在 `--season-roster-scan` 模式下，JSON 输出的是整套组合扫描的汇总结果，而不是单一阵容结果。
 
-Example:
+示例：
 
 ```powershell
 python cubie_derby.py -n 10000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --json
@@ -200,27 +200,27 @@ python cubie_derby.py -n 10000 --season 2 --start "1:*" --runners 11 12 13 14 15
 
 ### `--skill-ablation`
 
-Run skill on/off ablation statistics. This first runs one all-skills-on baseline, then runs one additional simulation for each ablated runner.
+运行技能开关消融统计。它会先跑一组“全技能开启”的基准模拟，再对每名被评估角色分别跑一组“仅关闭该角色技能”的额外模拟。
 
-Related options:
+相关参数：
 
-- `--skill-ablation-runners`: limit ablation to selected runners.
-- `--skill-ablation-detail`: include the success-count distribution in the printed output.
+- `--skill-ablation-runners`：只评估指定角色。
+- `--skill-ablation-detail`：在输出里追加技能成功次数分布。
 
-Examples:
+示例：
 
 ```powershell
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --seed 42
 python cubie_derby.py -n 100000 --season 2 --start "1:*" --runners 11 12 13 14 15 16 --skill-ablation --skill-ablation-runners 12 16 --skill-ablation-detail --seed 42
 ```
 
-## Debugging
+## 调试
 
 ### `--trace`
 
-Trace a single race directly in the terminal. This is useful when you want to inspect action order, skill timing, NPC movement, special-cell effects, or final ranking resolution step by step.
+直接在终端输出单局比赛的逐过程日志。适合用来核对行动顺序、技能触发时机、NPC 路径、特殊格效果以及最终排名判定。
 
-Example:
+示例：
 
 ```powershell
 python cubie_derby.py --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 2 --trace
@@ -228,73 +228,73 @@ python cubie_derby.py --season 2 --start "1:*" --runners 11 12 13 14 15 16 --see
 
 ### `--trace-log`
 
-Write one traced race to a log file instead of only printing it to the terminal. This is useful when you want to save a full readable process log for later checking or sharing.
+将单局 trace 日志写入文件，而不只是打印到终端。适合把一整局的详细过程保存下来，后续复盘或分享。
 
-Example:
+示例：
 
 ```powershell
 python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
 ```
 
-## Runner IDs and Skills
+## 角色编号与技能
 
-The notes below describe the current simulator implementation.
+以下说明描述的是当前模拟器中的实现逻辑。
 
-Season grouping in this project's numbering scheme:
+按本项目编号体系划分的赛季角色池如下：
 
-- Season 1 roster: `1 今汐`, `2 长离`, `3 卡卡罗`, `4 守岸人`, `5 椿`, `6 小土豆`, `7 洛可可`, `8 布兰特`, `9 坎特蕾拉`, `10 赞妮`, `11 卡提希娅`, `12 菲比`
-- Season 2 roster: `1 今汐`, `2 长离`, `3 卡卡罗`, `4 守岸人`, `6 小土豆`, `11 卡提希娅`, `12 菲比`, `13 西格莉卡`, `14 陆赫斯`, `15 达尼娅`, `16 绯雪`, `17 千咲`, `18 莫宁`, `19 琳奈`, `20 爱弥斯`
+- 第 1 季角色池：`1 今汐`、`2 长离`、`3 卡卡罗`、`4 守岸人`、`5 椿`、`6 小土豆`、`7 洛可可`、`8 布兰特`、`9 坎特蕾拉`、`10 赞妮`、`11 卡提希娅`、`12 菲比`
+- 第 2 季角色池：`1 今汐`、`2 长离`、`3 卡卡罗`、`4 守岸人`、`6 小土豆`、`11 卡提希娅`、`12 菲比`、`13 西格莉卡`、`14 陆赫斯`、`15 达尼娅`、`16 绯雪`、`17 千咲`、`18 莫宁`、`19 琳奈`、`20 爱弥斯`
 
-So in the actual Season 2 competition pool, runners `5 椿`, `7 洛可可`, `8 布兰特`, `9 坎特蕾拉`, and `10 赞妮` are not included.
+因此，在实际的第 2 季比赛角色池中，不包含 `5 椿`、`7 洛可可`、`8 布兰特`、`9 坎特蕾拉`、`10 赞妮`。
 
-`--season` switches the race ruleset, not the allowed runner list, so you can still choose any custom runner mix in `--runners` when you want custom experiments.
+`--season` 切换的是赛道规则，不是角色选择限制，所以若你想做自定义实验，仍然可以在 `--runners` 中自由混搭角色。
 
-- `1` / `jinhsi`: 今汐. After another non-NPC runner finishes their action, if that runner ends in 今汐's cell and is positioned to her left, 今汐 makes a `40%` check; on success, she moves to the far left of that cell.
-- `2` / `changli`: 长离. At round end, if she is not the rightmost runner in her current cell, she makes a `65%` check; on success, she is forced to act last next round.
-- `3` / `calcharo`: 卡卡罗. At action start, if he is currently last place, he gets `+3` steps.
-- `4` / `shorekeeper`: 守岸人. Uses a special `2..3` dice range instead of the normal `1..3`.
-- `5` / `camellya`: 椿. At action start, she makes a `50%` check to move alone; on success, she does not carry other runners this turn and gains extra steps equal to the number of other runners in her current cell.
-- `6` / `potato`: 小土豆. After rolling, makes a `28%` check to repeat the same die and add it again.
-- `7` / `roccia`: 洛可可. If she is the last actor of the round, she gets `+2` steps.
-- `8` / `brant`: 布兰特. If he is the first actor of the round, he gets `+2` steps.
-- `9` / `cantarella`: 坎特蕾拉. Starts in step-by-step movement mode. While this mode is active, she moves one cell at a time; if she reaches a cell with other runners, she merges with that cell for the remaining movement and then leaves that special mode afterward.
-- `10` / `zani`: 赞妮. Uses a special `1 or 3` dice. At action start, if she shares a cell with others, she makes a `40%` check; on success, her next action is stored with an extra `+2` steps.
-- `11` / `cartethyia`: 卡提希娅. Once per race, after her own action ends, if she is last place, she enters an empowered state. For the rest of the race, each of her later turns makes a `60%` check for `+2` steps.
-- `12` / `phoebe`: 菲比. At action start, makes a `50%` check for `+1` step.
-- `13` / `sigrika`: 西格莉卡. At round start, marks up to two immediately higher-ranked runners; marked runners move `1` fewer step that round, with a minimum movement of `1`. She can act in round `1` for fixed starts, but skips round `1` for random stack starts such as `--start "1:*"`.
-- `14` / `luuk_herssen`: 陆赫斯. Only on his own turn, forward special cells move his active group `4` cells total, and backward special cells move his active group `2` cells backward.
-- `15` / `denia`: 达尼娅. If her current dice roll matches her previous round's dice roll, she gets `+2` steps.
-- `16` / `hiyuki`: 绯雪. After round `3`, once her movement path and the active NPC path intersect, she gains a persistent `+1` step bonus for future moves. The bonus does not stack.
-- `17` / `chisa`: 千咲. Dice are rolled for all round participants at round start; if her dice value is tied for the lowest value, including NPC when active, she gets `+2` steps that turn.
-- `18` / `mornye`: 莫宁. Her dice follows a deterministic `3 -> 2 -> 1` cycle.
-- `19` / `lynae`: 琳奈. Before Sigrika's debuff is applied, she has a `60%` chance to move with double dice, a `20%` chance to be unable to move, and otherwise moves normally.
-- `20` / `aemeath`: 爱弥斯. Once per race, after she has passed cell `17`, her skill enters a pending state. Passing cell `17` while being carried by another runner also arms this pending state, but does not trigger an immediate check. At the end of each of 爱弥斯's own forward moves, if the pending state is armed, she checks whether another non-NPC runner is ahead of her current position. If so, only 爱弥斯 teleports to the nearest such runner's cell and enters from the left; any runners she carried stay on her action's normal landing cell. If no valid target exists, the pending state remains and she checks again after her next own forward move.
+- `1` / `jinhsi`：今汐。其他非 NPC 角色行动结束后，若该角色终点与今汐同格，且位于今汐左侧，则今汐进行一次 `40%` 判定；成功后移动到该格最左侧。
+- `2` / `changli`：长离。回合结束时，若她不是自己所在格的最右侧角色，则进行一次 `65%` 判定；成功后，下一回合强制最后行动。
+- `3` / `calcharo`：卡卡罗。行动开始时，若当前处于最后一名，则额外 `+3` 步。
+- `4` / `shorekeeper`：守岸人。骰子范围不是普通的 `1..3`，而是特殊的 `2..3`。
+- `5` / `camellya`：椿。行动开始时，进行一次 `50%` 判定决定是否独自行动；成功后，本回合不再携带同格角色，并获得等于当前格其他角色数量的额外步数。
+- `6` / `potato`：小土豆。投骰结束后，进行一次 `28%` 判定；成功则重复本次骰子，并将同样点数再加一次。
+- `7` / `roccia`：洛可可。若本回合最后行动，则额外 `+2` 步。
+- `8` / `brant`：布兰特。若本回合最先行动，则额外 `+2` 步。
+- `9` / `cantarella`：坎特蕾拉。初始处于逐格移动模式。该模式下，她会一格一格地前进；若中途到达存在其他角色的格子，则会在该格合流，并带着该格角色继续完成剩余移动，随后退出该特殊模式。
+- `10` / `zani`：赞妮。使用特殊骰子，只会掷出 `1` 或 `3`。行动开始时，若与其他角色同格，则进行一次 `40%` 判定；成功后，为下一次行动存储一个 `+2` 步加成。
+- `11` / `cartethyia`：卡提希娅。每场比赛最多 1 次。自身行动结束后，若她处于最后一名，则进入强化状态。之后比赛剩余回合中，她每次行动都会进行一次 `60%` 判定；成功则额外 `+2` 步。
+- `12` / `phoebe`：菲比。行动开始时，进行一次 `50%` 判定；成功则额外 `+1` 步。
+- `13` / `sigrika`：西格莉卡。每回合开始时，标记排名紧邻且高于自己的至多两名角色；被标记角色本回合少走 `1` 步，但最少仍会移动 `1` 步。若是固定开局站位，则西格莉卡第一回合可以发动；若是 `--start "1:*"` 这种随机同格开局，则第一回合不发动。
+- `14` / `luuk_herssen`：陆赫斯。只在自己的回合生效。若到达前进特殊格，则其本回合移动队列总共前进 `4` 格；若到达后退特殊格，则其本回合移动队列总共后退 `2` 格。
+- `15` / `denia`：达尼娅。若本回合骰子点数与上一回合骰子点数相同，则额外 `+2` 步。
+- `16` / `hiyuki`：绯雪。第 3 回合后，一旦她的移动路径与已激活 NPC 的路径发生接触，就获得一个持续存在的 `+1` 步加成。该加成不叠加。
+- `17` / `chisa`：千咲。每回合开始时，会先为全部行动参与者统一掷骰；若她的骰子点数是全场最小值之一，则本回合额外 `+2` 步。NPC 激活后也会参与这个“最小点数”判定。
+- `18` / `mornye`：莫宁。她的骰子固定按 `3 -> 2 -> 1` 循环。
+- `19` / `lynae`：琳奈。在西格莉卡减速生效前，她有 `60%` 概率以双倍骰子移动，有 `20%` 概率本回合无法行动，其余情况下正常移动。
+- `20` / `aemeath`：爱弥斯。每场比赛最多 1 次。只要她已经经过第 `17` 格，技能就会进入待判定状态。即便是被其他角色带着经过第 `17` 格，也只会进入待判定状态，不会立刻发动。之后，在爱弥斯每次自身主动前进结束时，若待判定状态已开启，则会检查自己前方是否存在其他非 NPC 角色；若存在，则只有爱弥斯自己会传送到最近目标所在格，并从该格最左侧加入；若她本回合带着其他角色移动，则那些被她带着的角色仍留在她原本行动的正常落点。若当前没有可传送目标，则待判定状态保留，等待她下一次自身主动前进结束后继续检查。
 
-## Season 2 Rules
+## 第 2 季赛道规则
 
-- Forward cells: `3`, `11`, `16`, `23`.
-- Backward cells: `10`, `28`.
-- Shuffle cells: `6`, `20`.
-- NPC is physically waiting on the finish cell `0` from race start, but it is not active for Hiyuki contact checks, action order, or ranking before round 3. It joins the action order from round 3, rolls with the selected runners, moves backward `1..6` positions on its own turn, and is always rightmost when sharing a cell. During its backward movement, if it passes through a cell while it still has movement remaining, it carries that cell's runners onward. At round end, NPC returns to `0` only when its position is less than the last-place runner's position.
+- 前进格：`3`、`11`、`16`、`23`
+- 后退格：`10`、`28`
+- 打乱格：`6`、`20`
+- NPC 从比赛开始起就物理存在于终点格 `0`，但在第 3 回合前，它不会参与绯雪接触判定、行动顺序和排名。第 3 回合开始后，NPC 会加入行动顺序，与其他角色一起掷点，在自己的回合反向移动 `1..6` 格，并且在同格时永远处于最右侧。NPC 反向移动过程中，只要经过某格时自己还有剩余步数，就会带着该格角色继续后退。每轮结束时，只有当 NPC 的位置小于最后一名角色的位置时，NPC 才会被送回第 `0` 格。
 
-## Output Columns
+## 输出列说明
 
-- `夺冠率`: estimated first-place probability.
-- `晋级率`: estimated probability of finishing in the top four.
-- `平均名次`: lower is better.
-- `名次方差`: ranking volatility.
-- `场均领先`: champion progress margin contribution averaged across all races.
-- `胜时领先`: average winner margin only among races won by that runner.
+- `夺冠率`：估计的一名概率。
+- `晋级率`：估计的前四名概率。
+- `平均名次`：越低越好。
+- `名次方差`：名次波动程度。
+- `场均领先`：按全部对局平均后的冠军领先贡献。
+- `胜时领先`：只在该角色获胜的对局中统计平均领先距离。
 
-When `--skill-ablation` is enabled, an extra table is printed:
+启用 `--skill-ablation` 后，还会额外打印一张技能消融表：
 
-- `开启胜率`: that runner's win rate in the all-skills-on baseline.
-- `关闭胜率`: that runner's win rate when only that runner's skill is disabled.
-- `净胜率`: `开启胜率 - 关闭胜率`.
-- `平均成功次数`: average successful skill activations per baseline race.
-- `单次边际胜率`: descriptive linear estimate of win-rate change per additional successful activation; `无数据` means the activation count did not vary.
+- `开启胜率`：全技能开启基准组中，该角色的胜率。
+- `关闭胜率`：仅关闭该角色技能时，该角色的胜率。
+- `净胜率`：`开启胜率 - 关闭胜率`。
+- `平均成功次数`：全技能开启基准组中，该角色每局平均成功发动技能的次数。
+- `单次边际胜率`：对“每多成功发动 1 次技能，大约带来多少胜率变化”的描述性线性估计；若显示 `无数据`，说明成功次数没有波动。
 
-## Tests
+## 测试
 
 ```powershell
 python -m unittest discover -s tests
