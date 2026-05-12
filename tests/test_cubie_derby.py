@@ -102,6 +102,32 @@ class FixedDiceRandom(CountingRandom):
         return self.dice_value
 
 
+class FixedDiceShuffleRandom(FixedDiceRandom):
+    def shuffle(self, x) -> None:
+        x.reverse()
+
+
+class QueuedFloatDiceShuffleRandom(random.Random):
+    def __init__(self, random_values: list[float], dice_value: int, fallback_random: float = 0.9):
+        super().__init__(1)
+        self.random_values = list(random_values)
+        self.dice_value = dice_value
+        self.fallback_random = fallback_random
+
+    def random(self) -> float:
+        if not self.random_values:
+            return self.fallback_random
+        return self.random_values.pop(0)
+
+    def randint(self, a: int, b: int) -> int:
+        if not a <= self.dice_value <= b:
+            raise ValueError(f"fixed dice {self.dice_value} is outside {a}..{b}")
+        return self.dice_value
+
+    def shuffle(self, x) -> None:
+        x.reverse()
+
+
 class QueuedRandom(CountingRandom):
     def __init__(self, randint_values: list[int], random_value: float = 0.9):
         super().__init__(random_value)
@@ -772,6 +798,82 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(grid[4], [2])
         self.assertEqual(rng.random_calls, 0)
 
+    def test_player1_skill_does_not_trigger_when_actor_cannot_move(self):
+        config = RaceConfig(
+            runners=(19, 1),
+            track_length=32,
+            start_grid={5: (19, 1)},
+            initial_order_mode="fixed",
+            fixed_initial_order=(19, 1),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.7, dice_value=1), trace=trace)
+        first_action = first_trace_action(trace.text(), "琳奈")
+
+        self.assertIn("琳奈本回合无法移动：", first_action)
+        self.assertIn("今汐检查行动角色琳奈是否因本回合移动进入自己左侧", first_action)
+        self.assertIn("今汐技能不判定：", first_action)
+        self.assertIn("原因：行动角色本回合未发生移动，无法因移动进入今汐左侧", first_action)
+        self.assertNotIn("今汐技能触发：", first_action)
+
+    def test_player1_skill_can_trigger_after_shuffle_moves_actor_to_left(self):
+        config = RaceConfig(
+            runners=(1, 2),
+            track_length=32,
+            start_grid={5: (1, 2)},
+            shuffle_cells=frozenset({6}),
+            initial_order_mode="fixed",
+            fixed_initial_order=(2, 1),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceShuffleRandom(random_value=0.1, dice_value=1), trace=trace)
+        first_action = first_trace_action(trace.text(), "长离")
+
+        self.assertIn("效果：随机打乱格内顺序", first_action)
+        self.assertIn("格内顺序：[长离, 今汐]", first_action)
+        self.assertIn("今汐技能触发：", first_action)
+        self.assertIn("原左侧角色：[长离]", first_action)
+
+    def test_player1_skill_can_trigger_after_no_move_shuffle_reorders_left_side(self):
+        config = RaceConfig(
+            runners=(19, 1),
+            track_length=32,
+            start_grid={6: (1, 19)},
+            shuffle_cells=frozenset({6}),
+            initial_order_mode="fixed",
+            fixed_initial_order=(19, 1),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, QueuedFloatDiceShuffleRandom(random_values=[0.7, 0.1], dice_value=1), trace=trace)
+        first_action = first_trace_action(trace.text(), "琳奈")
+
+        self.assertIn("琳奈本回合无法移动：", first_action)
+        self.assertIn("效果：随机打乱格内顺序", first_action)
+        self.assertIn("原因：行动角色未移动，但打乱顺序后今汐左侧出现角色", first_action)
+        self.assertIn("左侧角色：[琳奈]", first_action)
+        self.assertIn("今汐技能触发：", first_action)
+
+    def test_finish_line_stops_after_action_skill_checks(self):
+        config = RaceConfig(
+            runners=(22, 1),
+            track_length=32,
+            start_grid={31: (22,), 19: (1,)},
+            initial_order_mode="fixed",
+            fixed_initial_order=(22, 1),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.1, dice_value=1), trace=trace)
+        first_action = first_trace_action(trace.text(), "尤诺")
+
+        self.assertIn("到达位置：第0格", first_action)
+        self.assertIn("到达或经过终点，立即进行冠军判定", first_action)
+        self.assertNotIn("今汐检查行动角色尤诺", first_action)
+        self.assertNotIn("尤诺技能触发：", first_action)
+
     def test_negative_start_first_reaches_zero_without_winning(self):
         grid = {-3: [3]}
         progress = {3: -3}
@@ -1391,7 +1493,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("效果：随机打乱格内顺序", first_action)
         self.assertEqual(apply_sigrika_debuff(player=19, total_steps=0, debuffed={19}), 0)
 
-    def test_augusta_skips_turn_when_leftmost_and_is_forced_last_next_round(self):
+    def test_augusta_skips_turn_when_leftmost_and_skips_skill_check_next_round(self):
         config = RaceConfig(
             runners=(21, 12),
             track_length=8,
@@ -1405,7 +1507,7 @@ class CubieDerbyTests(unittest.TestCase):
         first_action = first_trace_action(text, "奥古斯塔")
 
         self.assertIn("奥古斯塔技能触发：", first_action)
-        self.assertIn("本回合不行动，下回合固定最后行动且不再判定自身技能", first_action)
+        self.assertIn("本回合不行动，下回合固定最后行动", first_action)
         self.assertIn("奥古斯塔本回合无法移动：", first_action)
 
         round_two = text[text.index("=== 第2轮 ===") :]
@@ -1413,7 +1515,31 @@ class CubieDerbyTests(unittest.TestCase):
         order_index = next(i for i, line in enumerate(lines) if line.startswith("本轮行动顺序："))
         order_text = lines[order_index + 1].strip()
         self.assertTrue(order_text.endswith("奥古斯塔"))
-        self.assertIn("奥古斯塔技能本回合不判定：", round_two)
+        round_two_augusta_action = first_trace_action(round_two, "奥古斯塔")
+        self.assertIn("奥古斯塔技能本回合不判定：", round_two_augusta_action)
+        self.assertNotIn("奥古斯塔检查自己是否位于同格最左侧且同格存在其他角色", round_two_augusta_action)
+
+    def test_augusta_and_changli_forced_last_follow_trigger_order(self):
+        config = RaceConfig(
+            runners=(21, 2, 12),
+            track_length=8,
+            start_grid={0: (21, 2), 1: (12,)},
+            initial_order_mode="fixed",
+            fixed_initial_order=(21, 2, 12),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.1, dice_value=1), trace=trace)
+        text = trace.text()
+
+        self.assertIn("奥古斯塔技能触发：", text)
+        self.assertIn("长离技能触发：", text)
+
+        round_two = text[text.index("=== 第2轮 ===") :]
+        lines = round_two.splitlines()
+        order_index = next(i for i, line in enumerate(lines) if line.startswith("本轮行动顺序："))
+        order_text = lines[order_index + 1].strip()
+        self.assertTrue(order_text.endswith("奥古斯塔 -> 长离"))
 
     def test_phrolova_gets_plus_three_when_rightmost_with_other_runners(self):
         config = RaceConfig(
@@ -1468,6 +1594,63 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(progress[7], 18)
         self.assertFalse(state.luno_available)
         self.assertEqual(state.success_counts[22], 1)
+
+    def test_luno_requires_runners_on_both_sides_and_keeps_skill_until_later_trigger(self):
+        config = RaceConfig(
+            runners=(22, 1, 3),
+            track_length=32,
+            start_grid={25: (22,), 20: (1,), 18: (3,)},
+        )
+        state = RaceSkillState()
+
+        grid = {25: [22], 20: [1], 18: [3]}
+        progress = {22: 25, 1: 20, 3: 18}
+        maybe_trigger_luno_after_action(
+            grid=grid,
+            progress=progress,
+            config=config,
+            skill_state=state,
+        )
+
+        self.assertEqual(grid[25], [22])
+        self.assertEqual(grid[20], [1])
+        self.assertEqual(grid[18], [3])
+        self.assertTrue(state.luno_available)
+        self.assertNotIn(22, state.success_counts)
+
+        grid = {26: [22], 29: [1], 21: [3]}
+        progress = {22: 26, 1: 29, 3: 21}
+        maybe_trigger_luno_after_action(
+            grid=grid,
+            progress=progress,
+            config=config,
+            skill_state=state,
+        )
+
+        self.assertEqual(grid[26], [1, 22, 3])
+        self.assertEqual(progress[22], 26)
+        self.assertEqual(progress[1], 26)
+        self.assertEqual(progress[3], 26)
+        self.assertFalse(state.luno_available)
+        self.assertEqual(state.success_counts[22], 1)
+
+    def test_luno_skill_does_not_trigger_player1_skill(self):
+        config = RaceConfig(
+            runners=(22, 1, 3, 5),
+            track_length=32,
+            start_grid={17: (22,), 15: (1,), 23: (3,), 10: (5,)},
+            initial_order_mode="fixed",
+            fixed_initial_order=(22, 1, 3, 5),
+        )
+        trace = TraceLogger()
+
+        simulate_race(config, FixedDiceRandom(random_value=0.1, dice_value=1), trace=trace)
+        first_action = first_trace_action(trace.text(), "尤诺")
+
+        self.assertIn("今汐技能不判定：", first_action)
+        self.assertIn("原因：行动角色终点未与自己同格", first_action)
+        self.assertIn("尤诺技能触发：", first_action)
+        self.assertNotIn("今汐技能触发：", first_action)
 
     def test_aemeath_triggers_only_after_active_move_ends(self):
         config = RaceConfig(runners=(20, 2, 3), track_length=32, start_grid={15: (20,), 22: (2,), 25: (3,)})
