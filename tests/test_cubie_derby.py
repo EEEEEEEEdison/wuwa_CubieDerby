@@ -856,6 +856,22 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("左侧角色：[琳奈]", first_action)
         self.assertIn("今汐技能触发：", first_action)
 
+    def test_player1_skill_can_trigger_after_npc_moves_group_to_jinhsi_left_side(self):
+        grid = {18: [3, 1, -1]}
+        progress = {1: 18, 3: 18, -1: 18}
+        rng = CountingRandom(0.1)
+
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=-1,
+            track_length=32,
+            rng=rng,
+        )
+
+        self.assertEqual(grid[18], [1, 3, -1])
+        self.assertEqual(rng.random_calls, 1)
+
     def test_finish_line_stops_after_action_skill_checks(self):
         config = RaceConfig(
             runners=(22, 1),
