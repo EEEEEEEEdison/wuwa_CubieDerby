@@ -980,8 +980,8 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     log_block(
                         trace,
                         f"{format_runner(player)}本回合无法移动：",
-                        "移动结算：原地停留",
-                        "后续：若当前停留格是打乱格，则触发打乱效果",
+                        "移动结算：视为主动移动0格，原地停留",
+                        "后续：若当前停留格是打乱格，则触发打乱效果；随后仍按行动结束后的最终站位结算今汐技能判定",
                     )
                 if current_pos in config.shuffle_cells:
                     if trace:
@@ -1035,17 +1035,16 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 finished = True
                 break
 
-            if total_steps > 0:
-                maybe_trigger_player1_skill_after_action(
-                    grid=grid,
-                    progress=progress,
-                    actor=player,
-                    track_length=track_length,
-                    rng=rng,
-                    disabled_skills=config.disabled_skills,
-                    skill_state=skill_state,
-                    trace=trace,
-                )
+            maybe_trigger_player1_skill_after_action(
+                grid=grid,
+                progress=progress,
+                actor=player,
+                track_length=track_length,
+                rng=rng,
+                disabled_skills=config.disabled_skills,
+                skill_state=skill_state,
+                trace=trace,
+            )
 
             if player == AEMEATH_ID:
                 maybe_trigger_aemeath_after_active_move(
@@ -2194,7 +2193,7 @@ def maybe_trigger_player1_skill_after_action(
         log_timing(
             trace,
             "行动结束",
-            f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}是否通过本回合移动来到自己紧邻左侧",
+            f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}在本回合行动结算后是否位于自己紧邻左侧",
         )
 
     pos = display_position(progress[JINHSI_ID], track_length)
@@ -2343,14 +2342,14 @@ def run_monte_carlo(
             return acc.to_summary(config)
 
         master_rng = random.Random(seed)
-        chunk_sizes = split_iterations(iterations, workers)
+        chunk_sizes = split_iterations(iterations, parallel_task_count(iterations, workers))
         chunk_args = [
             (config, chunk_size, master_rng.randrange(1, 2**63))
             for chunk_size in chunk_sizes
             if chunk_size > 0
         ]
         acc = MonteCarloAccumulator(config.runners)
-        with mp.Pool(processes=len(chunk_args)) as pool:
+        with mp.Pool(processes=workers) as pool:
             if progress is None:
                 parts = pool.map(simulate_chunk_from_tuple, chunk_args)
                 for part in parts:
@@ -2597,9 +2596,13 @@ def simulate_chunk(
     return acc
 
 
-def split_iterations(iterations: int, workers: int) -> list[int]:
-    base, remainder = divmod(iterations, workers)
-    return [base + (1 if i < remainder else 0) for i in range(workers)]
+def parallel_task_count(iterations: int, workers: int) -> int:
+    return max(1, min(iterations, workers * 8))
+
+
+def split_iterations(iterations: int, chunk_count: int) -> list[int]:
+    base, remainder = divmod(iterations, chunk_count)
+    return [base + (1 if i < remainder else 0) for i in range(chunk_count)]
 
 
 def progress_batch_size(iterations: int) -> int:
@@ -2628,13 +2631,14 @@ def parse_runner(token: str) -> int:
 def parse_runner_tokens(
     tokens: Sequence[str] | None,
     rng: random.Random | None = None,
+    runner_pool: Sequence[int] | None = None,
 ) -> tuple[int, ...] | None:
     if not tokens:
         return None
-    random_count = parse_random_runner_count(tokens)
+    pool = tuple(runner_pool) if runner_pool is not None else tuple(sorted(runner for runner in RUNNER_NAMES if runner > 0))
+    random_count = parse_random_runner_count(tokens, pool_size=len(pool))
     if random_count is not None:
         selection_rng = rng or random.Random()
-        pool = sorted(runner for runner in RUNNER_NAMES if runner > 0)
         return tuple(sorted(selection_rng.sample(pool, random_count)))
     runners: list[int] = []
     for token in tokens:
@@ -2646,7 +2650,7 @@ def parse_runner_tokens(
     return tuple(runners)
 
 
-def parse_random_runner_count(tokens: Sequence[str]) -> int | None:
+def parse_random_runner_count(tokens: Sequence[str], pool_size: int | None = None) -> int | None:
     parts = [part.strip() for token in tokens for part in token.split(",") if part.strip()]
     if not parts:
         return None
@@ -2666,9 +2670,9 @@ def parse_random_runner_count(tokens: Sequence[str]) -> int | None:
         return None
     if len(parts) != 1:
         raise ValueError("random runner selection cannot be mixed with explicit runners")
-    pool_size = sum(1 for runner in RUNNER_NAMES if runner > 0)
-    if count < 1 or count > pool_size:
-        raise ValueError(f"random runner count must be 1..{pool_size}")
+    available_pool_size = pool_size if pool_size is not None else sum(1 for runner in RUNNER_NAMES if runner > 0)
+    if count < 1 or count > available_pool_size:
+        raise ValueError(f"random runner count must be 1..{available_pool_size}")
     return count
 
 
@@ -2715,12 +2719,13 @@ def build_config_from_args(
     *,
     runners_override: Sequence[int] | None = None,
 ) -> RaceConfig:
+    season = args.season
+    runner_pool = season_runner_pool(season)
     runners = (
         tuple(runners_override)
         if runners_override is not None
-        else parse_runner_tokens(args.runners, rng=random.Random(args.seed))
+        else parse_runner_tokens(args.runners, rng=random.Random(args.seed), runner_pool=runner_pool)
     )
-    season = args.season
     rules = season_rules(season)
     if not args.start:
         raise ValueError("--start is required; pass a custom start grid such as '1:*' or '-3:2;-2:1,4;1:5'")
