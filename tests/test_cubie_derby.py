@@ -31,6 +31,7 @@ from cubie_derby import (
     maybe_trigger_luno_after_action,
     maybe_trigger_player1_skill_after_action,
     initial_player_order,
+    next_round_action_order,
     move_npc,
     move_group_due_to_cell_effect,
     move_runner_with_left_side,
@@ -1523,12 +1524,13 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("效果：随机打乱格内顺序", first_action)
         self.assertEqual(apply_sigrika_debuff(player=19, total_steps=0, debuffed={19}), 0)
 
-    def test_augusta_skips_turn_when_leftmost_and_skips_skill_check_next_round(self):
+    def test_augusta_does_not_trigger_in_round_one_but_can_trigger_in_round_two(self):
         config = RaceConfig(
             runners=(21, 12),
             track_length=8,
-            start_grid={0: (21, 12)},
-            initial_order_mode="start",
+            start_grid={0: (21,), 1: (12,)},
+            initial_order_mode="fixed",
+            fixed_initial_order=(21, 12),
         )
         trace = TraceLogger()
 
@@ -1536,58 +1538,41 @@ class CubieDerbyTests(unittest.TestCase):
         text = trace.text()
         first_action = first_trace_action(text, "奥古斯塔")
 
-        self.assertIn("奥古斯塔技能触发：", first_action)
-        self.assertIn("本回合不行动，下回合固定最后行动", first_action)
-        self.assertIn("奥古斯塔本回合无法移动：", first_action)
+        self.assertIn("奥古斯塔技能本回合不判定：", first_action)
+        self.assertIn("原因：第一回合不发动技能", first_action)
+        self.assertNotIn("奥古斯塔技能触发：", first_action)
 
         round_two = text[text.index("=== 第2轮 ===") :]
-        lines = round_two.splitlines()
-        order_index = next(i for i, line in enumerate(lines) if line.startswith("本轮行动顺序："))
-        order_text = lines[order_index + 1].strip()
-        self.assertTrue(order_text.endswith("奥古斯塔"))
         round_two_augusta_action = first_trace_action(round_two, "奥古斯塔")
-        self.assertIn("奥古斯塔技能本回合不判定：", round_two_augusta_action)
-        self.assertNotIn("奥古斯塔检查自己是否位于同格最左侧且同格存在其他角色", round_two_augusta_action)
+        self.assertIn("奥古斯塔技能触发：", round_two_augusta_action)
+        self.assertIn("本回合不行动，下回合固定最后行动", round_two_augusta_action)
+        self.assertIn("奥古斯塔本回合无法移动：", round_two_augusta_action)
 
     def test_augusta_and_changli_forced_last_follow_trigger_order(self):
-        config = RaceConfig(
+        order = next_round_action_order(
             runners=(21, 2, 12),
-            track_length=8,
-            start_grid={0: (21, 2), 1: (12,)},
-            initial_order_mode="fixed",
-            fixed_initial_order=(21, 2, 12),
+            rng=random.Random(1),
+            include_npc=False,
+            forced_last_runners=(21, 2),
         )
-        trace = TraceLogger()
 
-        simulate_race(config, FixedDiceRandom(random_value=0.1, dice_value=1), trace=trace)
-        text = trace.text()
+        self.assertEqual(order[-2:], [21, 2])
 
-        self.assertIn("奥古斯塔技能触发：", text)
-        self.assertIn("长离技能触发：", text)
-
-        round_two = text[text.index("=== 第2轮 ===") :]
-        lines = round_two.splitlines()
-        order_index = next(i for i, line in enumerate(lines) if line.startswith("本轮行动顺序："))
-        order_text = lines[order_index + 1].strip()
-        self.assertTrue(order_text.endswith("奥古斯塔 -> 长离"))
-
-    def test_phrolova_gets_plus_three_when_rightmost_with_other_runners(self):
+    def test_phrolova_does_not_trigger_in_round_one(self):
         config = RaceConfig(
-            runners=(3, 23),
+            runners=(12, 23),
             track_length=8,
-            start_grid={0: (3, 23)},
+            start_grid={0: (23, 12)},
             initial_order_mode="fixed",
-            fixed_initial_order=(23, 3),
+            fixed_initial_order=(23, 12),
         )
         trace = TraceLogger()
 
         simulate_race(config, FixedDiceRandom(random_value=0.9, dice_value=1), trace=trace)
         first_action = first_trace_action(trace.text(), "弗洛洛")
-
-        self.assertIn("弗洛洛技能触发：", first_action)
-        self.assertIn("效果：本回合额外前进3格", first_action)
-        self.assertIn("总步数：4", first_action)
-        self.assertIn("到达位置：第4格", first_action)
+        self.assertIn("弗洛洛技能本回合不判定：", first_action)
+        self.assertIn("原因：第一回合不发动技能", first_action)
+        self.assertNotIn("弗洛洛技能触发：", first_action)
 
     def test_luno_gathers_all_non_npc_runners_to_own_cell_in_rank_order(self):
         config = RaceConfig(

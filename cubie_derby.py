@@ -767,6 +767,13 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                             "原因：上一回合已触发停行动作",
                             "效果：本回合仅保留固定最后行动",
                         )
+                elif round_number == 1:
+                    if trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能本回合不判定：",
+                            "原因：第一回合不发动技能",
+                        )
                 else:
                     if trace:
                         log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最左侧且同格存在其他角色")
@@ -917,26 +924,34 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
 
             if player == PHROLOVA_ID and skill_enabled(config, PHROLOVA_ID):
                 non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最右侧且同格存在其他角色")
-                if len(non_npc_cell) > 1 and non_npc_cell[-1] == player:
-                    extra_steps += 3
-                    total_steps += 3
-                    record_skill_success(skill_state, player)
+                if round_number == 1:
                     if trace:
                         log_block(
                             trace,
-                            f"{format_runner(player)}技能触发：",
-                            "原因：自己位于同格最右侧，且同格存在其他角色",
-                            "效果：本回合额外前进3格",
+                            f"{format_runner(player)}技能本回合不判定：",
+                            "原因：第一回合不发动技能",
                         )
-                elif trace:
-                    log_block(
-                        trace,
-                        f"{format_runner(player)}技能未触发：",
-                        "原因：当前不满足最右侧且同格有其他角色",
-                        f"格内顺序：{format_cell(current_cell)}",
-                    )
+                else:
+                    if trace:
+                        log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最右侧且同格存在其他角色")
+                    if len(non_npc_cell) > 1 and non_npc_cell[-1] == player:
+                        extra_steps += 3
+                        total_steps += 3
+                        record_skill_success(skill_state, player)
+                        if trace:
+                            log_block(
+                                trace,
+                                f"{format_runner(player)}技能触发：",
+                                "原因：自己位于同格最右侧，且同格存在其他角色",
+                                "效果：本回合额外前进3格",
+                            )
+                    elif trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能未触发：",
+                            "原因：当前不满足最右侧且同格有其他角色",
+                            f"格内顺序：{format_cell(current_cell)}",
+                        )
 
             if augusta_skip_turn:
                 total_steps = 0
@@ -1168,8 +1183,6 @@ def initial_player_order(config: RaceConfig, grid: dict[int, Sequence[int]], rng
     if config.initial_order_mode == "fixed":
         return list(config.fixed_initial_order)
     raise ValueError(f"unknown initial_order_mode: {config.initial_order_mode}")
-
-
 def rank_scope(runners: Sequence[int], progress: dict[int, int], include_npc: bool) -> tuple[int, ...]:
     if include_npc and NPC_ID in progress:
         return tuple(runners) + (NPC_ID,)
@@ -1978,11 +1991,9 @@ def maybe_trigger_luno_after_action(
 
     ranking = current_rank(config.runners, progress, grid)
     luno_rank_index = ranking.index(LUNO_ID)
-    has_runner_ahead = luno_rank_index > 0
-    has_runner_behind = luno_rank_index < len(ranking) - 1
-    if not (has_runner_ahead and has_runner_behind):
+    if not (0 < luno_rank_index < len(ranking) - 1):
         if trace:
-            reason = "当前不存在排名比自己更高的非NPC角色" if not has_runner_ahead else "当前不存在排名比自己更低的非NPC角色"
+            reason = "去掉NPC后当前排名为第一名" if luno_rank_index == 0 else "去掉NPC后当前排名为最后一名"
             log_block(
                 trace,
                 f"{format_runner(LUNO_ID)}技能未触发：",
