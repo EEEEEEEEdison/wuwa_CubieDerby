@@ -1,3 +1,4 @@
+import contextlib
 import io
 import random
 import tempfile
@@ -354,6 +355,19 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("0/100", output)
         self.assertIn("0.00%", output)
         progress.close()
+
+    def test_run_monte_carlo_seed_is_worker_independent(self):
+        config = RaceConfig(
+            runners=(3, 4, 8, 10),
+            track_length=24,
+            start_grid=make_start_grid(24, {1: (10,), 2: (4, 3), 3: (8,)}),
+        )
+
+        single_worker = run_monte_carlo(config, 120, seed=42, workers=1)
+        multi_worker = run_monte_carlo(config, 120, seed=42, workers=2)
+
+        self.assertEqual(single_worker.best, multi_worker.best)
+        self.assertEqual(single_worker.rows, multi_worker.rows)
 
     def test_parallel_task_count_uses_more_tasks_than_workers(self):
         self.assertEqual(parallel_task_count(1_000_000, 8), 64)
@@ -1529,6 +1543,17 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(dice, {17: 2, -1: 1})
         self.assertEqual(check_chisa_skill(state, dice[17], dice), 0)
+
+    def test_core_skill_trace_logger_uses_buffer_instead_of_stdout(self):
+        state = RaceSkillState()
+        trace = TraceLogger()
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(check_hiyuki_bonus(state, trace), 0)
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("绯雪技能未生效：", trace.text())
 
     def test_chisa_gets_bonus_when_tied_for_lowest_dice(self):
         state = RaceSkillState()

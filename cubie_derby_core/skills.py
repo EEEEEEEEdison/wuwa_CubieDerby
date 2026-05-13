@@ -16,6 +16,12 @@ from .runners import (
     SKILL_RUNNERS,
     ZANI_ID,
 )
+from .tracing import TraceContext
+
+
+LYNAE_DOUBLE_MOVE_CHANCE = 0.6
+LYNAE_NO_MOVE_CUTOFF = 0.8
+ZANI_ONE_STEP_DICE_CHANCE = 0.5
 
 
 def skill_enabled(config: object, runner: int) -> bool:
@@ -40,7 +46,7 @@ def mark_sigrika_debuffs(
     round_number: int = 2,
     skip_first_round: bool = False,
     disabled_skills: frozenset[int] = frozenset(),
-    trace: bool | Any = False,
+    trace: TraceContext = False,
 ) -> set[int]:
     if SIGRIKA_ID not in runners or not skill_enabled_from_set(disabled_skills, SIGRIKA_ID):
         return set()
@@ -71,7 +77,7 @@ def apply_sigrika_debuff(
     total_steps: int,
     debuffed: set[int],
     skill_state: Any | None = None,
-    trace: bool | Any = False,
+    trace: TraceContext = False,
 ) -> int:
     if player not in debuffed:
         return total_steps
@@ -98,7 +104,7 @@ def check_chisa_skill(
     skill_state: Any,
     dice: int,
     round_dice: dict[int, int],
-    trace: bool | Any = False,
+    trace: TraceContext = False,
 ) -> int:
     active = chisa_has_lowest_dice(dice, round_dice)
     log_chisa_round_check(dice, round_dice, active, trace)
@@ -113,7 +119,7 @@ def log_chisa_round_check(
     dice: int,
     round_dice: dict[int, int],
     active: bool,
-    trace: bool | Any = False,
+    trace: TraceContext = False,
 ) -> None:
     if not trace:
         return
@@ -139,7 +145,7 @@ def log_chisa_round_check(
 def apply_chisa_bonus(
     skill_state: Any,
     active: bool,
-    trace: bool | Any = False,
+    trace: TraceContext = False,
 ) -> int:
     if active:
         record_skill_success(skill_state, CHISA_ID)
@@ -154,7 +160,7 @@ def apply_chisa_bonus(
 def check_denia_skill(
     skill_state: Any,
     dice: int,
-    trace: bool | Any = False,
+    trace: TraceContext = False,
 ) -> int:
     if trace:
         _log_timing(trace, "骰子后", f"{_format_runner(DENIA_ID)}检查本轮骰点是否与上一轮相同")
@@ -191,12 +197,12 @@ def apply_lynae_skill(
     *,
     dice: int,
     total_steps: int,
-    trace: bool | Any = False,
+    trace: TraceContext = False,
 ) -> tuple[int, int]:
     if trace:
         _log_timing(trace, "移动结算前", f"{_format_runner(LYNAE_ID)}进行60%双倍点数、20%无法移动判定")
     roll = rng.random()
-    if roll < 0.6:
+    if roll < LYNAE_DOUBLE_MOVE_CHANCE:
         adjusted = total_steps + dice
         record_skill_success(skill_state, LYNAE_ID)
         if trace:
@@ -208,7 +214,7 @@ def apply_lynae_skill(
                 f"修正后总步数：{adjusted}",
             )
         return adjusted, dice
-    if roll < 0.8:
+    if roll < LYNAE_NO_MOVE_CUTOFF:
         if trace:
             _log_block(
                 trace,
@@ -223,7 +229,7 @@ def apply_lynae_skill(
     return total_steps, 0
 
 
-def check_hiyuki_bonus(skill_state: Any, trace: bool | Any = False) -> int:
+def check_hiyuki_bonus(skill_state: Any, trace: TraceContext = False) -> int:
     if trace:
         _log_timing(trace, "行动开始", f"{_format_runner(HIYUKI_ID)}检查与NPC相遇后获得的额外步数")
     if skill_state.hiyuki_bonus_steps <= 0:
@@ -258,7 +264,7 @@ def roll_dice(
         record_skill_success(skill_state, SHOREKEEPER_ID)
         return rng.randint(2, 3)
     if player == ZANI_ID:
-        return 1 if rng.random() < 0.5 else 3
+        return 1 if rng.random() < ZANI_ONE_STEP_DICE_CHANCE else 3
     return rng.randint(1, 3)
 
 
@@ -298,22 +304,22 @@ def _format_runner_arrow_list(runners: Sequence[int]) -> str:
     return " -> ".join(_format_runner(runner) for runner in runners)
 
 
-def _log(enabled: bool | Any, message: str) -> None:
+def _log(enabled: TraceContext, message: str) -> None:
     if not enabled:
         return
-    if hasattr(enabled, "write"):
-        enabled.write(message)
+    if hasattr(enabled, "write_line"):
+        enabled.write_line(message)
     else:
         print(message)
 
 
-def _log_timing(enabled: bool | Any, timing: str, message: str) -> None:
+def _log_timing(enabled: TraceContext, timing: str, message: str) -> None:
     _log(enabled, f"【判定时机：{timing}】")
     _log(enabled, f"  {message}")
     _log(enabled, "")
 
 
-def _log_block(enabled: bool | Any, title: str, *lines: str) -> None:
+def _log_block(enabled: TraceContext, title: str, *lines: str) -> None:
     _log(enabled, title)
     for line in lines:
         _log(enabled, f"  {line}")
