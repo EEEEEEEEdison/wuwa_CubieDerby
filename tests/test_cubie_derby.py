@@ -689,6 +689,22 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(grid[5], [1, 2, 3])
         self.assertEqual(rng.random_calls, 1)
 
+    def test_player1_skill_requires_actor_to_be_immediately_left(self):
+        grid = {5: [2, 3, 1]}
+        progress = {1: 5, 2: 5, 3: 5}
+        rng = CountingRandom(0.1)
+
+        maybe_trigger_player1_skill_after_action(
+            grid=grid,
+            progress=progress,
+            actor=2,
+            track_length=24,
+            rng=rng,
+        )
+
+        self.assertEqual(grid[5], [2, 3, 1])
+        self.assertEqual(rng.random_calls, 0)
+
     def test_player1_skill_does_not_check_left_side_when_actor_elsewhere(self):
         grid = {5: [3, 1], 7: [2]}
         progress = {1: 5, 2: 7, 3: 5}
@@ -722,7 +738,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(grid[5], [2, 1])
         self.assertEqual(first_rng.random_calls, 1)
 
-        grid[5] = [3, 2, 1]
+        grid[5] = [2, 3, 1]
         progress[3] = 5
         second_rng = CountingRandom(0.1)
         maybe_trigger_player1_skill_after_action(
@@ -733,7 +749,7 @@ class CubieDerbyTests(unittest.TestCase):
             rng=second_rng,
         )
 
-        self.assertEqual(grid[5], [1, 3, 2])
+        self.assertEqual(grid[5], [1, 2, 3])
         self.assertEqual(second_rng.random_calls, 1)
 
     def test_player1_skill_can_retry_after_previous_success(self):
@@ -812,9 +828,8 @@ class CubieDerbyTests(unittest.TestCase):
         first_action = first_trace_action(trace.text(), "琳奈")
 
         self.assertIn("琳奈本回合无法移动：", first_action)
-        self.assertIn("今汐检查行动角色琳奈是否因本回合移动进入自己左侧", first_action)
-        self.assertIn("今汐技能不判定：", first_action)
-        self.assertIn("原因：行动角色本回合未发生移动，无法因移动进入今汐左侧", first_action)
+        self.assertNotIn("今汐检查行动角色", first_action)
+        self.assertNotIn("今汐技能不判定：", first_action)
         self.assertNotIn("今汐技能触发：", first_action)
 
     def test_player1_skill_can_trigger_after_shuffle_moves_actor_to_left(self):
@@ -836,7 +851,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("今汐技能触发：", first_action)
         self.assertIn("原左侧角色：[长离]", first_action)
 
-    def test_player1_skill_can_trigger_after_no_move_shuffle_reorders_left_side(self):
+    def test_player1_skill_does_not_trigger_after_no_move_shuffle_reorders_left_side(self):
         config = RaceConfig(
             runners=(19, 1),
             track_length=32,
@@ -852,11 +867,10 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertIn("琳奈本回合无法移动：", first_action)
         self.assertIn("效果：随机打乱格内顺序", first_action)
-        self.assertIn("原因：行动角色未移动，但打乱顺序后今汐左侧出现角色", first_action)
-        self.assertIn("左侧角色：[琳奈]", first_action)
-        self.assertIn("今汐技能触发：", first_action)
+        self.assertNotIn("今汐检查行动角色", first_action)
+        self.assertNotIn("今汐技能触发：", first_action)
 
-    def test_player1_skill_can_trigger_after_npc_moves_group_to_jinhsi_left_side(self):
+    def test_player1_skill_does_not_trigger_after_npc_moves_group_to_jinhsi_left_side(self):
         grid = {18: [3, 1, -1]}
         progress = {1: 18, 3: 18, -1: 18}
         rng = CountingRandom(0.1)
@@ -869,8 +883,8 @@ class CubieDerbyTests(unittest.TestCase):
             rng=rng,
         )
 
-        self.assertEqual(grid[18], [1, 3, -1])
-        self.assertEqual(rng.random_calls, 1)
+        self.assertEqual(grid[18], [3, 1, -1])
+        self.assertEqual(rng.random_calls, 0)
 
     def test_finish_line_stops_after_action_skill_checks(self):
         config = RaceConfig(
@@ -2099,7 +2113,7 @@ class CubieDerbyTests(unittest.TestCase):
             self.assertIn("行动后位置分布：", text)
             self.assertIn("【判定时机：行动结束】", text)
             self.assertIn("今汐检查行动角色", text)
-            self.assertIn("是否位于自己左侧", text)
+            self.assertIn("来到自己紧邻左侧", text)
             self.assertIn("【判定时机：回合结束】", text)
             self.assertIn("长离检查", text)
             self.assertIn("NPC参与排名：否", text)

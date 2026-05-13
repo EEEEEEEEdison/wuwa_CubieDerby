@@ -725,18 +725,6 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                         movement_state=movement_state,
                         trace=trace,
                     )
-                    maybe_trigger_player1_skill_after_action(
-                        grid=grid,
-                        progress=progress,
-                        actor=NPC_ID,
-                        actor_moved=True,
-                        allow_shuffle_reorder_trigger=False,
-                        track_length=track_length,
-                        rng=rng,
-                        disabled_skills=config.disabled_skills,
-                        skill_state=skill_state,
-                        trace=trace,
-                    )
                     npc_rank_active = True
                     if trace:
                         log_grid(trace, grid, title="NPC行动后位置分布：")
@@ -973,7 +961,6 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
             if total_steps <= 0:
                 new_progress = progress[player]
                 current_pos = display_position(new_progress, track_length)
-                player1_allow_shuffle_reorder_trigger = current_pos in config.shuffle_cells
                 if trace:
                     log_block(
                         trace,
@@ -987,7 +974,6 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     apply_shuffle_cell_effect(grid, current_pos, rng, trace=trace)
                 new_progress = progress[player]
             elif cantarella_move:
-                player1_allow_shuffle_reorder_trigger = False
                 new_progress, cantarella_state, cantarella_group = move_cantarella(
                     grid=grid,
                     progress=progress,
@@ -1002,7 +988,6 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     trace=trace,
                 )
             elif skip_carried_runners:
-                player1_allow_shuffle_reorder_trigger = False
                 new_progress = move_single_runner(
                     grid=grid,
                     progress=progress,
@@ -1015,7 +1000,6 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                     trace=trace,
                 )
             else:
-                player1_allow_shuffle_reorder_trigger = False
                 new_progress = move_runner_with_left_side(
                     grid=grid,
                     progress=progress,
@@ -1036,18 +1020,17 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: bool | TraceLog
                 finished = True
                 break
 
-            maybe_trigger_player1_skill_after_action(
-                grid=grid,
-                progress=progress,
-                actor=player,
-                actor_moved=total_steps > 0,
-                allow_shuffle_reorder_trigger=player1_allow_shuffle_reorder_trigger,
-                track_length=track_length,
-                rng=rng,
-                disabled_skills=config.disabled_skills,
-                skill_state=skill_state,
-                trace=trace,
-            )
+            if total_steps > 0:
+                maybe_trigger_player1_skill_after_action(
+                    grid=grid,
+                    progress=progress,
+                    actor=player,
+                    track_length=track_length,
+                    rng=rng,
+                    disabled_skills=config.disabled_skills,
+                    skill_state=skill_state,
+                    trace=trace,
+                )
 
             if player == AEMEATH_ID:
                 maybe_trigger_aemeath_after_active_move(
@@ -2185,15 +2168,13 @@ def maybe_trigger_player1_skill_after_action(
     grid: dict[int, list[int]],
     progress: dict[int, int],
     actor: int,
-    actor_moved: bool = True,
-    allow_shuffle_reorder_trigger: bool = False,
     track_length: int,
     rng: random.Random,
     disabled_skills: frozenset[int] = frozenset(),
     skill_state: RaceSkillState | None = None,
     trace: bool | TraceLogger = False,
 ) -> None:
-    if actor == JINHSI_ID or JINHSI_ID not in progress or not skill_enabled_from_set(disabled_skills, JINHSI_ID):
+    if actor in (JINHSI_ID, NPC_ID) or JINHSI_ID not in progress or not skill_enabled_from_set(disabled_skills, JINHSI_ID):
         return
     if actor not in progress:
         return
@@ -2202,22 +2183,11 @@ def maybe_trigger_player1_skill_after_action(
         log_timing(
             trace,
             "行动结束",
-            f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}是否因本回合移动进入自己左侧",
+            f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}是否通过本回合移动来到自己紧邻左侧",
         )
-    if not actor_moved and not allow_shuffle_reorder_trigger:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能不判定：",
-                f"行动角色：{format_runner(actor)}",
-                "原因：行动角色本回合未发生移动，无法因移动进入今汐左侧",
-            )
-        return
 
     pos = display_position(progress[JINHSI_ID], track_length)
     actor_pos = display_position(progress[actor], track_length)
-    if trace:
-        log_timing(trace, "行动结束", f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}终点是否与自己同格")
     if actor_pos != pos:
         if trace:
             log_block(
@@ -2230,8 +2200,6 @@ def maybe_trigger_player1_skill_after_action(
             )
         return
 
-    if trace:
-        log_timing(trace, "行动结束", f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}是否位于自己左侧")
     cell = grid.get(pos)
     if not cell or JINHSI_ID not in cell:
         if trace:
@@ -2245,101 +2213,20 @@ def maybe_trigger_player1_skill_after_action(
 
     keep_npc_rightmost(cell)
     one_idx = cell.index(JINHSI_ID)
-    if actor == NPC_ID:
-        left_runners = [runner for runner in cell[:one_idx] if runner not in (NPC_ID, JINHSI_ID)]
-        if not left_runners:
-            if trace:
-                log_block(
-                    trace,
-                    f"{format_runner(JINHSI_ID)}技能不判定：",
-                    f"行动角色：{format_runner(actor)}",
-                    "原因：NPC行动后今汐左侧没有非NPC角色",
-                    f"格内顺序：{format_cell(cell)}",
-                )
-            return
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能进入概率判定：",
-                "原因：NPC行动后的最终站位使今汐左侧存在非NPC角色",
-                f"左侧角色：{format_cell(left_runners)}",
-                f"格内顺序：{format_cell(cell)}",
-            )
-        if rng.random() <= 0.4:
-            cell[:] = [JINHSI_ID] + [runner for runner in cell if runner != JINHSI_ID]
-            keep_npc_rightmost(cell)
-            record_skill_success(skill_state, JINHSI_ID)
-            if trace:
-                log_block(
-                    trace,
-                    f"{format_runner(JINHSI_ID)}技能触发：",
-                    f"原左侧角色：{format_cell(left_runners)}",
-                    f"格内顺序：{format_cell(cell)}",
-                )
-        else:
-            if trace:
-                log_block(
-                    trace,
-                    f"{format_runner(JINHSI_ID)}技能未触发：",
-                    "原因：概率判定失败",
-                    f"格内顺序：{format_cell(cell)}",
-                )
-        return
 
-    if not actor_moved and allow_shuffle_reorder_trigger:
-        left_runners = [runner for runner in cell[:one_idx] if runner != NPC_ID]
-        if not left_runners:
-            if trace:
-                log_block(
-                    trace,
-                    f"{format_runner(JINHSI_ID)}技能不判定：",
-                    f"行动角色：{format_runner(actor)}",
-                    "原因：行动角色虽未移动，但打乱顺序后今汐左侧仍无角色",
-                    f"格内顺序：{format_cell(cell)}",
-                )
-            return
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能进入概率判定：",
-                "原因：行动角色未移动，但打乱顺序后今汐左侧出现角色",
-                f"左侧角色：{format_cell(left_runners)}",
-                f"格内顺序：{format_cell(cell)}",
-            )
-        if rng.random() <= 0.4:
-            cell[:] = [JINHSI_ID] + [runner for runner in cell if runner != JINHSI_ID]
-            keep_npc_rightmost(cell)
-            record_skill_success(skill_state, JINHSI_ID)
-            if trace:
-                log_block(
-                    trace,
-                    f"{format_runner(JINHSI_ID)}技能触发：",
-                    f"原左侧角色：{format_cell(left_runners)}",
-                    f"格内顺序：{format_cell(cell)}",
-                )
-        else:
-            if trace:
-                log_block(
-                    trace,
-                    f"{format_runner(JINHSI_ID)}技能未触发：",
-                    "原因：概率判定失败",
-                    f"格内顺序：{format_cell(cell)}",
-                )
-        return
-
-    if actor not in cell or cell.index(actor) >= one_idx:
+    if actor not in cell or one_idx == 0 or cell[one_idx - 1] != actor:
         if trace:
             log_block(
                 trace,
                 f"{format_runner(JINHSI_ID)}技能不判定：",
                 f"行动角色：{format_runner(actor)}",
                 f"位置：{format_position(pos)}",
-                f"原因：行动角色不在{format_runner(JINHSI_ID)}左侧",
+                f"原因：行动角色不紧邻{format_runner(JINHSI_ID)}左侧",
                 f"格内顺序：{format_cell(cell)}",
             )
         return
 
-    left_runners = [runner for runner in cell[:one_idx] if runner != NPC_ID]
+    left_runners = [actor]
     if not left_runners:
         if trace:
             log_block(
