@@ -789,12 +789,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                             "原因：上一回合已触发停行动作",
                             "效果：本回合仅保留固定最后行动",
                         )
-                elif round_number == 1:
+                elif round_number == 1 and config.random_start_stack:
                     if trace:
                         log_block(
                             trace,
                             f"{format_runner(player)}技能本回合不判定：",
-                            "原因：第一回合不发动技能",
+                            "原因：随机同格开局时，第一回合不发动技能",
                         )
                 else:
                     if trace:
@@ -946,12 +946,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
 
             if player == PHROLOVA_ID and skill_enabled(config, PHROLOVA_ID):
                 non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
-                if round_number == 1:
+                if round_number == 1 and config.random_start_stack:
                     if trace:
                         log_block(
                             trace,
                             f"{format_runner(player)}技能本回合不判定：",
-                            "原因：第一回合不发动技能",
+                            "原因：随机同格开局时，第一回合不发动技能",
                         )
                 else:
                     if trace:
