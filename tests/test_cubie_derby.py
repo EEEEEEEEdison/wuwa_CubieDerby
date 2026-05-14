@@ -1333,6 +1333,28 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(progress[13], 16)
         self.assertEqual(progress[11], 16)
 
+    def test_npc_does_not_carry_runners_already_stacked_before_first_action_round(self):
+        grid = {0: [3, -1], 31: [4]}
+        progress = {3: 0, 4: 31, -1: 0}
+        config = RaceConfig(runners=(3, 4), track_length=32, start_grid={})
+
+        npc_progress = move_npc(
+            grid=grid,
+            progress=progress,
+            config=config,
+            npc_progress=0,
+            rng=FixedDiceRandom(random_value=0.1, dice_value=2),
+            trace=False,
+            ignore_waiting_stack=True,
+        )
+
+        self.assertEqual(npc_progress, 30)
+        self.assertEqual(progress[-1], 30)
+        self.assertEqual(progress[3], 0)
+        self.assertEqual(progress[4], 30)
+        self.assertEqual(grid[0], [3])
+        self.assertEqual(grid[30], [4, -1])
+
     def test_npc_triggers_fixed_backward_cell_after_landing(self):
         config = RaceConfig(
             runners=(3,),
@@ -1738,6 +1760,27 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(progress[22], 26)
         self.assertEqual(progress[1], 26)
         self.assertEqual(progress[3], 26)
+        self.assertFalse(state.luno_available)
+        self.assertEqual(state.success_counts[22], 1)
+
+    def test_luno_can_trigger_when_not_first_or_last_even_if_all_runners_share_one_cell(self):
+        config = RaceConfig(
+            runners=(22, 1, 3),
+            track_length=32,
+            start_grid={25: (1, 22, 3)},
+        )
+        state = RaceSkillState()
+        grid = {25: [1, 22, 3]}
+        progress = {22: 25, 1: 25, 3: 25}
+
+        maybe_trigger_luno_after_action(
+            grid=grid,
+            progress=progress,
+            config=config,
+            skill_state=state,
+        )
+
+        self.assertEqual(grid[25], [1, 22, 3])
         self.assertFalse(state.luno_available)
         self.assertEqual(state.success_counts[22], 1)
 

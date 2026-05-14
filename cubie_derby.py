@@ -744,6 +744,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                         steps=round_dice[player],
                         skill_state=skill_state,
                         movement_state=movement_state,
+                        ignore_waiting_stack=round_number == config.npc_start_round,
                         trace=trace,
                     )
                     npc_rank_active = True
@@ -1535,6 +1536,7 @@ def move_npc(
     steps: int | None = None,
     skill_state: RaceSkillState | None = None,
     movement_state: RaceMovementState | None = None,
+    ignore_waiting_stack: bool = False,
 ) -> int:
     track_length = config.track_length
     steps = rng.randint(1, 6) if steps is None else steps
@@ -1543,13 +1545,21 @@ def move_npc(
     if current_cell:
         keep_npc_rightmost(current_cell)
     if NPC_ID in current_cell:
-        npc_idx = current_cell.index(NPC_ID)
-        movers = current_cell[:npc_idx] + [NPC_ID]
-        remaining = current_cell[npc_idx + 1 :]
-        if remaining:
-            grid[current_pos] = remaining
+        if ignore_waiting_stack:
+            remaining = [runner for runner in current_cell if runner != NPC_ID]
+            if remaining:
+                grid[current_pos] = remaining
+            else:
+                grid.pop(current_pos, None)
+            movers = [NPC_ID]
         else:
-            grid.pop(current_pos, None)
+            npc_idx = current_cell.index(NPC_ID)
+            movers = current_cell[:npc_idx] + [NPC_ID]
+            remaining = current_cell[npc_idx + 1 :]
+            if remaining:
+                grid[current_pos] = remaining
+            else:
+                grid.pop(current_pos, None)
     else:
         remove_runner_from_grid(grid, NPC_ID)
         movers = [NPC_ID]
