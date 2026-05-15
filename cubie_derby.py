@@ -74,6 +74,11 @@ from cubie_derby_core.match_types import (
     match_type_choices,
     resolve_match_start_spec,
 )
+from cubie_derby_core.npc import (
+    NPCHelpers,
+    move_npc as core_move_npc,
+    settle_npc_end_of_round as core_settle_npc_end_of_round,
+)
 from cubie_derby_core.reporting import (
     format_season_roster_scan_summary as core_format_season_roster_scan_summary,
     format_skill_ablation_summary as core_format_skill_ablation_summary,
@@ -149,6 +154,7 @@ JINHSI_REORDER_CHANCE = 0.4
 CHANGLI_EXTRA_STEP_CHANCE = 0.65
 
 _EFFECT_HOOKS: EffectHooks | None = None
+_NPC_HELPERS: NPCHelpers | None = None
 _SKILL_HOOK_HELPERS: SkillHookHelpers | None = None
 
 
@@ -1603,99 +1609,19 @@ def move_npc(
     movement_state: RaceMovementState | None = None,
     ignore_waiting_stack: bool = False,
 ) -> int:
-    track_length = config.track_length
-    steps = rng.randint(1, 6) if steps is None else steps
-    current_pos = npc_progress % track_length
-    current_cell = grid.get(current_pos, [])
-    if current_cell:
-        keep_npc_rightmost(current_cell)
-    if NPC_ID in current_cell:
-        if ignore_waiting_stack:
-            remaining = [runner for runner in current_cell if runner != NPC_ID]
-            if remaining:
-                grid[current_pos] = remaining
-            else:
-                grid.pop(current_pos, None)
-            movers = [NPC_ID]
-        else:
-            npc_idx = current_cell.index(NPC_ID)
-            movers = current_cell[:npc_idx] + [NPC_ID]
-            remaining = current_cell[npc_idx + 1 :]
-            if remaining:
-                grid[current_pos] = remaining
-            else:
-                grid.pop(current_pos, None)
-    else:
-        remove_runner_from_grid(grid, NPC_ID)
-        movers = [NPC_ID]
-
-    path = [current_pos]
-    contact_cell: list[int] = []
-    final_movers = list(movers)
-    final_pos = current_pos
-    for step_index in range(steps):
-        new_progress = (npc_progress - 1) % track_length
-        new_pos = new_progress
-        destination_before = [runner for runner in grid.get(new_pos, []) if runner != NPC_ID]
-        contact_cell.extend(destination_before)
-        if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in progress:
-            record_hiyuki_npc_path_contact(
-                movers=[NPC_ID],
-                progress=progress,
-                track_length=track_length,
-                path=(new_pos,),
-                skill_state=skill_state,
-                trace=trace,
-            )
-
-        for runner in movers:
-            progress[runner] = new_progress
-        moving_without_npc = [runner for runner in movers if runner != NPC_ID]
-        if grid.get(new_pos):
-            grid[new_pos] = moving_without_npc + [runner for runner in grid[new_pos] if runner != NPC_ID] + [NPC_ID]
-        else:
-            grid[new_pos] = moving_without_npc + [NPC_ID]
-        keep_npc_rightmost(grid[new_pos])
-
-        npc_progress = new_progress
-        final_pos = new_pos
-        final_movers = list(movers)
-        path.append(new_pos)
-
-        if step_index < steps - 1:
-            current_cell = grid[new_pos]
-            keep_npc_rightmost(current_cell)
-            npc_idx = current_cell.index(NPC_ID)
-            movers = current_cell[:npc_idx] + [NPC_ID]
-            remaining = current_cell[npc_idx + 1 :]
-            if remaining:
-                grid[new_pos] = remaining
-            else:
-                grid.pop(new_pos, None)
-
-    if trace:
-        log_block(
-            trace,
-            "NPC行动：",
-            f"后退步数：{steps}",
-            f"路径：{' -> '.join(format_position(pos) for pos in path)}",
-            f"接触角色：{format_cell(contact_cell)}",
-            f"最终移动队列：{format_cell(final_movers)}",
-            f"格内顺序：{format_cell(grid[final_pos])}",
-        )
-    apply_cell_effects(
-        grid,
-        progress,
-        final_movers,
-        final_pos,
-        rng,
-        config,
-        active_player=NPC_ID,
+    return core_move_npc(
+        grid=grid,
+        progress=progress,
+        config=config,
+        npc_progress=npc_progress,
+        rng=rng,
+        trace=trace,
+        steps=steps,
         skill_state=skill_state,
         movement_state=movement_state,
-        trace=trace,
+        ignore_waiting_stack=ignore_waiting_stack,
+        helpers=_npc_helpers(),
     )
-    return progress[NPC_ID]
 
 
 def settle_npc_end_of_round(
@@ -1707,37 +1633,15 @@ def settle_npc_end_of_round(
     track_length: int,
     trace: TraceContext,
 ) -> int:
-    npc_pos = npc_progress % track_length
-    last_runner = current_rank(runners, progress, grid)[-1]
-    last_pos = display_position(progress[last_runner], track_length)
-    if npc_pos >= last_pos:
-        progress[NPC_ID] = npc_progress
-        if trace:
-            log_block(
-                trace,
-                "NPC停留：",
-                f"原因：NPC位置不小于最后一名{format_runner(last_runner)}的位置",
-                f"NPC位置：{format_position(npc_pos)}",
-                f"最后一名位置：{format_position(last_pos)}",
-            )
-        return npc_progress
-    remove_runner_from_grid(grid, NPC_ID)
-    if grid.get(0):
-        grid[0] = grid[0] + [NPC_ID]
-    else:
-        grid[0] = [NPC_ID]
-    keep_npc_rightmost(grid[0])
-    progress[NPC_ID] = 0
-    if trace:
-        log_block(
-            trace,
-            "NPC回到起始格：",
-            "原因：NPC位置小于最后一名位置",
-            f"NPC位置：{format_position(npc_pos)}",
-            f"最后一名：{format_runner(last_runner)}",
-            f"最后一名位置：{format_position(last_pos)}",
-        )
-    return 0
+    return core_settle_npc_end_of_round(
+        grid=grid,
+        progress=progress,
+        runners=runners,
+        npc_progress=npc_progress,
+        track_length=track_length,
+        trace=trace,
+        helpers=_npc_helpers(),
+    )
 
 
 def apply_shuffle_cell_effect(
@@ -2988,6 +2892,21 @@ def _effect_hooks() -> EffectHooks:
             log_timing=log_timing,
         )
     return _EFFECT_HOOKS
+
+
+def _npc_helpers() -> NPCHelpers:
+    global _NPC_HELPERS
+    if _NPC_HELPERS is None:
+        _NPC_HELPERS = NPCHelpers(
+            apply_cell_effects=apply_cell_effects,
+            current_rank=current_rank,
+            format_cell=format_cell,
+            format_position=format_position,
+            format_runner=format_runner,
+            log_block=log_block,
+            record_hiyuki_npc_path_contact=record_hiyuki_npc_path_contact,
+        )
+    return _NPC_HELPERS
 
 
 def _skill_hook_helpers() -> SkillHookHelpers:
