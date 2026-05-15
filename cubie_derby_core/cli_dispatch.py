@@ -13,7 +13,10 @@ class ChampionCLIHelpers:
     champion_prediction_to_dict: Callable[[Any], dict[str, object]]
     format_champion_prediction_summary: Callable[[Any], str]
     format_tournament_result: Callable[[Any], str]
+    load_tournament_entry_request: Callable[[str | Path], Any]
+    run_champion_prediction_from_entry_request_monte_carlo: Callable[..., Any]
     run_champion_prediction_monte_carlo: Callable[..., Any]
+    simulate_tournament_from_entry_request: Callable[[Any, random.Random], Any]
     simulate_tournament: Callable[[int, random.Random], Any]
     tournament_result_to_dict: Callable[[Any], dict[str, object]]
     validate_champion_prediction_season: Callable[[int], None]
@@ -65,11 +68,22 @@ def run_champion_prediction_command(
         raise ValueError("--champion-prediction uses stage rules automatically; do not pass --start or --initial-order")
     if args.match_type:
         raise ValueError("--champion-prediction already controls the full tournament; do not combine it with --match-type")
-    helpers.validate_champion_prediction_season(args.season)
+    if args.tournament_context_out:
+        raise ValueError("--tournament-context-out is only supported with --interactive")
+    request = None
+    season = args.season
+    if args.tournament_context_in:
+        request = helpers.load_tournament_entry_request(args.tournament_context_in)
+        season = request.season
+    helpers.validate_champion_prediction_season(season)
     if args.champion_prediction == "random":
         start_time = time.perf_counter()
         tournament = replace(
-            helpers.simulate_tournament(args.season, random.Random(args.seed)),
+            (
+                helpers.simulate_tournament_from_entry_request(request, random.Random(args.seed))
+                if request is not None
+                else helpers.simulate_tournament(season, random.Random(args.seed))
+            ),
             elapsed_seconds=time.perf_counter() - start_time,
         )
         if args.json:
@@ -78,12 +92,22 @@ def run_champion_prediction_command(
             print(helpers.format_tournament_result(tournament))
         return 0
 
-    champion_summary = helpers.run_champion_prediction_monte_carlo(
-        args.season,
-        args.iterations,
-        seed=args.seed,
-        workers=args.workers,
-        show_progress=show_progress,
+    champion_summary = (
+        helpers.run_champion_prediction_from_entry_request_monte_carlo(
+            request,
+            args.iterations,
+            seed=args.seed,
+            workers=args.workers,
+            show_progress=show_progress,
+        )
+        if request is not None
+        else helpers.run_champion_prediction_monte_carlo(
+            season,
+            args.iterations,
+            seed=args.seed,
+            workers=args.workers,
+            show_progress=show_progress,
+        )
     )
     if args.json:
         print(json.dumps(helpers.champion_prediction_to_dict(champion_summary), ensure_ascii=False, indent=2))

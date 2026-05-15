@@ -2618,8 +2618,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
     show_progress = sys.stderr.isatty() and not args.json
     try:
-        if (args.tournament_context_in or args.tournament_context_out) and not args.interactive:
-            raise ValueError("--tournament-context-in and --tournament-context-out require --interactive")
+        if args.tournament_context_out and not args.interactive:
+            raise ValueError("--tournament-context-out requires --interactive")
+        if args.tournament_context_in and not (args.interactive or args.champion_prediction):
+            raise ValueError("--tournament-context-in requires --interactive or --champion-prediction")
         if args.interactive:
             return core_run_interactive_champion_prediction_command(
                 args,
@@ -2651,7 +2653,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     champion_prediction_to_dict=champion_prediction_to_dict,
                     format_champion_prediction_summary=format_champion_prediction_summary,
                     format_tournament_result=format_tournament_result,
+                    load_tournament_entry_request=load_tournament_entry_request,
+                    run_champion_prediction_from_entry_request_monte_carlo=run_champion_prediction_from_entry_request_monte_carlo,
                     run_champion_prediction_monte_carlo=run_champion_prediction_monte_carlo,
+                    simulate_tournament_from_entry_request=simulate_tournament_from_entry_request,
                     simulate_tournament=simulate_tournament,
                     tournament_result_to_dict=tournament_result_to_dict,
                     validate_champion_prediction_season=validate_champion_prediction_season,

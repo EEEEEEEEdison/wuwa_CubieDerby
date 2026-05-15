@@ -33,7 +33,7 @@ def make_parser(*, match_type_choices_fn: MatchTypeChoicesFn) -> argparse.Argume
     )
     parser.add_argument(
         "--tournament-context-in",
-        help="load tournament entry context JSON for --interactive champion prediction",
+        help="load tournament entry context JSON for champion prediction; supports --interactive or direct --champion-prediction runs",
     )
     parser.add_argument(
         "--tournament-context-out",

@@ -2789,6 +2789,77 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("champion", data)
         self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
 
+    def test_main_champion_prediction_random_can_load_tournament_context_json(self):
+        stdout = io.StringIO()
+        request = build_tournament_entry_request(
+            season=2,
+            entry_point="grand-final",
+            inputs={"grand-final-entrants": (11, 12, 13, 14, 15, 16)},
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context_path = Path(temp_dir) / "grand-final-context.json"
+            context_path.write_text(
+                json.dumps(tournament_entry_request_to_dict(request), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--champion-prediction",
+                        "random",
+                        "--seed",
+                        "7",
+                        "--json",
+                        "--tournament-context-in",
+                        str(context_path),
+                    ]
+                )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["season"], 2)
+        self.assertEqual(data["start_entry_point"], "grand-final")
+        self.assertEqual(data["stages"][0]["entrants"], [11, 12, 13, 14, 15, 16])
+
+    def test_main_champion_prediction_monte_carlo_can_load_tournament_context_json(self):
+        stdout = io.StringIO()
+        request = build_tournament_entry_request(
+            season=2,
+            entry_point="grand-final",
+            inputs={"grand-final-entrants": (11, 12, 13, 14, 15, 16)},
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context_path = Path(temp_dir) / "grand-final-context.json"
+            context_path.write_text(
+                json.dumps(tournament_entry_request_to_dict(request), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--champion-prediction",
+                        "monte-carlo",
+                        "--iterations",
+                        "4",
+                        "--workers",
+                        "1",
+                        "--seed",
+                        "7",
+                        "--json",
+                        "--tournament-context-in",
+                        str(context_path),
+                    ]
+                )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["season"], 2)
+        self.assertEqual(data["iterations"], 4)
+        self.assertEqual(data["start_entry_point"], "grand-final")
+        self.assertEqual({row["runner"] for row in data["rows"]}, {11, 12, 13, 14, 15, 16})
+
     def test_main_interactive_champion_prediction_prompts_for_mode(self):
         stdout = io.StringIO()
 
