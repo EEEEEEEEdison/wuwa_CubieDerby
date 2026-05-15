@@ -124,6 +124,46 @@ def _prompt_runner_list(
             prompt_output_fn(str(exc))
 
 
+def _prompt_qualified_runner_list(
+    requirement: Any,
+    *,
+    helpers: ChampionInteractiveHelpers,
+    season: int,
+    input_fn: Callable[[str], str],
+    prompt_output_fn: Callable[[str], None],
+) -> tuple[int, ...]:
+    mode = _prompt_choice(
+        f"{requirement.label}的提供方式",
+        (
+            ("direct", "直接输入晋级名单"),
+            ("ranking", "输入上一阶段完整排名（6名）自动截取晋级名单"),
+        ),
+        default_key="direct",
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+    )
+    if mode == "ranking":
+        ranking = _prompt_runner_list(
+            f"请输入用于推导{requirement.label}的完整排名",
+            description=f"{requirement.description}；如果你手头有上一阶段完整排名，可以直接输入 6 名角色，系统会自动取前 {requirement.runner_count} 名。",
+            helpers=helpers,
+            season=season,
+            expected_count=6,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        return ranking[: requirement.runner_count]
+    return _prompt_runner_list(
+        requirement.label,
+        description=requirement.description,
+        helpers=helpers,
+        season=season,
+        expected_count=requirement.runner_count,
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+    )
+
+
 def _prompt_grouped_runner_list(
     requirement: Any,
     *,
@@ -174,6 +214,14 @@ def _prompt_requirement_value(
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
+    if requirement.kind == "qualified":
+        return _prompt_qualified_runner_list(
+            requirement,
+            helpers=helpers,
+            season=season,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
     return _prompt_runner_list(
         requirement.label,
         description=requirement.description,
@@ -183,6 +231,118 @@ def _prompt_requirement_value(
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
     )
+
+
+def _collect_derived_entry_inputs(
+    *,
+    season: int,
+    entry_point: str,
+    helpers: ChampionInteractiveHelpers,
+    input_fn: Callable[[str], str],
+    prompt_output_fn: Callable[[str], None],
+) -> dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]]:
+    if entry_point == "losers-round-1":
+        mode = _prompt_choice(
+            "败者组第一轮的补录方式",
+            (
+                ("direct", "直接输入败者组与胜者组当前名单"),
+                ("derive", "输入淘汰赛 A/B 完整排名，自动推导胜者组和败者组名单"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            elimination_a = _prompt_runner_list(
+                "请输入淘汰赛A完整排名（6名）",
+                description="系统会自动取前 3 名并入胜者组，后 3 名并入败者组。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            elimination_b = _prompt_runner_list(
+                "请输入淘汰赛B完整排名（6名）",
+                description="系统会自动取前 3 名并入胜者组，后 3 名并入败者组。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "losers-round-1-entrants": elimination_a[3:] + elimination_b[3:],
+                "winners-round-2-entrants": elimination_a[:3] + elimination_b[:3],
+            }
+    if entry_point == "losers-round-2":
+        mode = _prompt_choice(
+            "败者组第二轮的补录方式",
+            (
+                ("direct", "直接输入败者组第二轮名单和胜者组直通名单"),
+                ("derive", "输入胜者组与败者组第一轮完整排名，自动推导剩余上下文"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            winners_round_two = _prompt_runner_list(
+                "请输入胜者组完整排名（6名）",
+                description="系统会自动取前 3 名直通总决赛，后 3 名进入败者组第二轮。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            losers_round_one = _prompt_runner_list(
+                "请输入败者组第一轮完整排名（6名）",
+                description="系统会自动取前 3 名进入败者组第二轮。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "winners-round-2-qualified": winners_round_two[:3],
+                "losers-round-2-entrants": winners_round_two[3:] + losers_round_one[:3],
+            }
+    if entry_point == "grand-final":
+        mode = _prompt_choice(
+            "总决赛名单的提供方式",
+            (
+                ("direct", "直接输入总决赛 6 名角色"),
+                ("derive", "输入胜者组与败者组第二轮完整排名，自动生成总决赛名单"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            winners_round_two = _prompt_runner_list(
+                "请输入胜者组完整排名（6名）",
+                description="系统会自动取前 3 名直通总决赛。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            losers_round_two = _prompt_runner_list(
+                "请输入败者组第二轮完整排名（6名）",
+                description="系统会自动取前 3 名补齐总决赛名单。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "grand-final-entrants": winners_round_two[:3] + losers_round_two[:3],
+            }
+    return {}
 
 
 def run_interactive_champion_prediction_command(
@@ -233,8 +393,16 @@ def run_interactive_champion_prediction_command(
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
     )
-    requirement_values: dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]] = {}
+    requirement_values = _collect_derived_entry_inputs(
+        season=season,
+        entry_point=entry_point,
+        helpers=helpers,
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+    )
     for requirement in helpers.tournament_entry_requirements(season, entry_point):
+        if requirement.key in requirement_values:
+            continue
         value = _prompt_requirement_value(
             requirement,
             helpers=helpers,

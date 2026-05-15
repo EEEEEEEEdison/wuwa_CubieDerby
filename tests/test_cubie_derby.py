@@ -2734,6 +2734,7 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "1",
                 "12",
+                "",
                 "11 12 13 14 15 16",
                 "",
                 "n",
@@ -2761,6 +2762,7 @@ class CubieDerbyTests(unittest.TestCase):
             "builtins.input",
             side_effect=[
                 "12",
+                "",
                 "11 12 13 14 15 16",
                 "",
                 "",
@@ -2791,6 +2793,79 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["iterations"], 4)
         self.assertEqual(data["start_entry_point"], "grand-final")
         self.assertEqual({row["runner"] for row in data["rows"]}, {11, 12, 13, 14, 15, 16})
+
+    def test_main_interactive_grand_final_can_derive_finalists_from_rankings(self):
+        stdout = io.StringIO()
+        pool = tuple(season_runner_pool(2))
+        winners = pool[:6]
+        losers = pool[6:12]
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "12",
+                "2",
+                " ".join(str(runner) for runner in winners),
+                " ".join(str(runner) for runner in losers),
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        finalists = list(winners[:3] + losers[:3])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "grand-final")
+        self.assertEqual(data["stages"][0]["entrants"], finalists)
+        self.assertIn(data["champion"], finalists)
+
+    def test_main_interactive_winners_round_can_derive_qualifiers_from_full_ranking(self):
+        stdout = io.StringIO()
+        pool = tuple(season_runner_pool(2))
+        losers_round_one = pool[:6]
+        winners_round_two = pool[6:12]
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "10",
+                "2",
+                " ".join(str(runner) for runner in losers_round_one),
+                " ".join(str(runner) for runner in winners_round_two),
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "winners-round-2")
+        self.assertEqual(data["stages"][0]["match_type"], "winners-bracket")
+        self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
 
 
 if __name__ == "__main__":
