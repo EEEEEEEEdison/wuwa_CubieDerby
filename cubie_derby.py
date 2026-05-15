@@ -78,6 +78,16 @@ from cubie_derby_core.analysis_jobs import (
     season_roster_combination_count as core_season_roster_combination_count,
     validate_season_roster_scan_args as core_validate_season_roster_scan_args,
 )
+from cubie_derby_core.cli_dispatch import (
+    ChampionCLIHelpers,
+    SeasonScanCLIHelpers,
+    SimulationCLIHelpers,
+    TraceCLIHelpers,
+    run_champion_prediction_command as core_run_champion_prediction_command,
+    run_season_roster_scan_command as core_run_season_roster_scan_command,
+    run_simulation_command as core_run_simulation_command,
+    run_trace_command as core_run_trace_command,
+)
 from cubie_derby_core.match_types import (
     MatchTypeRule,
     effective_qualify_cutoff,
@@ -2507,120 +2517,63 @@ def normalize_cli_args(argv: Sequence[str]) -> list[str]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = make_parser()
     args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
-    ablation_summary: SkillAblationSummary | None = None
-    season_scan_summary: SeasonRosterScanSummary | None = None
     show_progress = sys.stderr.isatty() and not args.json
     try:
         if args.champion_prediction:
-            if args.season_roster_scan:
-                raise ValueError("--champion-prediction cannot be combined with --season-roster-scan")
-            if args.skill_ablation:
-                raise ValueError("--champion-prediction cannot be combined with --skill-ablation")
-            if args.trace or args.trace_log:
-                raise ValueError("--champion-prediction does not support trace output")
-            if args.runners is not None:
-                raise ValueError("--champion-prediction chooses the season roster automatically; do not pass --runners")
-            if args.start or args.initial_order:
-                raise ValueError("--champion-prediction uses stage rules automatically; do not pass --start or --initial-order")
-            if args.match_type:
-                raise ValueError("--champion-prediction already controls the full tournament; do not combine it with --match-type")
-            validate_champion_prediction_season(args.season)
-            if args.champion_prediction == "random":
-                start_time = time.perf_counter()
-                tournament = replace(
-                    simulate_tournament(args.season, random.Random(args.seed)),
-                    elapsed_seconds=time.perf_counter() - start_time,
-                )
-                if args.json:
-                    print(json.dumps(tournament_result_to_dict(tournament), ensure_ascii=False, indent=2))
-                else:
-                    print(format_tournament_result(tournament))
-                return 0
-            champion_summary = run_champion_prediction_monte_carlo(
-                args.season,
-                args.iterations,
-                seed=args.seed,
-                workers=args.workers,
+            return core_run_champion_prediction_command(
+                args,
                 show_progress=show_progress,
+                helpers=ChampionCLIHelpers(
+                    champion_prediction_to_dict=champion_prediction_to_dict,
+                    format_champion_prediction_summary=format_champion_prediction_summary,
+                    format_tournament_result=format_tournament_result,
+                    run_champion_prediction_monte_carlo=run_champion_prediction_monte_carlo,
+                    simulate_tournament=simulate_tournament,
+                    tournament_result_to_dict=tournament_result_to_dict,
+                    validate_champion_prediction_season=validate_champion_prediction_season,
+                ),
             )
-            if args.json:
-                print(json.dumps(champion_prediction_to_dict(champion_summary), ensure_ascii=False, indent=2))
-            else:
-                print(format_champion_prediction_summary(champion_summary))
-            return 0
         if args.season_roster_scan:
-            if args.match_type:
-                raise ValueError("--match-type cannot be combined with --season-roster-scan")
-            season_scan_summary = run_season_roster_scan(args, show_progress=show_progress)
-            if args.json:
-                print(json.dumps(season_roster_scan_to_dict(season_scan_summary), ensure_ascii=False, indent=2))
-            else:
-                print(format_season_roster_scan_summary(season_scan_summary))
-            return 0
+            return core_run_season_roster_scan_command(
+                args,
+                show_progress=show_progress,
+                helpers=SeasonScanCLIHelpers(
+                    format_season_roster_scan_summary=format_season_roster_scan_summary,
+                    run_season_roster_scan=run_season_roster_scan,
+                    season_roster_scan_to_dict=season_roster_scan_to_dict,
+                ),
+            )
         config = build_config_from_args(args)
         if args.trace or args.trace_log:
-            trace = TraceLogger(echo=args.trace)
-            result = simulate_race(config, random.Random(args.seed), trace=trace)
-            result_text = json.dumps(trace_result_to_dict(result), ensure_ascii=False, indent=2)
-            trace.write_line("")
-            trace.write_line("=== 结果 ===")
-            trace.write_line(result_text)
-            if args.trace_log:
-                path = Path(args.trace_log)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(trace.text(), encoding="utf-8")
-                print(f"过程日志已写入：{path}")
-            return 0
-        if args.skill_ablation:
-            targets = parse_runner_tokens(args.skill_ablation_runners)
-            ablation_summary = run_skill_ablation(
+            return core_run_trace_command(
+                args,
                 config,
-                args.iterations,
-                targets=targets,
-                seed=args.seed,
-                workers=args.workers,
-                show_progress=show_progress,
+                helpers=TraceCLIHelpers(
+                    simulate_race=simulate_race,
+                    trace_logger_factory=TraceLogger,
+                    trace_result_to_dict=trace_result_to_dict,
+                ),
             )
-            summary = ablation_summary.base_summary
-        else:
-            start_time = time.perf_counter()
-            if show_progress:
-                emit_progress_overview(
-                    format_simulation_overview_lines(
-                        config,
-                        args.iterations,
-                        pending=True,
-                    )
-                )
-            summary = run_monte_carlo(
-                config,
-                args.iterations,
-                seed=args.seed,
-                workers=args.workers,
-                show_progress=show_progress,
-            )
-            summary = with_elapsed(summary, time.perf_counter() - start_time)
+        return core_run_simulation_command(
+            args,
+            config,
+            show_progress=show_progress,
+            helpers=SimulationCLIHelpers(
+                emit_progress_overview=emit_progress_overview,
+                format_simulation_overview_lines=format_simulation_overview_lines,
+                format_skill_ablation_summary=format_skill_ablation_summary,
+                format_summary=format_summary,
+                parse_runner_tokens=parse_runner_tokens,
+                run_monte_carlo=run_monte_carlo,
+                run_skill_ablation=run_skill_ablation,
+                skill_ablation_to_dict=skill_ablation_to_dict,
+                summary_to_dict=summary_to_dict,
+                with_elapsed=with_elapsed,
+            ),
+        )
     except ValueError as exc:
         parser.error(str(exc))
         return 2
-
-    if args.json:
-        data = summary_to_dict(summary)
-        if ablation_summary is not None:
-            data["skill_ablation"] = skill_ablation_to_dict(
-                ablation_summary,
-                include_detail=args.skill_ablation_detail,
-            )
-        print(json.dumps(data, ensure_ascii=False, indent=2))
-    else:
-        text = format_summary(summary)
-        if ablation_summary is not None:
-            text += "\n\n" + format_skill_ablation_summary(
-                ablation_summary,
-                detail=args.skill_ablation_detail,
-            )
-        print(text)
-    return 0
 
 
 def trace_result_to_dict(result: RaceResult) -> dict[str, object]:
