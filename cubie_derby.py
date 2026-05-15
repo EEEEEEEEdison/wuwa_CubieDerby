@@ -116,6 +116,10 @@ from cubie_derby_core.round_flow import (
     finalize_round as core_finalize_round,
     prepare_round as core_prepare_round,
 )
+from cubie_derby_core.race_runtime import (
+    build_race_result as core_build_race_result,
+    initialize_race_runtime as core_initialize_race_runtime,
+)
 from cubie_derby_core.skill_hooks import (
     SkillHookHelpers,
     gather_runners_to_luno_cell as core_gather_runners_to_luno_cell,
@@ -750,53 +754,33 @@ def record_movement(
 def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = False) -> RaceResult:
     runners = config.runners
     track_length = config.track_length
-    grid = {pos: list(cell) for pos, cell in config.start_grid.items() if cell}
-
-    if config.random_start_stack:
-        validate_start_position(config.random_start_position, track_length)
-        start_stack = list(runners)
-        rng.shuffle(start_stack)
-        grid = {config.random_start_position: start_stack}
-    if config.npc_enabled:
-        add_npc_to_start(grid)
-
-    progress: dict[int, int] = {}
-    for pos, cell in grid.items():
-        for runner in cell:
-            if runner == NPC_ID:
-                continue
-            progress[runner] = pos
-    validate_positions(runners, progress)
-
-    player_order = initial_player_order(config, grid, rng)
-    cantarella_state = 1
-    cantarella_group: list[int] = []
-    zani_extra_steps = 0
-    cartethyia_available = True
-    cartethyia_extra_steps = False
-    skill_state = RaceSkillState()
-    movement_state = RaceMovementState()
-    npc_progress = 0
-    npc_active = False
-    npc_rank_active = False
-
-    round_number = 1
-    if trace:
-        log_block(
-            trace,
-            "模拟配置：",
-            f"赛制：{config.name}",
-            f"赛季：{config.season}",
-            f"环形赛道：{track_length}格",
-        )
-        log_block(
-            trace,
-            "特殊格：",
-            f"前进一格：{format_position_list(sorted(config.forward_cells))}",
-            f"后退一格：{format_position_list(sorted(config.backward_cells))}",
-            f"随机打乱：{format_position_list(sorted(config.shuffle_cells))}",
-            f"NPC：{'开启' if config.npc_enabled else '关闭'}",
-        )
+    runtime = core_initialize_race_runtime(
+        config=config,
+        rng=rng,
+        trace=trace,
+        add_npc_to_start_fn=add_npc_to_start,
+        format_position_list_fn=format_position_list,
+        initial_player_order_fn=initial_player_order,
+        log_block_fn=log_block,
+        movement_state_factory=RaceMovementState,
+        skill_state_factory=RaceSkillState,
+        validate_positions_fn=validate_positions,
+        validate_start_position_fn=validate_start_position,
+    )
+    grid = runtime.grid
+    progress = runtime.progress
+    player_order = runtime.player_order
+    cantarella_state = runtime.cantarella_state
+    cantarella_group = runtime.cantarella_group
+    zani_extra_steps = runtime.zani_extra_steps
+    cartethyia_available = runtime.cartethyia_available
+    cartethyia_extra_steps = runtime.cartethyia_extra_steps
+    skill_state = runtime.skill_state
+    movement_state = runtime.movement_state
+    npc_progress = runtime.npc_progress
+    npc_active = runtime.npc_active
+    npc_rank_active = runtime.npc_rank_active
+    round_number = runtime.round_number
     while True:
         round_start = core_prepare_round(
             config=config,
@@ -881,36 +865,22 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 finished = True
                 break
 
-        ranking = current_rank(runners, progress, grid)
         if finished:
-            second_position = progress[ranking[1]] if len(ranking) > 1 else track_length
-            winner = grid[0][0]
-            result = RaceResult(
-                winner=winner,
-                ranking=tuple(ranking),
-                second_position=second_position,
-                winner_margin=max(0, track_length - second_position),
-                winner_carried_steps=movement_state.carried_steps.get(winner, 0),
-                winner_total_steps=movement_state.total_steps.get(winner, 0),
-                movement_stats=tuple(
-                    (runner, movement_state.total_steps.get(runner, 0), movement_state.carried_steps.get(runner, 0))
-                    for runner in runners
-                ),
-                skill_success_counts=tuple(sorted(skill_state.success_counts.items())),
+            return core_build_race_result(
+                config=config,
+                runners=runners,
+                grid=grid,
+                progress=progress,
+                movement_state=movement_state,
+                skill_state=skill_state,
+                trace=trace,
+                current_rank_fn=current_rank,
+                format_runner_fn=format_runner,
+                format_runner_list_fn=format_runner_list,
+                log_block_fn=log_block,
+                log_fn=log,
+                race_result_factory=RaceResult,
             )
-            if trace:
-                log(
-                    trace,
-                    "比赛结束："
-                )
-                log_block(
-                    trace,
-                    "结果：",
-                    f"冠军：{format_runner(result.winner)}",
-                    f"排名：{format_runner_list(result.ranking)}",
-                    f"领先距离：{result.winner_margin}",
-                )
-            return result
 
         round_end = core_finalize_round(
             config=config,
