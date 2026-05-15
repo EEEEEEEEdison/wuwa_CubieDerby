@@ -71,6 +71,13 @@ from cubie_derby_core.action_flow import (
     PostActionHelpers,
     resolve_post_action_effects as core_resolve_post_action_effects,
 )
+from cubie_derby_core.analysis_jobs import (
+    resolve_skill_ablation_runners as core_resolve_skill_ablation_runners,
+    run_season_roster_scan as core_run_season_roster_scan,
+    run_skill_ablation as core_run_skill_ablation,
+    season_roster_combination_count as core_season_roster_combination_count,
+    validate_season_roster_scan_args as core_validate_season_roster_scan_args,
+)
 from cubie_derby_core.match_types import (
     MatchTypeRule,
     effective_qualify_cutoff,
@@ -1548,95 +1555,33 @@ def run_skill_ablation(
     workers: int = 1,
     show_progress: bool = False,
 ) -> SkillAblationSummary:
-    evaluated = resolve_skill_ablation_runners(config.runners, targets)
-
-    total_start = time.perf_counter()
-    if show_progress:
-        emit_progress_overview(
-            format_skill_ablation_overview_lines(
-                config,
-                iterations=iterations,
-                scenario_count=len(evaluated) + 1,
-                total_simulated_races=iterations * (len(evaluated) + 1),
-                pending=True,
-            )
-        )
-    progress = ProgressBar(iterations * (len(evaluated) + 1), "技能消融", enabled=show_progress) if show_progress else None
-    base_start = time.perf_counter()
-    try:
-        base_summary = with_elapsed(
-            run_monte_carlo(config, iterations, seed=seed, workers=workers, progress=progress),
-            time.perf_counter() - base_start,
-        )
-        base_rows = {row.runner: row for row in base_summary.rows}
-
-        seed_rng = random.Random(seed)
-        rows: list[SkillAblationRow] = []
-        for runner in evaluated:
-            disabled_seed = seed_rng.randrange(1, 2**63) if seed is not None else None
-            disabled_config = replace(
-                config,
-                disabled_skills=frozenset(set(config.disabled_skills) | {runner}),
-            )
-            disabled_summary = run_monte_carlo(
-                disabled_config,
-                iterations,
-                seed=disabled_seed,
-                workers=workers,
-                progress=progress,
-            )
-            disabled_rows = {row.runner: row for row in disabled_summary.rows}
-            enabled_row = base_rows[runner]
-            disabled_row = disabled_rows[runner]
-            rows.append(
-                SkillAblationRow(
-                    runner=runner,
-                    name=enabled_row.name,
-                    enabled_win_rate=enabled_row.win_rate,
-                    disabled_win_rate=disabled_row.win_rate,
-                    net_win_rate=enabled_row.win_rate - disabled_row.win_rate,
-                    skill_average_success_count=enabled_row.skill_average_success_count,
-                    skill_marginal_win_rate=enabled_row.skill_marginal_win_rate,
-                    success_distribution=enabled_row.skill_success_distribution,
-                )
-            )
-
-        return SkillAblationSummary(
-            iterations=iterations,
-            total_simulated_races=iterations * (len(evaluated) + 1),
-            base_summary=base_summary,
-            rows=tuple(rows),
-            elapsed_seconds=time.perf_counter() - total_start,
-        )
-    finally:
-        if progress is not None:
-            progress.close()
+    return core_run_skill_ablation(
+        config,
+        iterations,
+        targets=targets,
+        seed=seed,
+        workers=workers,
+        show_progress=show_progress,
+        skill_runners=SKILL_RUNNERS,
+        resolve_skill_ablation_runners_fn=resolve_skill_ablation_runners,
+        emit_progress_overview_fn=emit_progress_overview,
+        format_skill_ablation_overview_lines_fn=format_skill_ablation_overview_lines,
+        progress_factory=ProgressBar,
+        run_monte_carlo_fn=run_monte_carlo,
+        skill_ablation_row_factory=SkillAblationRow,
+        skill_ablation_summary_factory=SkillAblationSummary,
+        with_elapsed_fn=with_elapsed,
+    )
 
 
 def validate_season_roster_scan_args(args: argparse.Namespace) -> tuple[int, ...]:
-    if args.field_size is None:
-        raise ValueError("--field-size is required when --season-roster-scan is enabled")
-    if args.runners:
-        raise ValueError("--season-roster-scan enumerates the season roster automatically; do not combine it with --runners")
-    if args.trace or args.trace_log:
-        raise ValueError("--season-roster-scan cannot be combined with --trace or --trace-log")
-    if args.skill_ablation or args.skill_ablation_runners or args.skill_ablation_detail:
-        raise ValueError("--season-roster-scan cannot be combined with skill ablation options")
-    if args.initial_order and args.initial_order not in {"random", "start"}:
-        raise ValueError("--season-roster-scan only supports --initial-order random or --initial-order start")
-    if not args.start:
-        raise ValueError("--start is required; pass a reusable start such as '1:*'")
-
-    roster = season_runner_pool(args.season)
-    if args.field_size < 1 or args.field_size > len(roster):
-        raise ValueError(f"--field-size must be between 1 and {len(roster)} for season {args.season}")
-
-    start_cells, random_start_position = parse_start_layout(args.start)
-    if random_start_position is None or start_cells:
-        raise ValueError("--season-roster-scan currently requires a reusable '*' start such as '1:*' or '-1:*'")
-    track_length = args.track_length or int(season_rules(args.season)["track_length"])
-    validate_start_position(random_start_position, track_length)
-    return roster
+    return core_validate_season_roster_scan_args(
+        args,
+        season_runner_pool_fn=season_runner_pool,
+        parse_start_layout_fn=parse_start_layout,
+        season_rules_fn=season_rules,
+        validate_start_position_fn=validate_start_position,
+    )
 
 
 def run_season_roster_scan_task(args: tuple[RaceConfig, int, int | None]) -> SimulationSummary:
@@ -1644,108 +1589,74 @@ def run_season_roster_scan_task(args: tuple[RaceConfig, int, int | None]) -> Sim
     return run_monte_carlo(config, iterations, seed=seed, workers=1)
 
 
-def season_roster_combination_count(season: int, field_size: int) -> int:
-    roster = season_runner_pool(season)
-    if field_size < 0 or field_size > len(roster):
-        raise ValueError(f"field_size must be between 0 and {len(roster)} for season {season}")
-    return math.comb(len(roster), field_size)
-
-
-def run_season_roster_scan(args: argparse.Namespace, *, show_progress: bool = False) -> SeasonRosterScanSummary:
-    roster = validate_season_roster_scan_args(args)
-    combo_list = list(combinations(roster, args.field_size))
-    total_start = time.perf_counter()
-    acc = SeasonRosterScanAccumulator(roster)
-    seed_rng = random.Random(args.seed)
-    task_args = [
-        (
-            build_config_from_args(args, runners_override=combo),
-            args.iterations,
-            seed_rng.randrange(1, 2**63) if args.seed is not None else None,
-        )
-        for combo in combo_list
-    ]
-
-    workers = args.workers
+def _execute_season_roster_scan_tasks(
+    task_args: list[tuple[RaceConfig, int, int | None]],
+    workers: int,
+    progress: ProgressBar | None,
+    acc: SeasonRosterScanAccumulator,
+    iterations: int,
+    run_monte_carlo_fn: Callable[..., SimulationSummary],
+) -> None:
     if workers == 0:
         workers = mp.cpu_count()
     workers = max(1, min(workers, len(task_args)))
-
-    template_config = build_config_from_args(args, runners_override=combo_list[0])
-    if show_progress:
-        emit_progress_overview(
-            format_season_roster_scan_overview_lines(
-                season=args.season,
-                roster=roster,
-                field_size=args.field_size,
-                qualify_cutoff=template_config.qualify_cutoff,
-                start_spec=args.start,
-                initial_order_mode=template_config.initial_order_mode,
-                combination_count=len(combo_list),
-                iterations_per_combination=args.iterations,
-                total_simulated_races=len(combo_list) * args.iterations,
-                track_length=template_config.track_length,
-                pending=True,
-            )
-        )
-    progress = ProgressBar(len(combo_list) * args.iterations, "阵容遍历", enabled=show_progress) if show_progress else None
-
-    try:
-        if workers == 1:
-            for config, iterations, seed in task_args:
-                acc.add_summary(
-                    run_monte_carlo(
-                        config,
-                        iterations,
-                        seed=seed,
-                        workers=1,
-                        progress=progress,
-                    )
+    if workers == 1:
+        for config, current_iterations, seed in task_args:
+            acc.add_summary(
+                run_monte_carlo_fn(
+                    config,
+                    current_iterations,
+                    seed=seed,
+                    workers=1,
+                    progress=progress,
                 )
-        else:
-            chunksize = max(1, len(task_args) // (workers * 4))
-            with mp.Pool(processes=workers) as pool:
-                for summary in pool.imap_unordered(run_season_roster_scan_task, task_args, chunksize=chunksize):
-                    acc.add_summary(summary)
-                    if progress is not None:
-                        progress.advance(summary.iterations)
+            )
+        return
 
-        return acc.to_summary(
-            season=args.season,
-            field_size=args.field_size,
-            qualify_cutoff=template_config.qualify_cutoff,
-            iterations_per_combination=args.iterations,
-            combination_count=len(combo_list),
-            start_spec=args.start,
-            track_length=template_config.track_length,
-            initial_order_mode=template_config.initial_order_mode,
-            elapsed_seconds=time.perf_counter() - total_start,
-        )
-    finally:
-        if progress is not None:
-            progress.close()
+    chunksize = max(1, len(task_args) // (workers * 4))
+    with mp.Pool(processes=workers) as pool:
+        for summary in pool.imap_unordered(run_season_roster_scan_task, task_args, chunksize=chunksize):
+            acc.add_summary(summary)
+            if progress is not None:
+                progress.advance(summary.iterations)
+
+
+def season_roster_combination_count(season: int, field_size: int) -> int:
+    return core_season_roster_combination_count(
+        season,
+        field_size,
+        season_runner_pool_fn=season_runner_pool,
+    )
+
+
+def run_season_roster_scan(args: argparse.Namespace, *, show_progress: bool = False) -> SeasonRosterScanSummary:
+    return core_run_season_roster_scan(
+        args,
+        show_progress=show_progress,
+        validate_season_roster_scan_args_fn=validate_season_roster_scan_args,
+        build_config_from_args_fn=build_config_from_args,
+        accumulator_factory=SeasonRosterScanAccumulator,
+        emit_progress_overview_fn=emit_progress_overview,
+        format_season_roster_scan_overview_lines_fn=format_season_roster_scan_overview_lines,
+        progress_factory=ProgressBar,
+        run_monte_carlo_fn=run_monte_carlo,
+        task_runner_fn=_execute_season_roster_scan_tasks,
+    )
 
 
 def resolve_skill_ablation_runners(
     selected_runners: Sequence[int],
     requested_runners: Sequence[int] | None,
+    *,
+    skill_runners: set[int] | frozenset[int] = SKILL_RUNNERS,
+    format_runner_list_fn: Callable[[Sequence[int]], str] | None = None,
 ) -> tuple[int, ...]:
-    selected = set(selected_runners)
-    if requested_runners is None:
-        runners = tuple(runner for runner in selected_runners if runner in SKILL_RUNNERS)
-    else:
-        runners = tuple(requested_runners)
-        if len(set(runners)) != len(runners):
-            raise ValueError("skill ablation runners contain duplicates")
-        missing = set(runners) - selected
-        if missing:
-            raise ValueError(f"skill ablation runners are not selected: {format_runner_list(sorted(missing))}")
-    without_skills = [runner for runner in runners if runner not in SKILL_RUNNERS]
-    if without_skills:
-        raise ValueError(f"runners do not have implemented skill ablation: {format_runner_list(without_skills)}")
-    if not runners:
-        raise ValueError("no selected runners have implemented skills to ablate")
-    return runners
+    return core_resolve_skill_ablation_runners(
+        selected_runners,
+        requested_runners,
+        skill_runners=skill_runners,
+        format_runner_list_fn=format_runner_list if format_runner_list_fn is None else format_runner_list_fn,
+    )
 
 
 def derive_race_seed(master_seed: int, race_index: int) -> int:
