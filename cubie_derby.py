@@ -93,6 +93,12 @@ from cubie_derby_core.reporting import (
     skill_ablation_to_dict as core_skill_ablation_to_dict,
     summary_to_dict as core_summary_to_dict,
 )
+from cubie_derby_core.runner_actions import (
+    RunnerActionHelpers,
+    move_cantarella as core_move_cantarella,
+    move_runner_with_left_side as core_move_runner_with_left_side,
+    move_single_runner as core_move_single_runner,
+)
 from cubie_derby_core.skill_hooks import (
     SkillHookHelpers,
     gather_runners_to_luno_cell as core_gather_runners_to_luno_cell,
@@ -160,6 +166,7 @@ CHANGLI_EXTRA_STEP_CHANCE = 0.65
 _EFFECT_HOOKS: EffectHooks | None = None
 _NPC_HELPERS: NPCHelpers | None = None
 _POST_ACTION_HELPERS: PostActionHelpers | None = None
+_RUNNER_ACTION_HELPERS: RunnerActionHelpers | None = None
 _SKILL_HOOK_HELPERS: SkillHookHelpers | None = None
 
 
@@ -1304,42 +1311,18 @@ def move_single_runner(
     movement_state: RaceMovementState | None = None,
     trace: TraceContext = False,
 ) -> int:
-    track_length = config.track_length
-    current_progress = progress[player]
-    current_pos = display_position(current_progress, track_length)
-    grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
-    new_progress = move_progress(current_progress, total_steps, track_length)
-    if skill_state is not None and skill_enabled(config, HIYUKI_ID) and player == HIYUKI_ID and NPC_ID in progress:
-        record_hiyuki_npc_path_contact(
-            movers=[player],
-            progress=progress,
-            track_length=track_length,
-            path=forward_path_positions(current_progress, total_steps, track_length),
-            skill_state=skill_state,
-            trace=trace,
-        )
-    add_group_to_position(
-        grid,
-        progress,
-        [player],
-        new_progress,
-        rng,
-        config,
-        active_player=player,
+    return core_move_single_runner(
+        grid=grid,
+        progress=progress,
+        config=config,
+        player=player,
+        total_steps=total_steps,
+        rng=rng,
         skill_state=skill_state,
         movement_state=movement_state,
         trace=trace,
+        helpers=_runner_action_helpers(),
     )
-    maybe_arm_aemeath_pending(
-        movers=[player],
-        start_progress=current_progress,
-        end_progress=progress[player],
-        moved_forward=True,
-        config=config,
-        skill_state=skill_state,
-        trace=trace,
-    )
-    return progress[player]
 
 
 def move_runner_with_left_side(
@@ -1355,49 +1338,19 @@ def move_runner_with_left_side(
     movement_state: RaceMovementState | None = None,
     trace: TraceContext = False,
 ) -> int:
-    track_length = config.track_length
-    current_progress = progress[player]
-    current_pos = display_position(current_progress, track_length)
-    old_cell = grid[current_pos]
-    left_runners = old_cell[:idx_in_cell]
-    movers = left_runners + [player]
-    remaining = old_cell[idx_in_cell + 1 :]
-    if remaining:
-        grid[current_pos] = remaining
-    else:
-        grid.pop(current_pos, None)
-    new_progress = move_progress(current_progress, total_steps, track_length)
-    if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
-        record_hiyuki_npc_path_contact(
-            movers=movers,
-            progress=progress,
-            track_length=track_length,
-            path=forward_path_positions(current_progress, total_steps, track_length),
-            skill_state=skill_state,
-            trace=trace,
-        )
-    add_group_to_position(
-        grid,
-        progress,
-        movers,
-        new_progress,
-        rng,
-        config,
-        active_player=player,
+    return core_move_runner_with_left_side(
+        grid=grid,
+        progress=progress,
+        config=config,
+        player=player,
+        idx_in_cell=idx_in_cell,
+        total_steps=total_steps,
+        rng=rng,
         skill_state=skill_state,
         movement_state=movement_state,
         trace=trace,
+        helpers=_runner_action_helpers(),
     )
-    maybe_arm_aemeath_pending(
-        movers=movers,
-        start_progress=current_progress,
-        end_progress=progress[player],
-        moved_forward=True,
-        config=config,
-        skill_state=skill_state,
-        trace=trace,
-    )
-    return progress[player]
 
 
 def move_cantarella(
@@ -1414,74 +1367,20 @@ def move_cantarella(
     skill_state: RaceSkillState | None = None,
     movement_state: RaceMovementState | None = None,
 ) -> tuple[int, int, list[int]]:
-    track_length = config.track_length
-    new_progress = progress[player]
-    group_mode = bool(cantarella_group)
-    group = list(cantarella_group)
-
-    for _ in range(total_steps):
-        current_progress = progress[player]
-        current_pos = display_position(current_progress, track_length)
-        old_cell = list(grid[current_pos])
-        if group_mode:
-            movers = [runner for runner in group if display_position(progress[runner], track_length) == current_pos]
-            if not movers:
-                movers = [player]
-        else:
-            idx = old_cell.index(player)
-            movers = old_cell[:idx] + [player]
-
-        grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
-        new_progress = move_progress(current_progress, 1, track_length)
-        new_pos = display_position(new_progress, track_length)
-        if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
-            record_hiyuki_npc_path_contact(
-                movers=movers,
-                progress=progress,
-                track_length=track_length,
-                path=forward_path_positions(current_progress, 1, track_length),
-                skill_state=skill_state,
-                trace=trace,
-            )
-        add_group_to_position(
-            grid,
-            progress,
-            movers,
-            new_progress,
-            rng,
-            config,
-            active_player=player,
-            skill_state=skill_state,
-            movement_state=movement_state,
-            trace=trace,
-        )
-        maybe_arm_aemeath_pending(
-            movers=movers,
-            start_progress=current_progress,
-            end_progress=progress[player],
-            moved_forward=True,
-            config=config,
-            skill_state=skill_state,
-            trace=trace,
-        )
-        new_progress = progress[player]
-        new_pos = display_position(new_progress, track_length)
-        if trace:
-            log_grid(trace, grid)
-
-        if not group_mode:
-            old_set = set(old_cell)
-            if any(runner not in old_set for runner in grid[new_pos]):
-                group_mode = True
-                group = list(grid[new_pos])
-                cantarella_state = 2
-                if trace:
-                    log_block(trace, f"{format_runner(player)}技能触发：", "效果：与终点格角色合流")
-
-        if new_progress >= track_length:
-            break
-
-    return new_progress, cantarella_state, group
+    return core_move_cantarella(
+        grid=grid,
+        progress=progress,
+        config=config,
+        player=player,
+        total_steps=total_steps,
+        rng=rng,
+        cantarella_state=cantarella_state,
+        cantarella_group=cantarella_group,
+        trace=trace,
+        skill_state=skill_state,
+        movement_state=movement_state,
+        helpers=_runner_action_helpers(),
+    )
 
 
 def add_group_to_position(
@@ -2900,6 +2799,20 @@ def _post_action_helpers() -> PostActionHelpers:
             rank_scope=rank_scope,
         )
     return _POST_ACTION_HELPERS
+
+
+def _runner_action_helpers() -> RunnerActionHelpers:
+    global _RUNNER_ACTION_HELPERS
+    if _RUNNER_ACTION_HELPERS is None:
+        _RUNNER_ACTION_HELPERS = RunnerActionHelpers(
+            add_group_to_position=add_group_to_position,
+            format_runner=format_runner,
+            log_block=log_block,
+            log_grid=log_grid,
+            maybe_arm_aemeath_pending=maybe_arm_aemeath_pending,
+            record_hiyuki_npc_path_contact=record_hiyuki_npc_path_contact,
+        )
+    return _RUNNER_ACTION_HELPERS
 
 
 def _skill_hook_helpers() -> SkillHookHelpers:
