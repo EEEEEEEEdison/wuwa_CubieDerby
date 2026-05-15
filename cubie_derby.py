@@ -247,6 +247,10 @@ from cubie_derby_core.tournament import (
     tournament_result_to_dict as core_tournament_result_to_dict,
     validate_champion_prediction_season as core_validate_champion_prediction_season,
 )
+from cubie_derby_core.tournament_context import (
+    load_tournament_entry_request,
+    save_tournament_entry_request,
+)
 
 
 DEFAULT_LAP_LENGTH = 24
@@ -2614,6 +2618,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
     show_progress = sys.stderr.isatty() and not args.json
     try:
+        if (args.tournament_context_in or args.tournament_context_out) and not args.interactive:
+            raise ValueError("--tournament-context-in and --tournament-context-out require --interactive")
         if args.interactive:
             return core_run_interactive_champion_prediction_command(
                 args,
@@ -2624,8 +2630,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     format_champion_prediction_summary=format_champion_prediction_summary,
                     format_tournament_result=format_tournament_result,
                     get_tournament_entry_point_definition=get_tournament_entry_point_definition,
+                    load_tournament_entry_request=load_tournament_entry_request,
                     parse_runner_tokens=parse_runner_tokens,
                     run_champion_prediction_from_entry_request_monte_carlo=run_champion_prediction_from_entry_request_monte_carlo,
+                    save_tournament_entry_request=save_tournament_entry_request,
                     season_runner_pool=season_runner_pool,
                     simulate_tournament_from_entry_request=simulate_tournament_from_entry_request,
                     tournament_entry_point_choices=tournament_entry_point_choices,

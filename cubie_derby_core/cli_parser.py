@@ -32,6 +32,14 @@ def make_parser(*, match_type_choices_fn: MatchTypeChoicesFn) -> argparse.Argume
         help="launch interactive prompts instead of providing every champion-prediction input by flags",
     )
     parser.add_argument(
+        "--tournament-context-in",
+        help="load tournament entry context JSON for --interactive champion prediction",
+    )
+    parser.add_argument(
+        "--tournament-context-out",
+        help="save resolved tournament entry context JSON during --interactive champion prediction",
+    )
+    parser.add_argument(
         "--season-roster-scan",
         action="store_true",
         help="enumerate every same-size combination from the selected season roster and aggregate the results",

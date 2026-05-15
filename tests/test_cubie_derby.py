@@ -7,6 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from cubie_derby_core.tournament_context import (
+    tournament_entry_request_from_dict,
+    tournament_entry_request_to_dict,
+)
+
 from cubie_derby import (
     MonteCarloAccumulator,
     ProgressBar,
@@ -100,6 +105,8 @@ def argparse_namespace(**kwargs):
         "skill_ablation": False,
         "skill_ablation_runners": None,
         "skill_ablation_detail": False,
+        "tournament_context_in": None,
+        "tournament_context_out": None,
         "qualify_cutoff": 4,
     }
     defaults.update(kwargs)
@@ -845,6 +852,25 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(request.entry_point, "group-a-round-1")
         self.assertIn("group-stage-groups", request.inputs)
+
+    def test_tournament_entry_request_context_round_trips_grouped_inputs(self):
+        entrants = tuple(season_runner_pool(2))
+        request = build_tournament_entry_request(
+            season=2,
+            entry_point="group-a-round-1",
+            inputs={
+                "season-roster": entrants,
+                "group-stage-groups": (entrants[:6], entrants[6:12], entrants[12:18]),
+            },
+        )
+
+        data = tournament_entry_request_to_dict(request)
+        restored = tournament_entry_request_from_dict(data)
+
+        self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(data["entry_point"], "group-a-round-1")
+        self.assertEqual(data["inputs"]["group-stage-groups"][1], list(entrants[6:12]))
+        self.assertEqual(restored, request)
 
     def test_build_tournament_entry_request_rejects_mismatched_manual_groups(self):
         entrants = tuple(season_runner_pool(2))
@@ -2830,6 +2856,84 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["iterations"], 4)
         self.assertEqual(data["start_entry_point"], "grand-final")
         self.assertEqual({row["runner"] for row in data["rows"]}, {11, 12, 13, 14, 15, 16})
+
+    def test_main_interactive_can_save_tournament_context_json(self):
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context_path = Path(temp_dir) / "grand-final-context.json"
+            with patch(
+                "builtins.input",
+                side_effect=[
+                    "12",
+                    "1",
+                    "11 12 13 14 15 16",
+                    "",
+                    "",
+                ],
+            ), contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--interactive",
+                        "--season",
+                        "2",
+                        "--champion-prediction",
+                        "random",
+                        "--seed",
+                        "7",
+                        "--json",
+                        "--tournament-context-out",
+                        str(context_path),
+                    ]
+                )
+
+            data = json.loads(stdout.getvalue())
+            saved = json.loads(context_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["season"], 2)
+        self.assertEqual(saved["entry_point"], "grand-final")
+        self.assertEqual(saved["inputs"]["grand-final-entrants"], [11, 12, 13, 14, 15, 16])
+
+    def test_main_interactive_can_load_tournament_context_json(self):
+        stdout = io.StringIO()
+        request = build_tournament_entry_request(
+            season=2,
+            entry_point="grand-final",
+            inputs={"grand-final-entrants": (11, 12, 13, 14, 15, 16)},
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            context_path = Path(temp_dir) / "grand-final-context.json"
+            context_path.write_text(
+                json.dumps(tournament_entry_request_to_dict(request), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            with patch(
+                "builtins.input",
+                side_effect=[
+                    "",
+                    "",
+                ],
+            ), contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--interactive",
+                        "--champion-prediction",
+                        "random",
+                        "--seed",
+                        "7",
+                        "--json",
+                        "--tournament-context-in",
+                        str(context_path),
+                    ]
+                )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["season"], 2)
+        self.assertEqual(data["start_entry_point"], "grand-final")
+        self.assertEqual({stage["match_type"] for stage in data["stages"]}, {"grand-final"})
 
     def test_main_interactive_grand_final_can_derive_finalists_from_rankings(self):
         stdout = io.StringIO()

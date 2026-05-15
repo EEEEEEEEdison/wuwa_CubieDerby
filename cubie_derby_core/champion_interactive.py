@@ -4,6 +4,7 @@ import json
 import random
 import time
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Callable, Sequence
 
 
@@ -14,8 +15,10 @@ class ChampionInteractiveHelpers:
     format_champion_prediction_summary: Callable[[Any], str]
     format_tournament_result: Callable[[Any], str]
     get_tournament_entry_point_definition: Callable[[int, str], Any]
+    load_tournament_entry_request: Callable[[str | Path], Any]
     parse_runner_tokens: Callable[[Sequence[str] | None, random.Random | None, Sequence[int] | None], tuple[int, ...] | None]
     run_champion_prediction_from_entry_request_monte_carlo: Callable[..., Any]
+    save_tournament_entry_request: Callable[[Any, str | Path], None]
     season_runner_pool: Callable[[int], Sequence[int]]
     simulate_tournament_from_entry_request: Callable[[Any, random.Random], Any]
     tournament_entry_point_choices: Callable[[int], Sequence[str]]
@@ -373,8 +376,18 @@ def run_interactive_champion_prediction_command(
     if args.match_type:
         raise ValueError("--interactive champion prediction does not accept --match-type")
 
-    season = args.season
-    helpers.validate_champion_prediction_season(season)
+    request = None
+    if args.tournament_context_in:
+        request = helpers.load_tournament_entry_request(args.tournament_context_in)
+        season = request.season
+        helpers.validate_champion_prediction_season(season)
+        prompt_output_fn(
+            f"已从 {args.tournament_context_in} 载入赛事上下文："
+            f"{helpers.get_tournament_entry_point_definition(season, request.entry_point).label}"
+        )
+    else:
+        season = args.season
+        helpers.validate_champion_prediction_season(season)
     prediction_mode = args.champion_prediction or _prompt_choice(
         "请选择冠军预测模式",
         (("random", "单届赛事"), ("monte-carlo", "Monte Carlo 统计")),
@@ -382,42 +395,48 @@ def run_interactive_champion_prediction_command(
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
     )
-    entry_options = [
-        (key, helpers.get_tournament_entry_point_definition(season, key).label)
-        for key in helpers.tournament_entry_point_choices(season)
-    ]
-    entry_point = _prompt_choice(
-        "请选择从哪个阶段开始",
-        entry_options,
-        default_key="group-a-round-1",
-        input_fn=input_fn,
-        prompt_output_fn=prompt_output_fn,
-    )
-    requirement_values = _collect_derived_entry_inputs(
-        season=season,
-        entry_point=entry_point,
-        helpers=helpers,
-        input_fn=input_fn,
-        prompt_output_fn=prompt_output_fn,
-    )
-    for requirement in helpers.tournament_entry_requirements(season, entry_point):
-        if requirement.key in requirement_values:
-            continue
-        value = _prompt_requirement_value(
-            requirement,
-            helpers=helpers,
-            season=season,
+
+    if request is None:
+        entry_options = [
+            (key, helpers.get_tournament_entry_point_definition(season, key).label)
+            for key in helpers.tournament_entry_point_choices(season)
+        ]
+        entry_point = _prompt_choice(
+            "请选择从哪个阶段开始",
+            entry_options,
+            default_key="group-a-round-1",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
-        if value is not None:
-            requirement_values[requirement.key] = value
+        requirement_values = _collect_derived_entry_inputs(
+            helpers=helpers,
+            season=season,
+            entry_point=entry_point,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        for requirement in helpers.tournament_entry_requirements(season, entry_point):
+            if requirement.key in requirement_values:
+                continue
+            value = _prompt_requirement_value(
+                requirement,
+                helpers=helpers,
+                season=season,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            if value is not None:
+                requirement_values[requirement.key] = value
+        request = helpers.build_tournament_entry_request(
+            season=season,
+            entry_point=entry_point,
+            inputs=requirement_values,
+        )
 
-    request = helpers.build_tournament_entry_request(
-        season=season,
-        entry_point=entry_point,
-        inputs=requirement_values,
-    )
+    if args.tournament_context_out:
+        helpers.save_tournament_entry_request(request, args.tournament_context_out)
+        prompt_output_fn(f"赛事上下文已写入：{args.tournament_context_out}")
+
     seed_text = _prompt_line(
         "请输入随机种子（留空表示不固定）",
         default="" if args.seed is None else str(args.seed),
