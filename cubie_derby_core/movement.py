@@ -33,14 +33,18 @@ def move_progress_by_delta(current_progress: int, signed_steps: int, track_lengt
 
 
 def remove_runner_from_grid(grid: dict[int, list[int]], runner: int) -> None:
-    empty_positions: list[int] = []
+    empty_position: int | None = None
     for pos, cell in grid.items():
-        if runner in cell:
-            grid[pos] = [item for item in cell if item != runner]
-            if not grid[pos]:
-                empty_positions.append(pos)
-    for pos in empty_positions:
-        grid.pop(pos, None)
+        try:
+            runner_index = cell.index(runner)
+        except ValueError:
+            continue
+        del cell[runner_index]
+        if not cell:
+            empty_position = pos
+        break
+    if empty_position is not None:
+        grid.pop(empty_position, None)
 
 
 def keep_npc_rightmost(cell: list[int]) -> None:

@@ -69,18 +69,20 @@ def add_group_to_position(
                 movement_state.carried_steps[runner] = movement_state.carried_steps.get(runner, 0) + distance
     for runner in movers:
         progress[runner] = new_progress
-    if grid.get(new_pos):
-        grid[new_pos] = movers_list + grid[new_pos]
+    destination_cell = grid.get(new_pos)
+    if destination_cell is None:
+        destination_cell = movers_list
+        grid[new_pos] = destination_cell
     else:
-        grid[new_pos] = movers_list
-    keep_npc_rightmost(grid[new_pos])
+        destination_cell[:0] = movers_list
+    keep_npc_rightmost(destination_cell)
     if trace:
         hooks.log_block(
             trace,
             "落点结算：",
             f"移动队列：{hooks.format_cell(movers)}",
             f"到达位置：{hooks.format_position(new_pos)}",
-            f"格内顺序：{hooks.format_cell(grid[new_pos])}",
+            f"格内顺序：{hooks.format_cell(destination_cell)}",
         )
     if apply_effects:
         apply_cell_effects(
@@ -174,9 +176,21 @@ def move_group_due_to_cell_effect(
         skill_state=skill_state,
         trace=trace,
     )
-    grid[current_pos] = [runner for runner in grid[current_pos] if runner not in active_movers]
-    if not grid[current_pos]:
+    current_cell = grid[current_pos]
+    if len(active_movers) == len(current_cell):
         grid.pop(current_pos, None)
+    elif len(active_movers) == 1:
+        current_cell.remove(active_movers[0])
+    else:
+        active_mover_set = set(active_movers)
+        write_index = 0
+        for runner in current_cell:
+            if runner not in active_mover_set:
+                current_cell[write_index] = runner
+                write_index += 1
+        del current_cell[write_index:]
+        if not current_cell:
+            grid.pop(current_pos, None)
 
     base_progress = progress[active_movers[-1]]
     if active_movers == [NPC_ID]:
@@ -212,11 +226,13 @@ def move_group_due_to_cell_effect(
         )
     for runner in active_movers:
         progress[runner] = new_progress
-    if grid.get(new_pos):
-        grid[new_pos] = active_movers + grid[new_pos]
+    destination_cell = grid.get(new_pos)
+    if destination_cell is None:
+        destination_cell = list(active_movers)
+        grid[new_pos] = destination_cell
     else:
-        grid[new_pos] = active_movers
-    keep_npc_rightmost(grid[new_pos])
+        destination_cell[:0] = active_movers
+    keep_npc_rightmost(destination_cell)
     hooks.maybe_arm_aemeath_pending(
         movers=active_movers,
         start_progress=base_progress,
@@ -234,7 +250,7 @@ def move_group_due_to_cell_effect(
             f"效果：{direction_text}",
             f"移动队列：{hooks.format_cell(active_movers)}",
             f"到达位置：{hooks.format_position(new_pos)}",
-            f"格内顺序：{hooks.format_cell(grid[new_pos])}",
+            f"格内顺序：{hooks.format_cell(destination_cell)}",
         )
 
 
@@ -246,7 +262,7 @@ def apply_shuffle_cell_effect(
     hooks: EffectHooks,
     trace: TraceContext = False,
 ) -> None:
-    before = list(grid[pos])
+    before = list(grid[pos]) if trace else ()
     grid[pos] = shuffle_without_npc(grid[pos], rng)
     if trace:
         hooks.log_block(

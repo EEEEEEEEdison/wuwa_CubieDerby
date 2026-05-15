@@ -77,10 +77,11 @@ def format_round_dice(
 
 
 def current_rank(runners: Sequence[int], progress: dict[int, int], grid: dict[int, Sequence[int]]) -> list[int]:
-    selected = set(runners)
     cell_index: dict[int, int] = {}
     for cell in grid.values():
         for idx, runner in enumerate(cell):
-            if runner != NPC_ID and runner in selected:
+            if runner != NPC_ID:
                 cell_index[runner] = idx
-    return sorted(runners, key=lambda runner: (-progress[runner], cell_index.get(runner, 9999)))
+    progress_get = progress.__getitem__
+    cell_index_get = cell_index.get
+    return sorted(runners, key=lambda runner: (-progress_get(runner), cell_index_get(runner, 9999)))

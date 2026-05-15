@@ -51,19 +51,16 @@ def move_npc(
         keep_npc_rightmost(current_cell)
     if NPC_ID in current_cell:
         if ignore_waiting_stack:
-            remaining = [runner for runner in current_cell if runner != NPC_ID]
-            if remaining:
-                grid[current_pos] = remaining
-            else:
+            npc_idx = current_cell.index(NPC_ID)
+            del current_cell[npc_idx]
+            if not current_cell:
                 grid.pop(current_pos, None)
             movers = [NPC_ID]
         else:
             npc_idx = current_cell.index(NPC_ID)
             movers = current_cell[:npc_idx] + [NPC_ID]
-            remaining = current_cell[npc_idx + 1 :]
-            if remaining:
-                grid[current_pos] = remaining
-            else:
+            del current_cell[: npc_idx + 1]
+            if not current_cell:
                 grid.pop(current_pos, None)
     else:
         remove_runner_from_grid(grid, NPC_ID)
@@ -91,11 +88,14 @@ def move_npc(
         for runner in movers:
             progress[runner] = new_progress
         moving_without_npc = [runner for runner in movers if runner != NPC_ID]
-        if grid.get(new_pos):
-            grid[new_pos] = moving_without_npc + [runner for runner in grid[new_pos] if runner != NPC_ID] + [NPC_ID]
+        destination_cell = grid.get(new_pos)
+        if destination_cell is None:
+            destination_cell = moving_without_npc + [NPC_ID]
+            grid[new_pos] = destination_cell
         else:
-            grid[new_pos] = moving_without_npc + [NPC_ID]
-        keep_npc_rightmost(grid[new_pos])
+            destination_cell[:0] = moving_without_npc
+            destination_cell.append(NPC_ID)
+        keep_npc_rightmost(destination_cell)
 
         npc_progress = new_progress
         final_pos = new_pos
@@ -107,10 +107,8 @@ def move_npc(
             keep_npc_rightmost(current_cell)
             npc_idx = current_cell.index(NPC_ID)
             movers = current_cell[:npc_idx] + [NPC_ID]
-            remaining = current_cell[npc_idx + 1 :]
-            if remaining:
-                grid[new_pos] = remaining
-            else:
+            del current_cell[: npc_idx + 1]
+            if not current_cell:
                 grid.pop(new_pos, None)
 
     if trace:
@@ -163,11 +161,13 @@ def settle_npc_end_of_round(
             )
         return npc_progress
     remove_runner_from_grid(grid, NPC_ID)
-    if grid.get(0):
-        grid[0] = grid[0] + [NPC_ID]
+    start_cell = grid.get(0)
+    if start_cell is None:
+        start_cell = [NPC_ID]
+        grid[0] = start_cell
     else:
-        grid[0] = [NPC_ID]
-    keep_npc_rightmost(grid[0])
+        start_cell.append(NPC_ID)
+    keep_npc_rightmost(start_cell)
     progress[NPC_ID] = 0
     if trace:
         helpers.log_block(

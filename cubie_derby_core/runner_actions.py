@@ -43,7 +43,10 @@ def move_single_runner(
     track_length = config.track_length
     current_progress = progress[player]
     current_pos = display_position(current_progress, track_length)
-    grid[current_pos] = [runner for runner in grid[current_pos] if runner != player]
+    current_cell = grid[current_pos]
+    current_cell.remove(player)
+    if not current_cell:
+        grid.pop(current_pos, None)
     new_progress = move_progress(current_progress, total_steps, track_length)
     if skill_state is not None and skill_enabled(config, HIYUKI_ID) and player == HIYUKI_ID and NPC_ID in progress:
         helpers.record_hiyuki_npc_path_contact(
@@ -96,12 +99,9 @@ def move_runner_with_left_side(
     current_progress = progress[player]
     current_pos = display_position(current_progress, track_length)
     old_cell = grid[current_pos]
-    left_runners = old_cell[:idx_in_cell]
-    movers = left_runners + [player]
-    remaining = old_cell[idx_in_cell + 1 :]
-    if remaining:
-        grid[current_pos] = remaining
-    else:
+    movers = old_cell[: idx_in_cell + 1]
+    del old_cell[: idx_in_cell + 1]
+    if not old_cell:
         grid.pop(current_pos, None)
     new_progress = move_progress(current_progress, total_steps, track_length)
     if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
