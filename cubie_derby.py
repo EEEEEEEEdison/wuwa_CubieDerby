@@ -88,6 +88,10 @@ from cubie_derby_core.cli_dispatch import (
     run_simulation_command as core_run_simulation_command,
     run_trace_command as core_run_trace_command,
 )
+from cubie_derby_core.cli_parser import (
+    make_parser as core_make_parser,
+    normalize_cli_args as core_normalize_cli_args,
+)
 from cubie_derby_core.match_types import (
     MatchTypeRule,
     effective_qualify_cutoff,
@@ -125,6 +129,7 @@ from cubie_derby_core.reporting import (
     skill_ablation_races_per_second as core_skill_ablation_races_per_second,
     skill_ablation_to_dict as core_skill_ablation_to_dict,
     summary_to_dict as core_summary_to_dict,
+    trace_result_to_dict as core_trace_result_to_dict,
 )
 from cubie_derby_core.runner_actions import (
     RunnerActionHelpers,
@@ -176,8 +181,10 @@ from cubie_derby_core.skills import (
     skill_enabled_from_set,
 )
 from cubie_derby_core.stage_config import (
+    build_config_from_args as core_build_config_from_args,
     build_race_config as core_build_race_config,
     default_initial_order_mode as core_default_initial_order_mode,
+    parse_start_layout as core_parse_start_layout,
     resolve_match_type_rule as core_resolve_match_type_rule,
 )
 from cubie_derby_core.tracing import TraceContext
@@ -1800,34 +1807,7 @@ def parse_start_spec(spec: str) -> dict[int, tuple[int, ...]]:
 
 
 def parse_start_layout(spec: str) -> tuple[dict[int, tuple[int, ...]], int | None]:
-    cells: dict[int, tuple[int, ...]] = {}
-    random_start_position: int | None = None
-    if not spec.strip():
-        raise ValueError("start spec cannot be empty")
-    for group in spec.split(";"):
-        if not group.strip():
-            continue
-        if ":" not in group:
-            raise ValueError(f"invalid start group {group!r}; expected 'position:runners'")
-        pos_text, runners_text = group.split(":", 1)
-        pos = int(pos_text.strip())
-        if runners_text.strip() == "*":
-            if random_start_position is not None:
-                raise ValueError("start spec can only contain one '*' random-stack group")
-            random_start_position = pos
-            continue
-        runners = tuple(parse_runner(part) for part in runners_text.split(",") if part.strip())
-        if not runners:
-            raise ValueError(f"position {pos} has no runners")
-        if pos in cells:
-            raise ValueError(f"position {pos} is defined more than once")
-        cells[pos] = runners
-    if random_start_position is not None and cells:
-        raise ValueError("'*' means all selected runners start in that cell, so it cannot be mixed with fixed cells")
-    all_runners = [runner for runners in cells.values() for runner in runners]
-    if len(set(all_runners)) != len(all_runners):
-        raise ValueError("start spec contains duplicate runners")
-    return cells, random_start_position
+    return core_parse_start_layout(spec, parse_runner_fn=parse_runner)
 
 
 def resolve_match_type_rule(args: argparse.Namespace) -> MatchTypeRule | None:
@@ -1876,32 +1856,16 @@ def build_config_from_args(
     *,
     runners_override: Sequence[int] | None = None,
 ) -> RaceConfig:
-    season = args.season
-    runner_pool = season_runner_pool(season)
-    runners = (
-        tuple(runners_override)
-        if runners_override is not None
-        else parse_runner_tokens(args.runners, rng=random.Random(args.seed), runner_pool=runner_pool)
-    )
-    match_rule = resolve_match_type_rule(args)
-    if match_rule is None:
-        if not args.start:
-            raise ValueError("--start is required; pass a custom start grid such as '1:*' or '-3:2;-2:1,4;1:5'")
-        start_spec = args.start
-        qualify_cutoff = resolve_qualify_cutoff(args)
-    else:
-        if runners is None:
-            raise ValueError("--runners is required when --match-type is used")
-        start_spec = args.start or resolve_match_start_spec(match_rule, runners)
-        qualify_cutoff = effective_qualify_cutoff(match_rule, len(runners))
-    return build_race_config(
-        season=season,
-        runners=runners or (),
-        start_spec=start_spec,
-        track_length=args.track_length,
-        initial_order=args.initial_order,
-        qualify_cutoff=qualify_cutoff,
-        match_rule=match_rule,
+    return core_build_config_from_args(
+        args,
+        season_runner_pool_fn=season_runner_pool,
+        parse_runner_tokens_fn=parse_runner_tokens,
+        resolve_match_type_rule_fn=resolve_match_type_rule,
+        resolve_match_start_spec_fn=resolve_match_start_spec,
+        effective_qualify_cutoff_fn=effective_qualify_cutoff,
+        resolve_qualify_cutoff_fn=resolve_qualify_cutoff,
+        build_race_config_fn=build_race_config,
+        runners_override=runners_override,
     )
 
 
@@ -2430,88 +2394,11 @@ def _skill_hook_helpers() -> SkillHookHelpers:
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Monte Carlo simulator for Wuthering Waves Cubie Derby.",
-    )
-    parser.add_argument("-n", "--iterations", type=int, default=100_000, help="number of races to simulate")
-    parser.add_argument("--season", type=int, choices=[1, 2], default=1, help="season ruleset")
-    parser.add_argument(
-        "--match-type",
-        help=(
-            "season-aware stage rules, e.g. "
-            + ", ".join(match_type_choices())
-            + "; Chinese aliases are also supported"
-        ),
-    )
-    parser.add_argument(
-        "--champion-prediction",
-        choices=("random", "monte-carlo"),
-        help="run a full season tournament instead of a single-stage simulation",
-    )
-    parser.add_argument(
-        "--season-roster-scan",
-        action="store_true",
-        help="enumerate every same-size combination from the selected season roster and aggregate the results",
-    )
-    parser.add_argument(
-        "--field-size",
-        type=int,
-        help="lineup size used by --season-roster-scan, e.g. 6 for all 6-runner combinations",
-    )
-    parser.add_argument(
-        "--runners",
-        nargs="+",
-        help="runner ids/names, e.g. --runners 3 4 8 10; use 'random' or 'random:6' to sample runners",
-    )
-    parser.add_argument(
-        "--qualify-cutoff",
-        type=int,
-        default=4,
-        help="count finishes within the top N as qualifying when computing 晋级率; default is 4",
-    )
-    parser.add_argument("--track-length", "--lap-length", dest="track_length", type=int, help="override lap length")
-    parser.add_argument(
-        "--start",
-        help=(
-            "custom start grid, e.g. '-3:10;-2:4,3;1:8'. "
-            "Use '1:*' to randomly stack all runners in one cell."
-        ),
-    )
-    parser.add_argument(
-        "--initial-order",
-        help="custom first-round order: 'random', 'start', or comma-separated runner ids",
-    )
-    parser.add_argument("--seed", type=int, help="random seed for reproducible output")
-    parser.add_argument("--workers", "--worker", dest="workers", type=int, default=1, help="parallel workers; use 0 for CPU count")
-    parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
-    parser.add_argument("--trace", action="store_true", help="print one traced race and exit")
-    parser.add_argument("--trace-log", help="write one traced race to this log file and exit")
-    parser.add_argument("--skill-ablation", action="store_true", help="run skill on/off ablation statistics")
-    parser.add_argument(
-        "--skill-ablation-runners",
-        nargs="+",
-        help="runner ids/names to ablate; defaults to all selected runners with implemented skills",
-    )
-    parser.add_argument(
-        "--skill-ablation-detail",
-        action="store_true",
-        help="include skill success-count distribution in ablation output",
-    )
-    return parser
+    return core_make_parser(match_type_choices_fn=match_type_choices)
 
 
 def normalize_cli_args(argv: Sequence[str]) -> list[str]:
-    normalized: list[str] = []
-    i = 0
-    while i < len(argv):
-        arg = argv[i]
-        if arg == "--start" and i + 1 < len(argv):
-            normalized.append(f"--start={argv[i + 1]}")
-            i += 2
-        else:
-            normalized.append(arg)
-            i += 1
-    return normalized
+    return core_normalize_cli_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -2577,41 +2464,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def trace_result_to_dict(result: RaceResult) -> dict[str, object]:
-    movement_stats = [
-        {
-            "runner": runner,
-            "name": format_runner(runner),
-            "total_forward_steps": total_steps,
-            "carried_forward_steps": carried_steps,
-            "lazy_rate": carried_steps / total_steps if total_steps else 0.0,
-        }
-        for runner, total_steps, carried_steps in sorted(
-            result.movement_stats,
-            key=lambda item: result.ranking.index(item[0]) if item[0] in result.ranking else len(result.ranking),
-        )
-    ]
-    return {
-        "winner": format_runner(result.winner),
-        "winner_id": result.winner,
-        "ranking": [format_runner(runner) for runner in result.ranking],
-        "ranking_ids": list(result.ranking),
-        "second_position": result.second_position,
-        "winner_margin": result.winner_margin,
-        "winner_lazy_stats": {
-            "carried_forward_steps": result.winner_carried_steps,
-            "total_forward_steps": result.winner_total_steps,
-            "lazy_rate": (
-                result.winner_carried_steps / result.winner_total_steps
-                if result.winner_total_steps
-                else 0.0
-            ),
-        },
-        "movement_stats": movement_stats,
-        "skill_success_counts": {
-            format_runner(runner): count for runner, count in result.skill_success_counts
-        },
-        "skill_success_count_ids": dict(result.skill_success_counts),
-    }
+    return core_trace_result_to_dict(result, format_runner_fn=format_runner)
 
 
 if __name__ == "__main__":

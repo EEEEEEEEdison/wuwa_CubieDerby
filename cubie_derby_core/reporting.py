@@ -74,6 +74,49 @@ def summary_to_dict(
     }
 
 
+def trace_result_to_dict(
+    result: Any,
+    *,
+    format_runner_fn: FormatRunnerFn,
+) -> dict[str, object]:
+    ranking_lookup = {runner: index for index, runner in enumerate(result.ranking)}
+    movement_stats = [
+        {
+            "runner": runner,
+            "name": format_runner_fn(runner),
+            "total_forward_steps": total_steps,
+            "carried_forward_steps": carried_steps,
+            "lazy_rate": carried_steps / total_steps if total_steps else 0.0,
+        }
+        for runner, total_steps, carried_steps in sorted(
+            result.movement_stats,
+            key=lambda item: ranking_lookup.get(item[0], len(result.ranking)),
+        )
+    ]
+    return {
+        "winner": format_runner_fn(result.winner),
+        "winner_id": result.winner,
+        "ranking": [format_runner_fn(runner) for runner in result.ranking],
+        "ranking_ids": list(result.ranking),
+        "second_position": result.second_position,
+        "winner_margin": result.winner_margin,
+        "winner_lazy_stats": {
+            "carried_forward_steps": result.winner_carried_steps,
+            "total_forward_steps": result.winner_total_steps,
+            "lazy_rate": (
+                result.winner_carried_steps / result.winner_total_steps
+                if result.winner_total_steps
+                else 0.0
+            ),
+        },
+        "movement_stats": movement_stats,
+        "skill_success_counts": {
+            format_runner_fn(runner): count for runner, count in result.skill_success_counts
+        },
+        "skill_success_count_ids": dict(result.skill_success_counts),
+    }
+
+
 def skill_ablation_to_dict(
     summary: Any,
     *,

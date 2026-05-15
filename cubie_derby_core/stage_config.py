@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import argparse
+import random
 from typing import Any, Callable, Sequence
 
 from cubie_derby_core.match_types import MatchTypeRule
 
 GetMatchTypeRuleFn = Callable[[int, str], MatchTypeRule]
 MakeRaceConfigFn = Callable[..., Any]
-ParseRunnerTokensFn = Callable[[Sequence[str] | None], tuple[int, ...] | None]
+BuildRaceConfigFn = Callable[..., Any]
+ParseRunnerFn = Callable[[str], int]
+ParseRunnerTokensFn = Callable[..., tuple[int, ...] | None]
 ParseStartLayoutFn = Callable[[str], tuple[dict[int, tuple[int, ...]], int | None]]
+ResolveMatchStartSpecFn = Callable[[MatchTypeRule, Sequence[int]], str]
+EffectiveQualifyCutoffFn = Callable[[MatchTypeRule, int], int]
+ResolveQualifyCutoffFn = Callable[[argparse.Namespace], int]
 SeasonRulesFn = Callable[[int], dict[str, object]]
+SeasonRunnerPoolFn = Callable[[int], Sequence[int]]
 ValidateQualifyCutoffFn = Callable[[int, int], None]
 ValidateSameRunnersFn = Callable[[Sequence[int], Sequence[int], str], None]
 
@@ -31,6 +39,41 @@ def default_initial_order_mode(grid: dict[int, Sequence[int]], random_start_posi
     if nonempty_positions == [0]:
         return "start"
     return "random"
+
+
+def parse_start_layout(
+    spec: str,
+    *,
+    parse_runner_fn: ParseRunnerFn,
+) -> tuple[dict[int, tuple[int, ...]], int | None]:
+    cells: dict[int, tuple[int, ...]] = {}
+    random_start_position: int | None = None
+    if not spec.strip():
+        raise ValueError("start spec cannot be empty")
+    for group in spec.split(";"):
+        if not group.strip():
+            continue
+        if ":" not in group:
+            raise ValueError(f"invalid start group {group!r}; expected 'position:runners'")
+        pos_text, runners_text = group.split(":", 1)
+        pos = int(pos_text.strip())
+        if runners_text.strip() == "*":
+            if random_start_position is not None:
+                raise ValueError("start spec can only contain one '*' random-stack group")
+            random_start_position = pos
+            continue
+        runners = tuple(parse_runner_fn(part) for part in runners_text.split(",") if part.strip())
+        if not runners:
+            raise ValueError(f"position {pos} has no runners")
+        if pos in cells:
+            raise ValueError(f"position {pos} is defined more than once")
+        cells[pos] = runners
+    if random_start_position is not None and cells:
+        raise ValueError("'*' means all selected runners start in that cell, so it cannot be mixed with fixed cells")
+    all_runners = [runner for runners in cells.values() for runner in runners]
+    if len(set(all_runners)) != len(all_runners):
+        raise ValueError("start spec contains duplicate runners")
+    return cells, random_start_position
 
 
 def build_race_config(
@@ -97,4 +140,45 @@ def build_race_config(
         match_type=match_rule.key if match_rule is not None else None,
         show_qualify_stats=match_rule.show_qualify_stats if match_rule is not None else True,
         name=name or (match_rule.label if match_rule is not None else "自定义"),
+    )
+
+
+def build_config_from_args(
+    args: argparse.Namespace,
+    *,
+    season_runner_pool_fn: SeasonRunnerPoolFn,
+    parse_runner_tokens_fn: ParseRunnerTokensFn,
+    resolve_match_type_rule_fn: Callable[[argparse.Namespace], MatchTypeRule | None],
+    resolve_match_start_spec_fn: ResolveMatchStartSpecFn,
+    effective_qualify_cutoff_fn: EffectiveQualifyCutoffFn,
+    resolve_qualify_cutoff_fn: ResolveQualifyCutoffFn,
+    build_race_config_fn: BuildRaceConfigFn,
+    runners_override: Sequence[int] | None = None,
+) -> Any:
+    season = args.season
+    runner_pool = season_runner_pool_fn(season)
+    runners = (
+        tuple(runners_override)
+        if runners_override is not None
+        else parse_runner_tokens_fn(args.runners, rng=random.Random(args.seed), runner_pool=runner_pool)
+    )
+    match_rule = resolve_match_type_rule_fn(args)
+    if match_rule is None:
+        if not args.start:
+            raise ValueError("--start is required; pass a custom start grid such as '1:*' or '-3:2;-2:1,4;1:5'")
+        start_spec = args.start
+        qualify_cutoff = resolve_qualify_cutoff_fn(args)
+    else:
+        if runners is None:
+            raise ValueError("--runners is required when --match-type is used")
+        start_spec = args.start or resolve_match_start_spec_fn(match_rule, runners)
+        qualify_cutoff = effective_qualify_cutoff_fn(match_rule, len(runners))
+    return build_race_config_fn(
+        season=season,
+        runners=runners or (),
+        start_spec=start_spec,
+        track_length=args.track_length,
+        initial_order=args.initial_order,
+        qualify_cutoff=qualify_cutoff,
+        match_rule=match_rule,
     )
