@@ -639,6 +639,9 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
     npc_active = runtime.npc_active
     npc_rank_active = runtime.npc_rank_active
     round_number = runtime.round_number
+    round_helpers = _round_flow_helpers()
+    turn_helpers = _turn_flow_helpers()
+    npc_helpers = _npc_helpers()
     while True:
         round_start = core_prepare_round(
             config=config,
@@ -652,7 +655,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
             skill_state=skill_state,
             rng=rng,
             trace=trace,
-            helpers=_round_flow_helpers(),
+            helpers=round_helpers,
         )
         npc_active = round_start.npc_active
         npc_progress = round_start.npc_progress
@@ -670,7 +673,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                     if trace:
                         log(trace, "--- NPC行动 ---")
                         log_timing(trace, "NPC行动轮到时", "从当前位置按反方向移动1~6步")
-                    npc_progress = move_npc(
+                    npc_progress = core_move_npc(
                         grid=grid,
                         progress=progress,
                         config=config,
@@ -681,6 +684,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                         movement_state=movement_state,
                         ignore_waiting_stack=round_number == config.npc_start_round,
                         trace=trace,
+                        helpers=npc_helpers,
                     )
                     npc_rank_active = True
                     if trace:
@@ -712,7 +716,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 zani_extra_steps=zani_extra_steps,
                 cartethyia_available=cartethyia_available,
                 cartethyia_extra_steps=cartethyia_extra_steps,
-                helpers=_turn_flow_helpers(),
+                helpers=turn_helpers,
             )
             cantarella_state = turn_state.cantarella_state
             cantarella_group = turn_state.cantarella_group
@@ -732,7 +736,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 movement_state=movement_state,
                 skill_state=skill_state,
                 trace=trace,
-                current_rank_fn=current_rank,
+                current_rank_fn=core_current_rank,
                 format_runner_fn=format_runner,
                 format_runner_list_fn=format_runner_list,
                 log_block_fn=log_block,
@@ -753,7 +757,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
             trace=trace,
             skill_state=skill_state,
             cantarella_state=cantarella_state,
-            helpers=_round_flow_helpers(),
+            helpers=round_helpers,
         )
         npc_progress = round_end.npc_progress
         player_order = round_end.player_order
@@ -2091,9 +2095,38 @@ def _effect_hooks() -> EffectHooks:
 def _npc_helpers() -> NPCHelpers:
     global _NPC_HELPERS
     if _NPC_HELPERS is None:
+        effect_hooks = _effect_hooks()
+
+        def apply_cell_effects_core(
+            grid: dict[int, list[int]],
+            progress: dict[int, int],
+            movers: Sequence[int],
+            pos: int,
+            rng: random.Random,
+            config: RaceConfig,
+            *,
+            active_player: int | None = None,
+            skill_state: RaceSkillState | None = None,
+            movement_state: RaceMovementState | None = None,
+            trace: TraceContext = False,
+        ) -> None:
+            core_apply_cell_effects(
+                grid,
+                progress,
+                movers,
+                pos,
+                rng,
+                config,
+                hooks=effect_hooks,
+                active_player=active_player,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+            )
+
         _NPC_HELPERS = core_build_npc_helpers(
-            apply_cell_effects=apply_cell_effects,
-            current_rank=current_rank,
+            apply_cell_effects=apply_cell_effects_core,
+            current_rank=core_current_rank,
             format_cell=format_cell,
             format_position=format_position,
             format_runner=format_runner,
@@ -2107,7 +2140,7 @@ def _pre_action_helpers() -> PreActionHelpers:
     global _PRE_ACTION_HELPERS
     if _PRE_ACTION_HELPERS is None:
         _PRE_ACTION_HELPERS = core_build_pre_action_helpers(
-            current_rank=current_rank,
+            current_rank=core_current_rank,
             format_cell=format_cell,
             format_runner=format_runner,
             log_block=log_block,
@@ -2122,7 +2155,7 @@ def _post_action_helpers() -> PostActionHelpers:
     global _POST_ACTION_HELPERS
     if _POST_ACTION_HELPERS is None:
         _POST_ACTION_HELPERS = core_build_post_action_helpers(
-            current_rank=current_rank,
+            current_rank=core_current_rank,
             format_runner=format_runner,
             log_block=log_block,
             log_rank_decision=log_rank_decision,
@@ -2163,8 +2196,39 @@ def _round_flow_helpers() -> RoundFlowHelpers:
 def _runner_action_helpers() -> RunnerActionHelpers:
     global _RUNNER_ACTION_HELPERS
     if _RUNNER_ACTION_HELPERS is None:
+        effect_hooks = _effect_hooks()
+
+        def add_group_to_position_core(
+            grid: dict[int, list[int]],
+            progress: dict[int, int],
+            movers: Sequence[int],
+            new_progress: int,
+            rng: random.Random,
+            config: RaceConfig,
+            *,
+            active_player: int | None = None,
+            skill_state: RaceSkillState | None = None,
+            movement_state: RaceMovementState | None = None,
+            trace: TraceContext = False,
+            apply_effects: bool = True,
+        ) -> None:
+            core_add_group_to_position(
+                grid,
+                progress,
+                movers,
+                new_progress,
+                rng,
+                config,
+                hooks=effect_hooks,
+                active_player=active_player,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+                apply_effects=apply_effects,
+            )
+
         _RUNNER_ACTION_HELPERS = core_build_runner_action_helpers(
-            add_group_to_position=add_group_to_position,
+            add_group_to_position=add_group_to_position_core,
             format_runner=format_runner,
             log_block=log_block,
             log_grid=log_grid,
@@ -2177,8 +2241,186 @@ def _runner_action_helpers() -> RunnerActionHelpers:
 def _turn_flow_helpers() -> TurnFlowHelpers:
     global _TURN_FLOW_HELPERS
     if _TURN_FLOW_HELPERS is None:
-        _TURN_FLOW_HELPERS = core_build_turn_flow_helpers(
-            apply_shuffle_cell_effect=apply_shuffle_cell_effect,
+        effect_hooks = _effect_hooks()
+        runner_helpers = _runner_action_helpers()
+        pre_helpers = _pre_action_helpers()
+        post_helpers = _post_action_helpers()
+
+        def apply_shuffle_cell_effect_core(
+            grid: dict[int, list[int]],
+            pos: int,
+            rng: random.Random,
+            *,
+            trace: TraceContext = False,
+        ) -> None:
+            core_apply_shuffle_cell_effect(grid, pos, rng, hooks=effect_hooks, trace=trace)
+
+        def move_cantarella_core(
+            *,
+            grid: dict[int, list[int]],
+            progress: dict[int, int],
+            config: RaceConfig,
+            player: int,
+            total_steps: int,
+            rng: random.Random,
+            cantarella_state: int,
+            cantarella_group: list[int],
+            trace: TraceContext,
+            skill_state: RaceSkillState | None = None,
+            movement_state: RaceMovementState | None = None,
+        ) -> tuple[int, int, list[int]]:
+            return core_move_cantarella(
+                grid=grid,
+                progress=progress,
+                config=config,
+                player=player,
+                total_steps=total_steps,
+                rng=rng,
+                cantarella_state=cantarella_state,
+                cantarella_group=cantarella_group,
+                trace=trace,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                helpers=runner_helpers,
+            )
+
+        def move_runner_with_left_side_core(
+            *,
+            grid: dict[int, list[int]],
+            progress: dict[int, int],
+            config: RaceConfig,
+            player: int,
+            idx_in_cell: int,
+            total_steps: int,
+            rng: random.Random,
+            skill_state: RaceSkillState | None = None,
+            movement_state: RaceMovementState | None = None,
+            trace: TraceContext = False,
+        ) -> int:
+            return core_move_runner_with_left_side(
+                grid=grid,
+                progress=progress,
+                config=config,
+                player=player,
+                idx_in_cell=idx_in_cell,
+                total_steps=total_steps,
+                rng=rng,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+                helpers=runner_helpers,
+            )
+
+        def move_single_runner_core(
+            *,
+            grid: dict[int, list[int]],
+            progress: dict[int, int],
+            config: RaceConfig,
+            player: int,
+            total_steps: int,
+            rng: random.Random,
+            skill_state: RaceSkillState | None = None,
+            movement_state: RaceMovementState | None = None,
+            trace: TraceContext = False,
+        ) -> int:
+            return core_move_single_runner(
+                grid=grid,
+                progress=progress,
+                config=config,
+                player=player,
+                total_steps=total_steps,
+                rng=rng,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+                helpers=runner_helpers,
+            )
+
+        def resolve_pre_action_state_for_turn(
+            *,
+            player: int,
+            current_cell: Sequence[int],
+            grid: dict[int, Sequence[int]],
+            progress: dict[int, int],
+            config: RaceConfig,
+            runners: Sequence[int],
+            player_order: Sequence[int],
+            round_number: int,
+            npc_rank_active: bool,
+            dice: int,
+            rng: random.Random,
+            skill_state: RaceSkillState,
+            trace: TraceContext,
+            chisa_bonus_active: bool,
+            sigrika_debuffed: set[int],
+            cantarella_state: int,
+            zani_extra_steps: int,
+            cartethyia_extra_steps: bool,
+        ) -> object:
+            return core_resolve_pre_action_state(
+                helpers=pre_helpers,
+                camellya_solo_action_chance=CAMELLYA_SOLO_ACTION_CHANCE,
+                zani_extra_steps_chance=ZANI_EXTRA_STEPS_CHANCE,
+                cartethyia_extra_steps_chance=CARTETHYIA_EXTRA_STEPS_CHANCE,
+                phoebe_extra_step_chance=PHOEBE_EXTRA_STEP_CHANCE,
+                potato_repeat_dice_chance=POTATO_REPEAT_DICE_CHANCE,
+                player=player,
+                current_cell=current_cell,
+                grid=grid,
+                progress=progress,
+                config=config,
+                runners=runners,
+                player_order=player_order,
+                round_number=round_number,
+                npc_rank_active=npc_rank_active,
+                dice=dice,
+                rng=rng,
+                skill_state=skill_state,
+                trace=trace,
+                chisa_bonus_active=chisa_bonus_active,
+                sigrika_debuffed=sigrika_debuffed,
+                cantarella_state=cantarella_state,
+                zani_extra_steps=zani_extra_steps,
+                cartethyia_extra_steps=cartethyia_extra_steps,
+            )
+
+        def resolve_post_action_effects_for_turn(
+            *,
+            grid: dict[int, list[int]],
+            progress: dict[int, int],
+            player: int,
+            runners: Sequence[int],
+            config: RaceConfig,
+            npc_rank_active: bool,
+            action_start_progress: int,
+            total_steps: int,
+            rng: random.Random,
+            skill_state: RaceSkillState | None,
+            movement_state: RaceMovementState | None = None,
+            trace: TraceContext = False,
+            cartethyia_available: bool,
+            cartethyia_extra_steps: bool,
+        ) -> object:
+            return core_resolve_post_action_effects(
+                helpers=post_helpers,
+                grid=grid,
+                progress=progress,
+                player=player,
+                runners=runners,
+                config=config,
+                npc_rank_active=npc_rank_active,
+                action_start_progress=action_start_progress,
+                total_steps=total_steps,
+                rng=rng,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+                cartethyia_available=cartethyia_available,
+                cartethyia_extra_steps=cartethyia_extra_steps,
+            )
+
+        _TURN_FLOW_HELPERS = TurnFlowHelpers(
+            apply_shuffle_cell_effect=apply_shuffle_cell_effect_core,
             format_cell=format_cell,
             format_position=format_position,
             format_runner=format_runner,
@@ -2186,18 +2428,11 @@ def _turn_flow_helpers() -> TurnFlowHelpers:
             log_block=log_block,
             log_grid=log_grid,
             log_timing=log_timing,
-            move_cantarella=move_cantarella,
-            move_runner_with_left_side=move_runner_with_left_side,
-            move_single_runner=move_single_runner,
-            resolve_pre_action_state_core_fn=core_resolve_pre_action_state,
-            resolve_post_action_effects_core_fn=core_resolve_post_action_effects,
-            pre_action_helpers_fn=_pre_action_helpers,
-            post_action_helpers_fn=_post_action_helpers,
-            camellya_solo_action_chance=CAMELLYA_SOLO_ACTION_CHANCE,
-            zani_extra_steps_chance=ZANI_EXTRA_STEPS_CHANCE,
-            cartethyia_extra_steps_chance=CARTETHYIA_EXTRA_STEPS_CHANCE,
-            phoebe_extra_step_chance=PHOEBE_EXTRA_STEP_CHANCE,
-            potato_repeat_dice_chance=POTATO_REPEAT_DICE_CHANCE,
+            move_cantarella=move_cantarella_core,
+            move_runner_with_left_side=move_runner_with_left_side_core,
+            move_single_runner=move_single_runner_core,
+            resolve_post_action_effects=resolve_post_action_effects_for_turn,
+            resolve_pre_action_state=resolve_pre_action_state_for_turn,
         )
     return _TURN_FLOW_HELPERS
 
@@ -2205,9 +2440,40 @@ def _turn_flow_helpers() -> TurnFlowHelpers:
 def _skill_hook_helpers() -> SkillHookHelpers:
     global _SKILL_HOOK_HELPERS
     if _SKILL_HOOK_HELPERS is None:
+        effect_hooks = _effect_hooks()
+
+        def add_group_to_position_core(
+            grid: dict[int, list[int]],
+            progress: dict[int, int],
+            movers: Sequence[int],
+            new_progress: int,
+            rng: random.Random,
+            config: RaceConfig,
+            *,
+            active_player: int | None = None,
+            skill_state: RaceSkillState | None = None,
+            movement_state: RaceMovementState | None = None,
+            trace: TraceContext = False,
+            apply_effects: bool = True,
+        ) -> None:
+            core_add_group_to_position(
+                grid,
+                progress,
+                movers,
+                new_progress,
+                rng,
+                config,
+                hooks=effect_hooks,
+                active_player=active_player,
+                skill_state=skill_state,
+                movement_state=movement_state,
+                trace=trace,
+                apply_effects=apply_effects,
+            )
+
         _SKILL_HOOK_HELPERS = core_build_skill_hook_helpers(
-            add_group_to_position=add_group_to_position,
-            current_rank=current_rank,
+            add_group_to_position=add_group_to_position_core,
+            current_rank=core_current_rank,
             format_cell=format_cell,
             format_position=format_position,
             format_runner=format_runner,
