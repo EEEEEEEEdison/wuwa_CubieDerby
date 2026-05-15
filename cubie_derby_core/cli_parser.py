@@ -27,6 +27,11 @@ def make_parser(*, match_type_choices_fn: MatchTypeChoicesFn) -> argparse.Argume
         help="run a full season tournament instead of a single-stage simulation",
     )
     parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="launch interactive prompts instead of providing every champion-prediction input by flags",
+    )
+    parser.add_argument(
         "--season-roster-scan",
         action="store_true",
         help="enumerate every same-size combination from the selected season roster and aggregate the results",

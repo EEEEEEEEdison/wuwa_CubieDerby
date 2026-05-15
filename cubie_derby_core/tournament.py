@@ -1448,6 +1448,53 @@ def simulate_tournament_chunk(
     return acc
 
 
+def tournament_entry_request_roster(request: TournamentEntryRequest) -> tuple[int, ...]:
+    definition = get_tournament_entry_point_definition(request.season, request.entry_point)
+    roster: list[int] = []
+    seen: set[int] = set()
+    for requirement in definition.requirements:
+        value = request.inputs.get(requirement.key)
+        if value is None:
+            continue
+        if requirement.kind == "grouped-entrants":
+            flat_runners = [runner for group in value for runner in group]  # type: ignore[misc]
+        else:
+            flat_runners = list(value)  # type: ignore[arg-type]
+        for runner in flat_runners:
+            if runner not in seen:
+                seen.add(runner)
+                roster.append(runner)
+    return tuple(roster)
+
+
+def simulate_tournament_from_entry_request_chunk(
+    request: TournamentEntryRequest,
+    iterations: int,
+    seed: int | None,
+    *,
+    simulate_tournament_from_entry_request_fn: Callable[[TournamentEntryRequest, random.Random], TournamentResult],
+    derive_seed_fn: DeriveSeedFn,
+    progress_batch_size_fn: ProgressBatchSizeFn,
+    start_index: int = 0,
+    progress: Any | None = None,
+) -> ChampionPredictionAccumulator:
+    acc = ChampionPredictionAccumulator(tournament_entry_request_roster(request))
+    chunk_rng = random.Random(seed)
+    progress_batch = progress_batch_size_fn(iterations)
+    pending_progress = 0
+    for index in range(iterations):
+        if seed is None:
+            tournament_rng = chunk_rng
+        else:
+            tournament_rng = random.Random(derive_seed_fn(seed, start_index + index))
+        acc.add(simulate_tournament_from_entry_request_fn(request, tournament_rng).champion)
+        pending_progress += 1
+        if progress is not None and (pending_progress >= progress_batch or index == iterations - 1):
+            progress.advance(pending_progress)
+            pending_progress = 0
+    return acc
+
+
 def stage_result_to_dict(result: StageResult) -> dict[str, object]:
     data: dict[str, object] = {
         "title": result.title,

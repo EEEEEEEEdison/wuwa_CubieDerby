@@ -102,6 +102,10 @@ from cubie_derby_core.cli_dispatch import (
     run_simulation_command as core_run_simulation_command,
     run_trace_command as core_run_trace_command,
 )
+from cubie_derby_core.champion_interactive import (
+    ChampionInteractiveHelpers,
+    run_interactive_champion_prediction_command as core_run_interactive_champion_prediction_command,
+)
 from cubie_derby_core.cli_parser import (
     make_parser as core_make_parser,
     normalize_cli_args as core_normalize_cli_args,
@@ -131,6 +135,7 @@ from cubie_derby_core.pre_action import (
     resolve_pre_action_state as core_resolve_pre_action_state,
 )
 from cubie_derby_core.parallel_jobs import (
+    run_champion_prediction_from_entry_request_monte_carlo as core_run_champion_prediction_from_entry_request_monte_carlo,
     run_champion_prediction_monte_carlo as core_run_champion_prediction_monte_carlo,
     run_monte_carlo as core_run_monte_carlo,
 )
@@ -230,10 +235,12 @@ from cubie_derby_core.tournament import (
     simulate_stage as core_simulate_stage,
     simulate_tournament_from_entry_request as core_simulate_tournament_from_entry_request,
     simulate_tournament as core_simulate_tournament,
+    simulate_tournament_from_entry_request_chunk as core_simulate_tournament_from_entry_request_chunk,
     simulate_tournament_chunk as core_simulate_tournament_chunk,
     stage_result_to_dict as core_stage_result_to_dict,
     tournament_entry_point_choices,
     tournament_entry_requirements,
+    tournament_entry_request_roster,
     tournament_phase_choices,
     tournament_result_to_dict as core_tournament_result_to_dict,
     validate_champion_prediction_season as core_validate_champion_prediction_season,
@@ -1341,6 +1348,38 @@ def simulate_tournament_from_entry_request(
     )
 
 
+def simulate_tournament_from_entry_request_chunk(
+    request: TournamentEntryRequest,
+    iterations: int,
+    seed: int | None,
+    *,
+    start_index: int = 0,
+    progress: ProgressBar | None = None,
+) -> ChampionPredictionAccumulator:
+    return core_simulate_tournament_from_entry_request_chunk(
+        request,
+        iterations,
+        seed,
+        simulate_tournament_from_entry_request_fn=simulate_tournament_from_entry_request,
+        derive_seed_fn=derive_race_seed,
+        progress_batch_size_fn=progress_batch_size,
+        start_index=start_index,
+        progress=progress,
+    )
+
+
+def simulate_tournament_from_entry_request_chunk_from_tuple(
+    args: tuple[TournamentEntryRequest, int, int | None, int],
+) -> ChampionPredictionAccumulator:
+    request, iterations, seed, start_index = args
+    return simulate_tournament_from_entry_request_chunk(
+        request,
+        iterations,
+        seed,
+        start_index=start_index,
+    )
+
+
 def simulate_tournament_chunk(
     season: int,
     iterations: int,
@@ -1419,6 +1458,38 @@ def run_champion_prediction_monte_carlo(
         simulate_tournament_chunk_from_tuple_fn=simulate_tournament_chunk_from_tuple,
         accumulator_factory=ChampionPredictionAccumulator,
         season_runner_pool_fn=season_runner_pool,
+        pool_factory=mp.Pool,
+        perf_counter_fn=time.perf_counter,
+        summary_factory=lambda acc, *, season, elapsed_seconds: acc.to_summary(
+            season=season,
+            elapsed_seconds=elapsed_seconds,
+        ),
+    )
+
+
+def run_champion_prediction_from_entry_request_monte_carlo(
+    request: TournamentEntryRequest,
+    iterations: int,
+    *,
+    seed: int | None = None,
+    workers: int = 1,
+    show_progress: bool = False,
+) -> ChampionPredictionSummary:
+    validate_champion_prediction_season(request.season)
+    return core_run_champion_prediction_from_entry_request_monte_carlo(
+        request,
+        iterations,
+        seed=seed,
+        workers=workers,
+        show_progress=show_progress,
+        cpu_count_fn=mp.cpu_count,
+        progress_factory=ProgressBar,
+        parallel_task_count_fn=parallel_task_count,
+        split_iterations_fn=split_iterations,
+        simulate_tournament_from_entry_request_chunk_fn=simulate_tournament_from_entry_request_chunk,
+        simulate_tournament_from_entry_request_chunk_from_tuple_fn=simulate_tournament_from_entry_request_chunk_from_tuple,
+        accumulator_factory=ChampionPredictionAccumulator,
+        tournament_entry_request_roster_fn=tournament_entry_request_roster,
         pool_factory=mp.Pool,
         perf_counter_fn=time.perf_counter,
         summary_factory=lambda acc, *, season, elapsed_seconds: acc.to_summary(
@@ -2523,6 +2594,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
     show_progress = sys.stderr.isatty() and not args.json
     try:
+        if args.interactive:
+            return core_run_interactive_champion_prediction_command(
+                args,
+                show_progress=show_progress,
+                helpers=ChampionInteractiveHelpers(
+                    build_tournament_entry_request=build_tournament_entry_request,
+                    champion_prediction_to_dict=champion_prediction_to_dict,
+                    format_champion_prediction_summary=format_champion_prediction_summary,
+                    format_tournament_result=format_tournament_result,
+                    get_tournament_entry_point_definition=get_tournament_entry_point_definition,
+                    parse_runner_tokens=parse_runner_tokens,
+                    run_champion_prediction_from_entry_request_monte_carlo=run_champion_prediction_from_entry_request_monte_carlo,
+                    season_runner_pool=season_runner_pool,
+                    simulate_tournament_from_entry_request=simulate_tournament_from_entry_request,
+                    tournament_entry_point_choices=tournament_entry_point_choices,
+                    tournament_entry_requirements=tournament_entry_requirements,
+                    tournament_result_to_dict=tournament_result_to_dict,
+                    validate_champion_prediction_season=validate_champion_prediction_season,
+                ),
+                prompt_output_fn=lambda text: print(text, file=sys.stderr),
+            )
         if args.champion_prediction:
             return core_run_champion_prediction_command(
                 args,

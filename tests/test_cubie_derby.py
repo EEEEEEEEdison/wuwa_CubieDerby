@@ -5,6 +5,7 @@ import random
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cubie_derby import (
     MonteCarloAccumulator,
@@ -51,6 +52,7 @@ from cubie_derby import (
     run_skill_ablation,
     run_monte_carlo,
     run_champion_prediction_monte_carlo,
+    run_champion_prediction_from_entry_request_monte_carlo,
     run_season_roster_scan,
     simulate_stage,
     simulate_tournament_from_entry_request,
@@ -900,6 +902,25 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(result.stages[0].title, "小组赛第一轮 B组")
         self.assertEqual(result.stages[-1].title, "总决赛")
         self.assertIn(result.champion, tuple(runner for value in request.inputs.values() for runner in value))
+
+    def test_champion_prediction_monte_carlo_from_entry_request_tracks_only_remaining_field(self):
+        request = build_tournament_entry_request(
+            season=2,
+            entry_point="grand-final",
+            inputs={"grand-final-entrants": (11, 12, 13, 14, 15, 16)},
+        )
+
+        summary = run_champion_prediction_from_entry_request_monte_carlo(
+            request,
+            4,
+            seed=7,
+            workers=1,
+        )
+
+        self.assertEqual(summary.iterations, 4)
+        self.assertEqual(len(summary.rows), 6)
+        self.assertEqual({row.runner for row in summary.rows}, {11, 12, 13, 14, 15, 16})
+        self.assertAlmostEqual(sum(row.championships for row in summary.rows), 4)
 
     def test_group_round_one_tournament_plan_covers_remaining_season_flow(self):
         plan = build_tournament_plan(
@@ -2694,6 +2715,72 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["season"], 2)
         self.assertIn("champion", data)
         self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
+
+    def test_main_interactive_champion_prediction_prompts_for_mode(self):
+        stdout = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "1",
+                "12",
+                "11 12 13 14 15 16",
+                "",
+                "n",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--seed",
+                    "7",
+                ]
+            )
+
+        text = stdout.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("起始阶段：总决赛", text)
+        self.assertIn("总决赛", text)
+
+    def test_main_interactive_champion_prediction_monte_carlo_json(self):
+        stdout = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "12",
+                "11 12 13 14 15 16",
+                "",
+                "",
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "monte-carlo",
+                    "--iterations",
+                    "4",
+                    "--workers",
+                    "1",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["season"], 2)
+        self.assertEqual(data["iterations"], 4)
+        self.assertEqual(data["start_entry_point"], "grand-final")
+        self.assertEqual({row["runner"] for row in data["rows"]}, {11, 12, 13, 14, 15, 16})
 
 
 if __name__ == "__main__":
