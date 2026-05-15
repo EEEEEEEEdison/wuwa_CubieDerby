@@ -47,6 +47,494 @@ class TournamentResult:
 
 
 @dataclass(frozen=True)
+class TournamentPhaseDefinition:
+    key: str
+    label: str
+    match_type: str
+    group_count: int
+    group_size: int
+    entrants_count: int
+    seeded_from_ranking_order: bool = False
+
+    @property
+    def stage_count(self) -> int:
+        return self.group_count
+
+
+@dataclass(frozen=True)
+class TournamentStartRequest:
+    season: int
+    start_phase: str
+    entrants: tuple[int, ...] = ()
+    grouped_entrants: tuple[tuple[int, ...], ...] | None = None
+
+
+@dataclass(frozen=True)
+class TournamentPlan:
+    season: int
+    start_phase: str
+    entrants: tuple[int, ...]
+    grouped_entrants: tuple[tuple[int, ...], ...] | None
+    phases: tuple[TournamentPhaseDefinition, ...]
+
+    @property
+    def stage_count(self) -> int:
+        return sum(phase.stage_count for phase in self.phases)
+
+
+@dataclass(frozen=True)
+class TournamentInputRequirement:
+    key: str
+    label: str
+    kind: str
+    runner_count: int
+    description: str
+    ordered: bool = False
+    optional: bool = False
+    group_count: int | None = None
+    group_size: int | None = None
+
+
+@dataclass(frozen=True)
+class TournamentEntryPointDefinition:
+    key: str
+    label: str
+    phase_key: str
+    requirements: tuple[TournamentInputRequirement, ...]
+
+
+SEASON2_TOURNAMENT_PHASES: dict[str, TournamentPhaseDefinition] = {
+    "group-round-1": TournamentPhaseDefinition(
+        key="group-round-1",
+        label="小组赛第一轮",
+        match_type="group-round-1",
+        group_count=3,
+        group_size=6,
+        entrants_count=18,
+    ),
+    "group-round-2": TournamentPhaseDefinition(
+        key="group-round-2",
+        label="小组赛第二轮",
+        match_type="group-round-2",
+        group_count=3,
+        group_size=6,
+        entrants_count=18,
+        seeded_from_ranking_order=True,
+    ),
+    "elimination": TournamentPhaseDefinition(
+        key="elimination",
+        label="淘汰赛",
+        match_type="elimination",
+        group_count=2,
+        group_size=6,
+        entrants_count=12,
+    ),
+    "losers-round-1": TournamentPhaseDefinition(
+        key="losers-round-1",
+        label="败者组第一轮",
+        match_type="losers-bracket",
+        group_count=1,
+        group_size=6,
+        entrants_count=6,
+    ),
+    "winners-round-2": TournamentPhaseDefinition(
+        key="winners-round-2",
+        label="胜者组第二轮",
+        match_type="winners-bracket",
+        group_count=1,
+        group_size=6,
+        entrants_count=6,
+    ),
+    "losers-round-2": TournamentPhaseDefinition(
+        key="losers-round-2",
+        label="败者组第二轮",
+        match_type="losers-bracket",
+        group_count=1,
+        group_size=6,
+        entrants_count=6,
+    ),
+    "grand-final": TournamentPhaseDefinition(
+        key="grand-final",
+        label="总决赛",
+        match_type="grand-final",
+        group_count=1,
+        group_size=6,
+        entrants_count=6,
+    ),
+}
+
+SEASON2_TOURNAMENT_FLOW: tuple[str, ...] = (
+    "group-round-1",
+    "group-round-2",
+    "elimination",
+    "losers-round-1",
+    "winners-round-2",
+    "losers-round-2",
+    "grand-final",
+)
+
+TOURNAMENT_PHASE_ALIASES = {
+    "group-round-1": "group-round-1",
+    "小组赛第一轮": "group-round-1",
+    "group-round-2": "group-round-2",
+    "小组赛第二轮": "group-round-2",
+    "elimination": "elimination",
+    "淘汰赛": "elimination",
+    "losers-round-1": "losers-round-1",
+    "losers-bracket": "losers-round-1",
+    "败者组": "losers-round-1",
+    "败者组第一轮": "losers-round-1",
+    "winners-round-2": "winners-round-2",
+    "winners-bracket": "winners-round-2",
+    "胜者组": "winners-round-2",
+    "胜者组第二轮": "winners-round-2",
+    "losers-round-2": "losers-round-2",
+    "败者组第二轮": "losers-round-2",
+    "grand-final": "grand-final",
+    "总决赛": "grand-final",
+}
+
+SEASON2_TOURNAMENT_ENTRY_FLOW: tuple[str, ...] = (
+    "group-a-round-1",
+    "group-a-round-2",
+    "group-b-round-1",
+    "group-b-round-2",
+    "group-c-round-1",
+    "group-c-round-2",
+    "elimination-a",
+    "elimination-b",
+    "losers-round-1",
+    "winners-round-2",
+    "losers-round-2",
+    "grand-final",
+)
+
+SEASON2_TOURNAMENT_ENTRY_POINTS: dict[str, TournamentEntryPointDefinition] = {
+    "group-a-round-1": TournamentEntryPointDefinition(
+        key="group-a-round-1",
+        label="小组A第一轮",
+        phase_key="group-round-1",
+        requirements=(
+            TournamentInputRequirement(
+                key="season-roster",
+                label="本届参赛角色（18名）",
+                kind="entrants",
+                runner_count=18,
+                description="提供本届赛事全部 18 名参赛角色；若不额外指定分组，系统会随机分配到小组 A/B/C。",
+            ),
+            TournamentInputRequirement(
+                key="group-stage-groups",
+                label="小组赛 A/B/C 分组（3组×6名，可选）",
+                kind="grouped-entrants",
+                runner_count=18,
+                description="如果你已经确定了小组赛分组，可以直接给出 A/B/C 三组各 6 人；否则系统会按 seed 随机分组。",
+                optional=True,
+                group_count=3,
+                group_size=6,
+            ),
+        ),
+    ),
+    "group-a-round-2": TournamentEntryPointDefinition(
+        key="group-a-round-2",
+        label="小组A第二轮",
+        phase_key="group-round-2",
+        requirements=(
+            TournamentInputRequirement(
+                key="group-a-round-2-entrants",
+                label="小组A第二轮参赛顺序（6名）",
+                kind="ranking",
+                runner_count=6,
+                description="按小组 A 第一轮的第 1 名到第 6 名顺序输入，系统会据此自动生成第二轮起跑站位。",
+                ordered=True,
+            ),
+            TournamentInputRequirement(
+                key="group-b-round-1-entrants",
+                label="小组B第一轮参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟小组 B 的两轮比赛。",
+            ),
+            TournamentInputRequirement(
+                key="group-c-round-1-entrants",
+                label="小组C第一轮参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟小组 C 的两轮比赛。",
+            ),
+        ),
+    ),
+    "group-b-round-1": TournamentEntryPointDefinition(
+        key="group-b-round-1",
+        label="小组B第一轮",
+        phase_key="group-round-1",
+        requirements=(
+            TournamentInputRequirement(
+                key="group-a-round-2-qualified",
+                label="小组A第二轮晋级角色（前4名）",
+                kind="qualified",
+                runner_count=4,
+                description="小组 A 已经结束，需要补齐这 4 个晋级名额，后续才能拼出淘汰赛阶段的 12 人名单。",
+            ),
+            TournamentInputRequirement(
+                key="group-b-round-1-entrants",
+                label="小组B第一轮参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟小组 B 的两轮比赛。",
+            ),
+            TournamentInputRequirement(
+                key="group-c-round-1-entrants",
+                label="小组C第一轮参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟小组 C 的两轮比赛。",
+            ),
+        ),
+    ),
+    "group-b-round-2": TournamentEntryPointDefinition(
+        key="group-b-round-2",
+        label="小组B第二轮",
+        phase_key="group-round-2",
+        requirements=(
+            TournamentInputRequirement(
+                key="group-a-round-2-qualified",
+                label="小组A第二轮晋级角色（前4名）",
+                kind="qualified",
+                runner_count=4,
+                description="小组 A 已经结束，需要补齐这 4 个晋级名额。",
+            ),
+            TournamentInputRequirement(
+                key="group-b-round-2-entrants",
+                label="小组B第二轮参赛顺序（6名）",
+                kind="ranking",
+                runner_count=6,
+                description="按小组 B 第一轮的第 1 名到第 6 名顺序输入，系统会据此自动生成第二轮起跑站位。",
+                ordered=True,
+            ),
+            TournamentInputRequirement(
+                key="group-c-round-1-entrants",
+                label="小组C第一轮参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟小组 C 的两轮比赛。",
+            ),
+        ),
+    ),
+    "group-c-round-1": TournamentEntryPointDefinition(
+        key="group-c-round-1",
+        label="小组C第一轮",
+        phase_key="group-round-1",
+        requirements=(
+            TournamentInputRequirement(
+                key="group-a-round-2-qualified",
+                label="小组A第二轮晋级角色（前4名）",
+                kind="qualified",
+                runner_count=4,
+                description="小组 A 已经结束，需要补齐这 4 个晋级名额。",
+            ),
+            TournamentInputRequirement(
+                key="group-b-round-2-qualified",
+                label="小组B第二轮晋级角色（前4名）",
+                kind="qualified",
+                runner_count=4,
+                description="小组 B 已经结束，需要补齐这 4 个晋级名额。",
+            ),
+            TournamentInputRequirement(
+                key="group-c-round-1-entrants",
+                label="小组C第一轮参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟小组 C 的两轮比赛。",
+            ),
+        ),
+    ),
+    "group-c-round-2": TournamentEntryPointDefinition(
+        key="group-c-round-2",
+        label="小组C第二轮",
+        phase_key="group-round-2",
+        requirements=(
+            TournamentInputRequirement(
+                key="group-a-round-2-qualified",
+                label="小组A第二轮晋级角色（前4名）",
+                kind="qualified",
+                runner_count=4,
+                description="小组 A 已经结束，需要补齐这 4 个晋级名额。",
+            ),
+            TournamentInputRequirement(
+                key="group-b-round-2-qualified",
+                label="小组B第二轮晋级角色（前4名）",
+                kind="qualified",
+                runner_count=4,
+                description="小组 B 已经结束，需要补齐这 4 个晋级名额。",
+            ),
+            TournamentInputRequirement(
+                key="group-c-round-2-entrants",
+                label="小组C第二轮参赛顺序（6名）",
+                kind="ranking",
+                runner_count=6,
+                description="按小组 C 第一轮的第 1 名到第 6 名顺序输入，系统会据此自动生成第二轮起跑站位。",
+                ordered=True,
+            ),
+        ),
+    ),
+    "elimination-a": TournamentEntryPointDefinition(
+        key="elimination-a",
+        label="淘汰赛A",
+        phase_key="elimination",
+        requirements=(
+            TournamentInputRequirement(
+                key="elimination-a-entrants",
+                label="淘汰赛A参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="12 名小组赛晋级者如何分到淘汰赛 A/B 两组，需要在这里确定一半名单。",
+            ),
+            TournamentInputRequirement(
+                key="elimination-b-entrants",
+                label="淘汰赛B参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="补齐淘汰赛另一组名单，后续才能继续拼接胜者组和败者组。",
+            ),
+        ),
+    ),
+    "elimination-b": TournamentEntryPointDefinition(
+        key="elimination-b",
+        label="淘汰赛B",
+        phase_key="elimination",
+        requirements=(
+            TournamentInputRequirement(
+                key="elimination-a-ranking",
+                label="淘汰赛A完整排名（6名）",
+                kind="ranking",
+                runner_count=6,
+                description="用于确定胜者组和败者组各自来自淘汰赛 A 的 3 个席位。",
+                ordered=True,
+            ),
+            TournamentInputRequirement(
+                key="elimination-b-entrants",
+                label="淘汰赛B参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟淘汰赛 B。",
+            ),
+        ),
+    ),
+    "losers-round-1": TournamentEntryPointDefinition(
+        key="losers-round-1",
+        label="败者组第一轮",
+        phase_key="losers-round-1",
+        requirements=(
+            TournamentInputRequirement(
+                key="losers-round-1-entrants",
+                label="败者组第一轮参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="这是两场淘汰赛后落入败者组的 6 名角色。",
+            ),
+            TournamentInputRequirement(
+                key="winners-round-2-entrants",
+                label="胜者组参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="这是两场淘汰赛后进入胜者组的 6 名角色。",
+            ),
+        ),
+    ),
+    "winners-round-2": TournamentEntryPointDefinition(
+        key="winners-round-2",
+        label="胜者组",
+        phase_key="winners-round-2",
+        requirements=(
+            TournamentInputRequirement(
+                key="losers-round-1-qualified",
+                label="败者组第一轮晋级角色（前3名）",
+                kind="qualified",
+                runner_count=3,
+                description="后续败者组第二轮需要用到这 3 个晋级名额。",
+            ),
+            TournamentInputRequirement(
+                key="winners-round-2-entrants",
+                label="胜者组参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟胜者组并锁定总决赛的前 3 席。",
+            ),
+        ),
+    ),
+    "losers-round-2": TournamentEntryPointDefinition(
+        key="losers-round-2",
+        label="败者组第二轮",
+        phase_key="losers-round-2",
+        requirements=(
+            TournamentInputRequirement(
+                key="winners-round-2-qualified",
+                label="胜者组直通总决赛角色（前3名）",
+                kind="qualified",
+                runner_count=3,
+                description="这 3 名角色会直接占据总决赛的一半席位，后续需要与败者组第二轮前 3 名合并。",
+            ),
+            TournamentInputRequirement(
+                key="losers-round-2-entrants",
+                label="败者组第二轮参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="用于继续模拟败者组第二轮，并决出剩余 3 个总决赛席位。",
+            ),
+        ),
+    ),
+    "grand-final": TournamentEntryPointDefinition(
+        key="grand-final",
+        label="总决赛",
+        phase_key="grand-final",
+        requirements=(
+            TournamentInputRequirement(
+                key="grand-final-entrants",
+                label="总决赛参赛角色（6名）",
+                kind="entrants",
+                runner_count=6,
+                description="从总决赛开始时，冠军预测会退化成单阶段夺冠预测。",
+            ),
+        ),
+    ),
+}
+
+TOURNAMENT_ENTRY_ALIASES = {
+    "group-a-round-1": "group-a-round-1",
+    "小组a第一轮": "group-a-round-1",
+    "小组赛a第一轮": "group-a-round-1",
+    "group-a-round-2": "group-a-round-2",
+    "小组a第二轮": "group-a-round-2",
+    "小组赛a第二轮": "group-a-round-2",
+    "group-b-round-1": "group-b-round-1",
+    "小组b第一轮": "group-b-round-1",
+    "小组赛b第一轮": "group-b-round-1",
+    "group-b-round-2": "group-b-round-2",
+    "小组b第二轮": "group-b-round-2",
+    "小组赛b第二轮": "group-b-round-2",
+    "group-c-round-1": "group-c-round-1",
+    "小组c第一轮": "group-c-round-1",
+    "小组赛c第一轮": "group-c-round-1",
+    "group-c-round-2": "group-c-round-2",
+    "小组c第二轮": "group-c-round-2",
+    "小组赛c第二轮": "group-c-round-2",
+    "elimination-a": "elimination-a",
+    "淘汰赛a": "elimination-a",
+    "elimination-b": "elimination-b",
+    "淘汰赛b": "elimination-b",
+    "losers-round-1": "losers-round-1",
+    "败者组第一轮": "losers-round-1",
+    "winners-round-2": "winners-round-2",
+    "胜者组": "winners-round-2",
+    "胜者组第二轮": "winners-round-2",
+    "losers-round-2": "losers-round-2",
+    "败者组第二轮": "losers-round-2",
+    "grand-final": "grand-final",
+    "总决赛": "grand-final",
+}
+
+
+@dataclass(frozen=True)
 class ChampionPredictionRow:
     runner: int
     name: str
@@ -103,6 +591,112 @@ class ChampionPredictionAccumulator:
             rows=tuple(rows),
             elapsed_seconds=elapsed_seconds,
         )
+
+
+def tournament_phase_choices(season: int) -> tuple[str, ...]:
+    validate_champion_prediction_season(season)
+    if season == 2:
+        return SEASON2_TOURNAMENT_FLOW
+    raise ValueError(f"season {season} does not support tournament phases yet")
+
+
+def normalize_tournament_phase(value: str) -> str:
+    normalized = value.strip().lower()
+    if not normalized:
+        raise ValueError("tournament phase cannot be empty")
+    alias = TOURNAMENT_PHASE_ALIASES.get(normalized)
+    if alias is not None:
+        return alias
+    alias = TOURNAMENT_PHASE_ALIASES.get(value.strip())
+    if alias is not None:
+        return alias
+    raise ValueError(f"unknown tournament phase: {value}")
+
+
+def get_tournament_phase_definition(season: int, phase: str) -> TournamentPhaseDefinition:
+    validate_champion_prediction_season(season)
+    key = normalize_tournament_phase(phase)
+    if season == 2:
+        return SEASON2_TOURNAMENT_PHASES[key]
+    raise ValueError(f"season {season} does not support tournament phases yet")
+
+
+def remaining_tournament_phases(season: int, start_phase: str) -> tuple[TournamentPhaseDefinition, ...]:
+    phase = get_tournament_phase_definition(season, start_phase)
+    flow = tournament_phase_choices(season)
+    start_index = flow.index(phase.key)
+    return tuple(SEASON2_TOURNAMENT_PHASES[key] for key in flow[start_index:])
+
+
+def tournament_entry_point_choices(season: int) -> tuple[str, ...]:
+    validate_champion_prediction_season(season)
+    if season == 2:
+        return SEASON2_TOURNAMENT_ENTRY_FLOW
+    raise ValueError(f"season {season} does not support tournament entry points yet")
+
+
+def normalize_tournament_entry_point(value: str) -> str:
+    normalized = value.strip().lower()
+    if not normalized:
+        raise ValueError("tournament entry point cannot be empty")
+    alias = TOURNAMENT_ENTRY_ALIASES.get(normalized)
+    if alias is not None:
+        return alias
+    alias = TOURNAMENT_ENTRY_ALIASES.get(value.strip())
+    if alias is not None:
+        return alias
+    raise ValueError(f"unknown tournament entry point: {value}")
+
+
+def get_tournament_entry_point_definition(season: int, entry_point: str) -> TournamentEntryPointDefinition:
+    validate_champion_prediction_season(season)
+    key = normalize_tournament_entry_point(entry_point)
+    if season == 2:
+        return SEASON2_TOURNAMENT_ENTRY_POINTS[key]
+    raise ValueError(f"season {season} does not support tournament entry points yet")
+
+
+def tournament_entry_requirements(season: int, entry_point: str) -> tuple[TournamentInputRequirement, ...]:
+    return get_tournament_entry_point_definition(season, entry_point).requirements
+
+
+def resolve_tournament_start_entrants(request: TournamentStartRequest) -> tuple[int, ...]:
+    if request.grouped_entrants is not None:
+        flattened = tuple(runner for group in request.grouped_entrants for runner in group)
+        if request.entrants and tuple(request.entrants) != flattened:
+            raise ValueError("grouped entrants do not match flat entrants")
+        return flattened
+    if not request.entrants:
+        raise ValueError("tournament start request requires entrants")
+    return tuple(request.entrants)
+
+
+def build_tournament_plan(request: TournamentStartRequest) -> TournamentPlan:
+    phase = get_tournament_phase_definition(request.season, request.start_phase)
+    entrants = resolve_tournament_start_entrants(request)
+    if len(entrants) != phase.entrants_count:
+        raise ValueError(
+            f"{phase.label} requires exactly {phase.entrants_count} entrants, got {len(entrants)}"
+        )
+    if len(set(entrants)) != len(entrants):
+        raise ValueError("tournament start entrants contain duplicates")
+    grouped_entrants = request.grouped_entrants
+    if grouped_entrants is not None:
+        if len(grouped_entrants) != phase.group_count:
+            raise ValueError(
+                f"{phase.label} requires exactly {phase.group_count} groups, got {len(grouped_entrants)}"
+            )
+        if any(len(group) != phase.group_size for group in grouped_entrants):
+            raise ValueError(
+                f"{phase.label} requires groups of exactly {phase.group_size} entrants"
+            )
+    return TournamentPlan(
+        season=request.season,
+        start_phase=phase.key,
+        entrants=entrants,
+        grouped_entrants=grouped_entrants,
+        phases=remaining_tournament_phases(request.season, phase.key),
+    )
 
 
 def format_runner(runner: int) -> str:

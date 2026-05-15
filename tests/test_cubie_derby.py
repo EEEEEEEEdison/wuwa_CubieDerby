@@ -54,6 +54,12 @@ from cubie_derby import (
     run_season_roster_scan,
     simulate_stage,
     simulate_tournament,
+    get_tournament_entry_point_definition,
+    TournamentStartRequest,
+    build_tournament_plan,
+    tournament_entry_point_choices,
+    tournament_entry_requirements,
+    get_tournament_phase_definition,
     season_rules,
     season_roster_combination_count,
     season_roster_scan_to_dict,
@@ -62,6 +68,7 @@ from cubie_derby import (
     simulate_race,
     skill_ablation_to_dict,
     split_iterations,
+    tournament_phase_choices,
     roll_dice,
     roll_round_dice,
     with_elapsed,
@@ -746,6 +753,168 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn(result.champion, season_runner_pool(2))
         self.assertIn("总决赛", text)
         self.assertIn("冠军", text)
+
+    def test_tournament_phase_choices_cover_explicit_season_two_flow(self):
+        self.assertEqual(
+            tournament_phase_choices(2),
+            (
+                "group-round-1",
+                "group-round-2",
+                "elimination",
+                "losers-round-1",
+                "winners-round-2",
+                "losers-round-2",
+                "grand-final",
+            ),
+        )
+
+    def test_tournament_entry_point_choices_cover_stage_by_stage_flow(self):
+        self.assertEqual(
+            tournament_entry_point_choices(2),
+            (
+                "group-a-round-1",
+                "group-a-round-2",
+                "group-b-round-1",
+                "group-b-round-2",
+                "group-c-round-1",
+                "group-c-round-2",
+                "elimination-a",
+                "elimination-b",
+                "losers-round-1",
+                "winners-round-2",
+                "losers-round-2",
+                "grand-final",
+            ),
+        )
+
+    def test_group_a_round_one_entry_accepts_optional_manual_groups(self):
+        entry = get_tournament_entry_point_definition(2, "小组A第一轮")
+        requirements = entry.requirements
+
+        self.assertEqual(entry.phase_key, "group-round-1")
+        self.assertEqual(requirements[0].key, "season-roster")
+        self.assertEqual(requirements[0].runner_count, 18)
+        self.assertFalse(requirements[0].optional)
+        self.assertEqual(requirements[1].kind, "grouped-entrants")
+        self.assertTrue(requirements[1].optional)
+        self.assertEqual((requirements[1].group_count, requirements[1].group_size), (3, 6))
+
+    def test_group_b_round_two_entry_requires_ranked_group_b_roster(self):
+        requirements = tournament_entry_requirements(2, "小组B第二轮")
+
+        self.assertEqual(len(requirements), 3)
+        self.assertEqual(requirements[0].key, "group-a-round-2-qualified")
+        self.assertEqual(requirements[0].runner_count, 4)
+        self.assertEqual(requirements[1].key, "group-b-round-2-entrants")
+        self.assertTrue(requirements[1].ordered)
+        self.assertEqual(requirements[1].kind, "ranking")
+        self.assertEqual(requirements[2].key, "group-c-round-1-entrants")
+
+    def test_elimination_b_entry_requires_prior_elimination_ranking(self):
+        entry = get_tournament_entry_point_definition(2, "elimination-b")
+        requirements = entry.requirements
+
+        self.assertEqual(entry.phase_key, "elimination")
+        self.assertEqual(requirements[0].key, "elimination-a-ranking")
+        self.assertTrue(requirements[0].ordered)
+        self.assertEqual(requirements[0].runner_count, 6)
+        self.assertEqual(requirements[1].key, "elimination-b-entrants")
+
+    def test_grand_final_entry_only_needs_finalists(self):
+        requirements = tournament_entry_requirements(2, "总决赛")
+
+        self.assertEqual(len(requirements), 1)
+        self.assertEqual(requirements[0].key, "grand-final-entrants")
+        self.assertEqual(requirements[0].runner_count, 6)
+
+    def test_group_round_one_tournament_plan_covers_remaining_season_flow(self):
+        plan = build_tournament_plan(
+            TournamentStartRequest(
+                season=2,
+                start_phase="group-round-1",
+                entrants=tuple(season_runner_pool(2)),
+            )
+        )
+
+        self.assertEqual(plan.start_phase, "group-round-1")
+        self.assertEqual(plan.stage_count, 12)
+        self.assertEqual(plan.phases[0].key, "group-round-1")
+        self.assertEqual(plan.phases[-1].key, "grand-final")
+
+    def test_grand_final_tournament_plan_degrades_to_single_stage(self):
+        plan = build_tournament_plan(
+            TournamentStartRequest(
+                season=2,
+                start_phase="grand-final",
+                entrants=(11, 12, 13, 14, 15, 16),
+            )
+        )
+
+        self.assertEqual(plan.start_phase, "grand-final")
+        self.assertEqual(plan.stage_count, 1)
+        self.assertEqual(tuple(phase.key for phase in plan.phases), ("grand-final",))
+
+    def test_losers_bracket_alias_resolves_to_first_losers_phase(self):
+        phase = get_tournament_phase_definition(2, "losers-bracket")
+        plan = build_tournament_plan(
+            TournamentStartRequest(
+                season=2,
+                start_phase="losers-bracket",
+                entrants=(11, 12, 13, 14, 15, 16),
+            )
+        )
+
+        self.assertEqual(phase.key, "losers-round-1")
+        self.assertEqual(plan.start_phase, "losers-round-1")
+        self.assertEqual(tuple(item.key for item in plan.phases[:2]), ("losers-round-1", "winners-round-2"))
+
+    def test_tournament_plan_rejects_wrong_entrant_count(self):
+        with self.assertRaisesRegex(ValueError, "requires exactly 12 entrants"):
+            build_tournament_plan(
+                TournamentStartRequest(
+                    season=2,
+                    start_phase="elimination",
+                    entrants=(11, 12, 13, 14, 15, 16),
+                )
+            )
+
+    def test_tournament_plan_rejects_wrong_group_count(self):
+        entrants = tuple(season_runner_pool(2))
+        grouped = (entrants[:6], entrants[6:])
+
+        with self.assertRaisesRegex(ValueError, "requires exactly 3 groups"):
+            build_tournament_plan(
+                TournamentStartRequest(
+                    season=2,
+                    start_phase="group-round-1",
+                    entrants=entrants,
+                    grouped_entrants=grouped,
+                )
+            )
+
+    def test_tournament_plan_rejects_wrong_group_size(self):
+        entrants = tuple(season_runner_pool(2))
+        grouped = (entrants[:5], entrants[5:11], entrants[11:18])
+
+        with self.assertRaisesRegex(ValueError, "groups of exactly 6 entrants"):
+            build_tournament_plan(
+                TournamentStartRequest(
+                    season=2,
+                    start_phase="group-round-1",
+                    entrants=tuple(runner for group in grouped for runner in group),
+                    grouped_entrants=grouped,
+                )
+            )
+
+    def test_tournament_plan_rejects_duplicate_entrants(self):
+        with self.assertRaisesRegex(ValueError, "contain duplicates"):
+            build_tournament_plan(
+                TournamentStartRequest(
+                    season=2,
+                    start_phase="grand-final",
+                    entrants=(11, 12, 13, 14, 15, 11),
+                )
+            )
 
     def test_champion_prediction_monte_carlo_outputs_only_champion_rates(self):
         summary = run_champion_prediction_monte_carlo(2, 8, seed=3, workers=1)
