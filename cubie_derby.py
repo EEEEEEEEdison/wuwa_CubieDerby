@@ -109,6 +109,7 @@ class RaceConfig:
     runners: tuple[int, ...]
     track_length: int
     start_grid: dict[int, tuple[int, ...]]
+    qualify_cutoff: int = 4
     season: int = 1
     forward_cells: frozenset[int] = field(default_factory=frozenset)
     backward_cells: frozenset[int] = field(default_factory=frozenset)
@@ -312,6 +313,7 @@ class SeasonRosterScanSummary:
     season: int
     roster: tuple[int, ...]
     field_size: int
+    qualify_cutoff: int
     iterations_per_combination: int
     combination_count: int
     total_simulated_races: int
@@ -327,10 +329,12 @@ class SeasonRosterScanSummary:
 
 
 class MonteCarloAccumulator:
-    def __init__(self, runners: Sequence[int]) -> None:
+    def __init__(self, runners: Sequence[int], qualify_cutoff: int = 4) -> None:
         self.runners = tuple(runners)
         self.index = {runner: i for i, runner in enumerate(self.runners)}
         size = len(self.runners)
+        validate_qualify_cutoff(qualify_cutoff, len(self.runners))
+        self.qualify_cutoff = min(qualify_cutoff, len(self.runners))
         self.iterations = 0
         self.wins = [0] * size
         self.qualify = [0] * size
@@ -354,7 +358,7 @@ class MonteCarloAccumulator:
         skill_counts = dict(result.skill_success_counts)
         for rank, runner in enumerate(result.ranking, start=1):
             idx = self.index[runner]
-            if rank <= 4:
+            if rank <= self.qualify_cutoff:
                 self.qualify[idx] += 1
             self.rank_sum[idx] += rank
             self.rank_square_sum[idx] += rank * rank
@@ -485,6 +489,7 @@ class SeasonRosterScanAccumulator:
         *,
         season: int,
         field_size: int,
+        qualify_cutoff: int,
         iterations_per_combination: int,
         combination_count: int,
         start_spec: str,
@@ -539,6 +544,7 @@ class SeasonRosterScanAccumulator:
             season=season,
             roster=self.roster,
             field_size=field_size,
+            qualify_cutoff=qualify_cutoff,
             iterations_per_combination=iterations_per_combination,
             combination_count=combination_count,
             total_simulated_races=combination_count * iterations_per_combination,
@@ -621,6 +627,15 @@ def validate_same_runners(expected: Sequence[int], actual: Sequence[int], label:
         if extra:
             parts.append(f"extra runners: {format_runner_list(sorted(extra))}")
         raise ValueError(f"{label} does not match selected runners ({'; '.join(parts)})")
+
+
+def validate_qualify_cutoff(qualify_cutoff: int, field_size: int) -> None:
+    if qualify_cutoff < 1:
+        raise ValueError("qualify cutoff must be at least 1")
+
+
+def resolve_qualify_cutoff(args: argparse.Namespace) -> int:
+    return getattr(args, "qualify_cutoff", 4)
 
 
 def record_movement(
@@ -2173,7 +2188,7 @@ def run_monte_carlo(
             if chunk_size > 0:
                 chunk_args.append((config, chunk_size, seed, start_index))
             start_index += chunk_size
-        acc = MonteCarloAccumulator(config.runners)
+        acc = MonteCarloAccumulator(config.runners, config.qualify_cutoff)
         with mp.Pool(processes=workers) as pool:
             if progress is None:
                 parts = pool.map(simulate_chunk_from_tuple, chunk_args)
@@ -2328,6 +2343,7 @@ def run_season_roster_scan(args: argparse.Namespace, *, show_progress: bool = Fa
                 season=args.season,
                 roster=roster,
                 field_size=args.field_size,
+                qualify_cutoff=template_config.qualify_cutoff,
                 start_spec=args.start,
                 initial_order_mode=template_config.initial_order_mode,
                 combination_count=len(combo_list),
@@ -2362,6 +2378,7 @@ def run_season_roster_scan(args: argparse.Namespace, *, show_progress: bool = Fa
         return acc.to_summary(
             season=args.season,
             field_size=args.field_size,
+            qualify_cutoff=template_config.qualify_cutoff,
             iterations_per_combination=args.iterations,
             combination_count=len(combo_list),
             start_spec=args.start,
@@ -2422,7 +2439,7 @@ def simulate_chunk(
 ) -> MonteCarloAccumulator:
     chunk_rng = random.Random(seed)
     race_rng = random.Random()
-    acc = MonteCarloAccumulator(config.runners)
+    acc = MonteCarloAccumulator(config.runners, config.qualify_cutoff)
     progress_batch = progress_batch_size(iterations)
     pending_progress = 0
     for index in range(iterations):
@@ -2585,6 +2602,8 @@ def build_config_from_args(
             runners = tuple(runner for _, cell in sorted(start_cells.items()) for runner in cell)
         grid = make_start_grid(track_length, start_cells)
         validate_fixed_start(runners, grid)
+    qualify_cutoff = resolve_qualify_cutoff(args)
+    validate_qualify_cutoff(qualify_cutoff, len(runners))
     initial_order_mode = default_initial_order_mode(grid, random_start_position)
     fixed_order: tuple[int, ...] = ()
     if args.initial_order:
@@ -2600,6 +2619,7 @@ def build_config_from_args(
         runners=runners,
         track_length=track_length,
         start_grid=grid,
+        qualify_cutoff=qualify_cutoff,
         season=season,
         forward_cells=rules["forward_cells"],
         backward_cells=rules["backward_cells"],
@@ -2633,6 +2653,7 @@ def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
             "runners": list(summary.config.runners),
             "lap_length": summary.config.track_length,
             "track_length": summary.config.track_length,
+            "qualify_cutoff": summary.config.qualify_cutoff,
             "forward_cells": sorted(summary.config.forward_cells),
             "backward_cells": sorted(summary.config.backward_cells),
             "shuffle_cells": sorted(summary.config.shuffle_cells),
@@ -2722,6 +2743,7 @@ def season_roster_scan_to_dict(summary: SeasonRosterScanSummary) -> dict[str, ob
         "season": summary.season,
         "roster": list(summary.roster),
         "field_size": summary.field_size,
+        "qualify_cutoff": summary.qualify_cutoff,
         "iterations_per_combination": summary.iterations_per_combination,
         "combination_count": summary.combination_count,
         "total_simulated_races": summary.total_simulated_races,
@@ -2830,6 +2852,7 @@ def format_season_roster_scan_summary(summary: SeasonRosterScanSummary) -> str:
         season=summary.season,
         roster=summary.roster,
         field_size=summary.field_size,
+        qualify_cutoff=summary.qualify_cutoff,
         start_spec=summary.start_spec,
         initial_order_mode=summary.initial_order_mode,
         combination_count=summary.combination_count,
@@ -2967,6 +2990,10 @@ def format_runtime_status_line(label: str, value: str) -> str:
     return f"{label}：{value}"
 
 
+def format_qualify_label(qualify_cutoff: int) -> str:
+    return f"前{qualify_cutoff}名"
+
+
 def format_simulation_overview_lines(
     config: RaceConfig,
     iterations: int,
@@ -2980,6 +3007,7 @@ def format_simulation_overview_lines(
         format_runtime_status_line("赛季", f"第{config.season}季"),
         format_runtime_status_line("模拟次数", f"{iterations:,}"),
         format_runtime_status_line("赛道长度", f"{config.track_length}格"),
+        format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)),
         format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
         format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
     ]
@@ -3005,6 +3033,7 @@ def format_skill_ablation_overview_lines(
         format_runtime_status_line("消融组数", f"{scenario_count - 1}个角色 + 1个技能全开基准"),
         format_runtime_status_line("总模拟局数", f"{total_simulated_races:,}局"),
         format_runtime_status_line("赛道长度", f"{config.track_length}格"),
+        format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)),
         format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
         format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
     ]
@@ -3018,6 +3047,7 @@ def format_season_roster_scan_overview_lines(
     season: int,
     roster: Sequence[int],
     field_size: int,
+    qualify_cutoff: int,
     start_spec: str,
     initial_order_mode: str,
     combination_count: int,
@@ -3033,6 +3063,7 @@ def format_season_roster_scan_overview_lines(
         format_runtime_status_line("赛季", f"第{season}季"),
         format_runtime_status_line("角色池", f"{len(roster)}人（{format_runner_list(roster)}）"),
         format_runtime_status_line("每组人数", f"{field_size}人"),
+        format_runtime_status_line("晋级统计", format_qualify_label(qualify_cutoff)),
         format_runtime_status_line("起点配置", start_spec),
         format_runtime_status_line("首轮顺序", format_initial_order_mode(initial_order_mode)),
         format_runtime_status_line("组合数", f"{combination_count:,}组"),
@@ -3220,6 +3251,12 @@ def make_parser() -> argparse.ArgumentParser:
         "--runners",
         nargs="+",
         help="runner ids/names, e.g. --runners 3 4 8 10; use 'random' or 'random:6' to sample runners",
+    )
+    parser.add_argument(
+        "--qualify-cutoff",
+        type=int,
+        default=4,
+        help="count finishes within the top N as qualifying when computing 晋级率; default is 4",
     )
     parser.add_argument("--track-length", "--lap-length", dest="track_length", type=int, help="override lap length")
     parser.add_argument(

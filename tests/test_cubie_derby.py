@@ -79,6 +79,7 @@ def argparse_namespace(**kwargs):
         "skill_ablation": False,
         "skill_ablation_runners": None,
         "skill_ablation_detail": False,
+        "qualify_cutoff": 4,
     }
     defaults.update(kwargs)
     return type("Args", (), defaults)()
@@ -249,6 +250,20 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual({row.runner for row in summary.rows}, {3, 4, 8, 10})
         self.assertEqual(sum(row.qualify_count for row in summary.rows), 400)
 
+    def test_qualify_cutoff_controls_top_n_counting(self):
+        config = RaceConfig(
+            runners=(3, 4, 8, 10),
+            track_length=24,
+            start_grid=make_start_grid(24, {1: (10,), 2: (4, 3), 3: (8,)}),
+            qualify_cutoff=2,
+        )
+
+        summary = run_monte_carlo(config, 100, seed=42)
+
+        self.assertEqual(sum(row.qualify_count for row in summary.rows), 200)
+        self.assertEqual(summary.config.qualify_cutoff, 2)
+        self.assertEqual(summary_to_dict(summary)["config"]["qualify_cutoff"], 2)
+
     def test_format_summary_uses_chinese_aligned_table(self):
         config = RaceConfig(
             runners=(13, 14, 15, 16),
@@ -263,6 +278,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("赛制：自定义", text)
         self.assertIn("角色", text)
         self.assertIn("晋级率", text)
+        self.assertIn("晋级统计：前4名", text)
         self.assertIn("用时：未统计", text)
         self.assertIn("速度：未统计", text)
         self.assertIn("推荐选择：", text)
@@ -339,6 +355,7 @@ class CubieDerbyTests(unittest.TestCase):
                 "赛季：第2季",
                 "模拟次数：1,000,000",
                 "赛道长度：24格",
+                "晋级统计：前4名",
                 "用时：进行中",
                 "速度：计算中",
                 "自定义站位：第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]",
