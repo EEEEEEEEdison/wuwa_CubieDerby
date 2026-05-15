@@ -67,6 +67,16 @@ from cubie_derby_core.effects import (
     apply_shuffle_cell_effect as core_apply_shuffle_cell_effect,
     move_group_due_to_cell_effect as core_move_group_due_to_cell_effect,
 )
+from cubie_derby_core.helper_factories import (
+    build_effect_hooks as core_build_effect_hooks,
+    build_npc_helpers as core_build_npc_helpers,
+    build_post_action_helpers as core_build_post_action_helpers,
+    build_pre_action_helpers as core_build_pre_action_helpers,
+    build_round_flow_helpers as core_build_round_flow_helpers,
+    build_runner_action_helpers as core_build_runner_action_helpers,
+    build_skill_hook_helpers as core_build_skill_hook_helpers,
+    build_turn_flow_helpers as core_build_turn_flow_helpers,
+)
 from cubie_derby_core.action_flow import (
     PostActionHelpers,
     resolve_post_action_effects as core_resolve_post_action_effects,
@@ -2241,7 +2251,7 @@ def log_grid(
 def _effect_hooks() -> EffectHooks:
     global _EFFECT_HOOKS
     if _EFFECT_HOOKS is None:
-        _EFFECT_HOOKS = EffectHooks(
+        _EFFECT_HOOKS = core_build_effect_hooks(
             record_movement=record_movement,
             record_hiyuki_npc_path_contact=record_hiyuki_npc_path_contact,
             maybe_arm_aemeath_pending=maybe_arm_aemeath_pending,
@@ -2257,7 +2267,7 @@ def _effect_hooks() -> EffectHooks:
 def _npc_helpers() -> NPCHelpers:
     global _NPC_HELPERS
     if _NPC_HELPERS is None:
-        _NPC_HELPERS = NPCHelpers(
+        _NPC_HELPERS = core_build_npc_helpers(
             apply_cell_effects=apply_cell_effects,
             current_rank=current_rank,
             format_cell=format_cell,
@@ -2272,7 +2282,7 @@ def _npc_helpers() -> NPCHelpers:
 def _pre_action_helpers() -> PreActionHelpers:
     global _PRE_ACTION_HELPERS
     if _PRE_ACTION_HELPERS is None:
-        _PRE_ACTION_HELPERS = PreActionHelpers(
+        _PRE_ACTION_HELPERS = core_build_pre_action_helpers(
             current_rank=current_rank,
             format_cell=format_cell,
             format_runner=format_runner,
@@ -2287,7 +2297,7 @@ def _pre_action_helpers() -> PreActionHelpers:
 def _post_action_helpers() -> PostActionHelpers:
     global _POST_ACTION_HELPERS
     if _POST_ACTION_HELPERS is None:
-        _POST_ACTION_HELPERS = PostActionHelpers(
+        _POST_ACTION_HELPERS = core_build_post_action_helpers(
             current_rank=current_rank,
             format_runner=format_runner,
             log_block=log_block,
@@ -2304,7 +2314,7 @@ def _post_action_helpers() -> PostActionHelpers:
 def _round_flow_helpers() -> RoundFlowHelpers:
     global _ROUND_FLOW_HELPERS
     if _ROUND_FLOW_HELPERS is None:
-        _ROUND_FLOW_HELPERS = RoundFlowHelpers(
+        _ROUND_FLOW_HELPERS = core_build_round_flow_helpers(
             add_npc_to_start=add_npc_to_start,
             check_player2_skill=check_player2_skill,
             chisa_has_lowest_dice=chisa_has_lowest_dice,
@@ -2329,7 +2339,7 @@ def _round_flow_helpers() -> RoundFlowHelpers:
 def _runner_action_helpers() -> RunnerActionHelpers:
     global _RUNNER_ACTION_HELPERS
     if _RUNNER_ACTION_HELPERS is None:
-        _RUNNER_ACTION_HELPERS = RunnerActionHelpers(
+        _RUNNER_ACTION_HELPERS = core_build_runner_action_helpers(
             add_group_to_position=add_group_to_position,
             format_runner=format_runner,
             log_block=log_block,
@@ -2343,24 +2353,7 @@ def _runner_action_helpers() -> RunnerActionHelpers:
 def _turn_flow_helpers() -> TurnFlowHelpers:
     global _TURN_FLOW_HELPERS
     if _TURN_FLOW_HELPERS is None:
-        def resolve_pre_action_state_for_turn(**kwargs: object) -> object:
-            return core_resolve_pre_action_state(
-                helpers=_pre_action_helpers(),
-                camellya_solo_action_chance=CAMELLYA_SOLO_ACTION_CHANCE,
-                zani_extra_steps_chance=ZANI_EXTRA_STEPS_CHANCE,
-                cartethyia_extra_steps_chance=CARTETHYIA_EXTRA_STEPS_CHANCE,
-                phoebe_extra_step_chance=PHOEBE_EXTRA_STEP_CHANCE,
-                potato_repeat_dice_chance=POTATO_REPEAT_DICE_CHANCE,
-                **kwargs,
-            )
-
-        def resolve_post_action_effects_for_turn(**kwargs: object) -> object:
-            return core_resolve_post_action_effects(
-                helpers=_post_action_helpers(),
-                **kwargs,
-            )
-
-        _TURN_FLOW_HELPERS = TurnFlowHelpers(
+        _TURN_FLOW_HELPERS = core_build_turn_flow_helpers(
             apply_shuffle_cell_effect=apply_shuffle_cell_effect,
             format_cell=format_cell,
             format_position=format_position,
@@ -2372,8 +2365,15 @@ def _turn_flow_helpers() -> TurnFlowHelpers:
             move_cantarella=move_cantarella,
             move_runner_with_left_side=move_runner_with_left_side,
             move_single_runner=move_single_runner,
-            resolve_post_action_effects=resolve_post_action_effects_for_turn,
-            resolve_pre_action_state=resolve_pre_action_state_for_turn,
+            resolve_pre_action_state_core_fn=core_resolve_pre_action_state,
+            resolve_post_action_effects_core_fn=core_resolve_post_action_effects,
+            pre_action_helpers_fn=_pre_action_helpers,
+            post_action_helpers_fn=_post_action_helpers,
+            camellya_solo_action_chance=CAMELLYA_SOLO_ACTION_CHANCE,
+            zani_extra_steps_chance=ZANI_EXTRA_STEPS_CHANCE,
+            cartethyia_extra_steps_chance=CARTETHYIA_EXTRA_STEPS_CHANCE,
+            phoebe_extra_step_chance=PHOEBE_EXTRA_STEP_CHANCE,
+            potato_repeat_dice_chance=POTATO_REPEAT_DICE_CHANCE,
         )
     return _TURN_FLOW_HELPERS
 
@@ -2381,7 +2381,7 @@ def _turn_flow_helpers() -> TurnFlowHelpers:
 def _skill_hook_helpers() -> SkillHookHelpers:
     global _SKILL_HOOK_HELPERS
     if _SKILL_HOOK_HELPERS is None:
-        _SKILL_HOOK_HELPERS = SkillHookHelpers(
+        _SKILL_HOOK_HELPERS = core_build_skill_hook_helpers(
             add_group_to_position=add_group_to_position,
             current_rank=current_rank,
             format_cell=format_cell,
