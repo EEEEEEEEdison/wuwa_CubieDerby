@@ -262,7 +262,6 @@ def run_interactive_champion_prediction_command(
         input_fn=input_fn,
     )
 
-    entry_definition = helpers.get_tournament_entry_point_definition(season, entry_point)
     if prediction_mode == "random":
         start_time = time.perf_counter()
         tournament = replace(
@@ -270,12 +269,8 @@ def run_interactive_champion_prediction_command(
             elapsed_seconds=time.perf_counter() - start_time,
         )
         if json_output:
-            data = helpers.tournament_result_to_dict(tournament)
-            data["start_entry_point"] = entry_definition.key
-            data["start_entry_label"] = entry_definition.label
-            print(json.dumps(data, ensure_ascii=False, indent=2))
+            result_output_fn(json.dumps(helpers.tournament_result_to_dict(tournament), ensure_ascii=False, indent=2))
         else:
-            result_output_fn(f"起始阶段：{entry_definition.label}")
             result_output_fn(helpers.format_tournament_result(tournament))
         return 0
 
@@ -301,11 +296,7 @@ def run_interactive_champion_prediction_command(
         show_progress=show_progress,
     )
     if json_output:
-        data = helpers.champion_prediction_to_dict(summary)
-        data["start_entry_point"] = entry_definition.key
-        data["start_entry_label"] = entry_definition.label
-        print(json.dumps(data, ensure_ascii=False, indent=2))
+        result_output_fn(json.dumps(helpers.champion_prediction_to_dict(summary), ensure_ascii=False, indent=2))
     else:
-        result_output_fn(f"起始阶段：{entry_definition.label}")
         result_output_fn(helpers.format_champion_prediction_summary(summary))
     return 0

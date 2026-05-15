@@ -240,6 +240,8 @@ from cubie_derby_core.tournament import (
     stage_result_to_dict as core_stage_result_to_dict,
     tournament_entry_point_choices,
     tournament_entry_requirements,
+    tournament_entry_input_context,
+    tournament_entry_remaining_stage_labels,
     tournament_entry_request_roster,
     tournament_phase_choices,
     tournament_result_to_dict as core_tournament_result_to_dict,
@@ -1495,6 +1497,10 @@ def run_champion_prediction_from_entry_request_monte_carlo(
         summary_factory=lambda acc, *, season, elapsed_seconds: acc.to_summary(
             season=season,
             elapsed_seconds=elapsed_seconds,
+            start_entry_point=request.entry_point,
+            start_entry_label=get_tournament_entry_point_definition(request.season, request.entry_point).label,
+            remaining_stage_labels=tournament_entry_remaining_stage_labels(request.season, request.entry_point),
+            input_context=tournament_entry_input_context(request),
         ),
     )
 

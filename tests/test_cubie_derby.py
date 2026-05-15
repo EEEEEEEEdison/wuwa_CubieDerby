@@ -882,6 +882,10 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(result.season, 2)
         self.assertEqual(len(result.stages), 1)
         self.assertEqual(result.stages[0].title, "总决赛")
+        self.assertEqual(result.start_entry_point, "grand-final")
+        self.assertEqual(result.start_entry_label, "总决赛")
+        self.assertEqual(result.remaining_stage_labels, ("总决赛",))
+        self.assertEqual(result.input_context[0].label, "总决赛参赛角色（6名）")
         self.assertIn(result.champion, result.stages[0].entrants)
 
     def test_simulate_tournament_from_group_b_round_one_finishes_remaining_stages(self):
@@ -919,8 +923,14 @@ class CubieDerbyTests(unittest.TestCase):
 
         self.assertEqual(summary.iterations, 4)
         self.assertEqual(len(summary.rows), 6)
+        self.assertEqual(summary.start_entry_point, "grand-final")
+        self.assertEqual(summary.remaining_stage_labels, ("总决赛",))
         self.assertEqual({row.runner for row in summary.rows}, {11, 12, 13, 14, 15, 16})
         self.assertAlmostEqual(sum(row.championships for row in summary.rows), 4)
+        data = champion_prediction_to_dict(summary)
+        self.assertEqual(data["start_entry_label"], "总决赛")
+        self.assertEqual(data["remaining_stage_labels"], ["总决赛"])
+        self.assertEqual(data["input_context"][0]["label"], "总决赛参赛角色（6名）")
 
     def test_group_round_one_tournament_plan_covers_remaining_season_flow(self):
         plan = build_tournament_plan(

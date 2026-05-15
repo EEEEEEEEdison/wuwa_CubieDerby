@@ -44,6 +44,10 @@ class TournamentResult:
     stages: tuple[StageResult, ...]
     champion: int
     elapsed_seconds: float | None = None
+    start_entry_point: str | None = None
+    start_entry_label: str | None = None
+    remaining_stage_labels: tuple[str, ...] = ()
+    input_context: tuple["TournamentInputSnapshot", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -108,6 +112,16 @@ class TournamentEntryRequest:
     season: int
     entry_point: str
     inputs: dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]]
+
+
+@dataclass(frozen=True)
+class TournamentInputSnapshot:
+    key: str
+    label: str
+    kind: str
+    ordered: bool
+    runners: tuple[int, ...] = ()
+    groups: tuple[tuple[int, ...], ...] = ()
 
 
 SEASON2_TOURNAMENT_PHASES: dict[str, TournamentPhaseDefinition] = {
@@ -555,6 +569,10 @@ class ChampionPredictionSummary:
     iterations: int
     rows: tuple[ChampionPredictionRow, ...]
     elapsed_seconds: float | None = None
+    start_entry_point: str | None = None
+    start_entry_label: str | None = None
+    remaining_stage_labels: tuple[str, ...] = ()
+    input_context: tuple[TournamentInputSnapshot, ...] = ()
 
     @property
     def best(self) -> ChampionPredictionRow:
@@ -579,7 +597,16 @@ class ChampionPredictionAccumulator:
         for index in range(len(self.roster)):
             self.championships[index] += other.championships[index]
 
-    def to_summary(self, *, season: int, elapsed_seconds: float | None = None) -> ChampionPredictionSummary:
+    def to_summary(
+        self,
+        *,
+        season: int,
+        elapsed_seconds: float | None = None,
+        start_entry_point: str | None = None,
+        start_entry_label: str | None = None,
+        remaining_stage_labels: tuple[str, ...] = (),
+        input_context: tuple["TournamentInputSnapshot", ...] = (),
+    ) -> ChampionPredictionSummary:
         rows = []
         total = self.iterations
         for runner in self.roster:
@@ -597,6 +624,10 @@ class ChampionPredictionAccumulator:
             iterations=total,
             rows=tuple(rows),
             elapsed_seconds=elapsed_seconds,
+            start_entry_point=start_entry_point,
+            start_entry_label=start_entry_label,
+            remaining_stage_labels=remaining_stage_labels,
+            input_context=input_context,
         )
 
 
@@ -665,6 +696,16 @@ def get_tournament_entry_point_definition(season: int, entry_point: str) -> Tour
 
 def tournament_entry_requirements(season: int, entry_point: str) -> tuple[TournamentInputRequirement, ...]:
     return get_tournament_entry_point_definition(season, entry_point).requirements
+
+
+def tournament_entry_remaining_stage_labels(season: int, entry_point: str) -> tuple[str, ...]:
+    definition = get_tournament_entry_point_definition(season, entry_point)
+    flow = tournament_entry_point_choices(season)
+    start_index = flow.index(definition.key)
+    return tuple(
+        get_tournament_entry_point_definition(season, key).label
+        for key in flow[start_index:]
+    )
 
 
 def normalize_tournament_input_value(
@@ -739,6 +780,36 @@ def build_tournament_entry_request(
         entry_point=definition.key,
         inputs=normalized_inputs,
     )
+
+
+def tournament_entry_input_context(request: TournamentEntryRequest) -> tuple[TournamentInputSnapshot, ...]:
+    definition = get_tournament_entry_point_definition(request.season, request.entry_point)
+    snapshots: list[TournamentInputSnapshot] = []
+    for requirement in definition.requirements:
+        value = request.inputs.get(requirement.key)
+        if value is None:
+            continue
+        if requirement.kind == "grouped-entrants":
+            snapshots.append(
+                TournamentInputSnapshot(
+                    key=requirement.key,
+                    label=requirement.label,
+                    kind=requirement.kind,
+                    ordered=requirement.ordered,
+                    groups=tuple(tuple(group) for group in value),  # type: ignore[arg-type]
+                )
+            )
+        else:
+            snapshots.append(
+                TournamentInputSnapshot(
+                    key=requirement.key,
+                    label=requirement.label,
+                    kind=requirement.kind,
+                    ordered=requirement.ordered,
+                    runners=tuple(value),  # type: ignore[arg-type]
+                )
+            )
+    return tuple(snapshots)
 
 
 def resolve_tournament_start_entrants(request: TournamentStartRequest) -> tuple[int, ...]:
@@ -1160,6 +1231,8 @@ def simulate_tournament_from_entry_request(
 ) -> TournamentResult:
     validate_champion_prediction_season(request.season)
     entry = get_tournament_entry_point_definition(request.season, request.entry_point)
+    remaining_stage_labels = tournament_entry_remaining_stage_labels(request.season, request.entry_point)
+    input_context = tournament_entry_input_context(request)
     group_entry_keys = {
         "group-a-round-1",
         "group-a-round-2",
@@ -1335,7 +1408,15 @@ def simulate_tournament_from_entry_request(
             simulate_stage_fn=simulate_stage_fn,
         )
         stages.append(grand_final)
-        return TournamentResult(season=request.season, stages=tuple(stages), champion=grand_final.ranking[0])
+        return TournamentResult(
+            season=request.season,
+            stages=tuple(stages),
+            champion=grand_final.ranking[0],
+            start_entry_point=entry.key,
+            start_entry_label=entry.label,
+            remaining_stage_labels=remaining_stage_labels,
+            input_context=input_context,
+        )
     elif entry.key == "grand-final":
         grand_final = _simulate_grand_final(
             season=request.season,
@@ -1344,7 +1425,15 @@ def simulate_tournament_from_entry_request(
             simulate_stage_fn=simulate_stage_fn,
         )
         stages.append(grand_final)
-        return TournamentResult(season=request.season, stages=tuple(stages), champion=grand_final.ranking[0])
+        return TournamentResult(
+            season=request.season,
+            stages=tuple(stages),
+            champion=grand_final.ranking[0],
+            start_entry_point=entry.key,
+            start_entry_label=entry.label,
+            remaining_stage_labels=remaining_stage_labels,
+            input_context=input_context,
+        )
     else:
         raise ValueError(f"unsupported tournament entry point: {entry.key}")
 
@@ -1416,6 +1505,10 @@ def simulate_tournament_from_entry_request(
         season=request.season,
         stages=tuple(stages),
         champion=grand_final.ranking[0],
+        start_entry_point=entry.key,
+        start_entry_label=entry.label,
+        remaining_stage_labels=remaining_stage_labels,
+        input_context=input_context,
     )
 
 
@@ -1512,14 +1605,34 @@ def stage_result_to_dict(result: StageResult) -> dict[str, object]:
     return data
 
 
+def tournament_input_snapshot_to_dict(snapshot: TournamentInputSnapshot) -> dict[str, object]:
+    data: dict[str, object] = {
+        "key": snapshot.key,
+        "label": snapshot.label,
+        "kind": snapshot.kind,
+        "ordered": snapshot.ordered,
+    }
+    if snapshot.groups:
+        data["groups"] = [list(group) for group in snapshot.groups]
+    else:
+        data["runners"] = list(snapshot.runners)
+    return data
+
+
 def tournament_result_to_dict(result: TournamentResult) -> dict[str, object]:
-    return {
+    data = {
         "season": result.season,
         "champion": result.champion,
         "champion_name": format_runner(result.champion),
         "elapsed_seconds": result.elapsed_seconds,
         "stages": [stage_result_to_dict(stage) for stage in result.stages],
     }
+    if result.start_entry_point is not None:
+        data["start_entry_point"] = result.start_entry_point
+        data["start_entry_label"] = result.start_entry_label
+        data["remaining_stage_labels"] = list(result.remaining_stage_labels)
+        data["input_context"] = [tournament_input_snapshot_to_dict(item) for item in result.input_context]
+    return data
 
 
 def champion_prediction_races_per_second(summary: ChampionPredictionSummary) -> float | None:
@@ -1530,7 +1643,7 @@ def champion_prediction_races_per_second(summary: ChampionPredictionSummary) -> 
 
 def champion_prediction_to_dict(summary: ChampionPredictionSummary) -> dict[str, object]:
     rows = sorted(summary.rows, key=lambda row: row.champion_rate, reverse=True)
-    return {
+    data = {
         "season": summary.season,
         "iterations": summary.iterations,
         "elapsed_seconds": summary.elapsed_seconds,
@@ -1551,6 +1664,20 @@ def champion_prediction_to_dict(summary: ChampionPredictionSummary) -> dict[str,
             for row in rows
         ],
     }
+    if summary.start_entry_point is not None:
+        data["start_entry_point"] = summary.start_entry_point
+        data["start_entry_label"] = summary.start_entry_label
+        data["remaining_stage_labels"] = list(summary.remaining_stage_labels)
+        data["input_context"] = [tournament_input_snapshot_to_dict(item) for item in summary.input_context]
+    return data
+
+
+def format_tournament_input_snapshot(snapshot: TournamentInputSnapshot) -> str:
+    if snapshot.groups:
+        parts = [f"{chr(ord('A') + index)}组：{format_runner_list(group)}" for index, group in enumerate(snapshot.groups)]
+        return " | ".join(parts)
+    prefix = "按顺序" if snapshot.ordered else "角色"
+    return f"{prefix}：{format_runner_list(snapshot.runners)}"
 
 
 def format_tournament_result(result: TournamentResult) -> str:
@@ -1560,6 +1687,11 @@ def format_tournament_result(result: TournamentResult) -> str:
         format_runtime_status_line("冠军", format_runner(result.champion)),
         format_runtime_status_line("用时", format_elapsed(result.elapsed_seconds)),
     ]
+    if result.start_entry_point is not None:
+        lines.append(format_runtime_status_line("起始阶段", result.start_entry_label or result.start_entry_point))
+        lines.append(format_runtime_status_line("剩余赛程", " -> ".join(result.remaining_stage_labels)))
+        for snapshot in result.input_context:
+            lines.append(format_runtime_status_line(snapshot.label, format_tournament_input_snapshot(snapshot)))
     for stage in result.stages:
         lines.extend(
             [
@@ -1602,6 +1734,15 @@ def format_champion_prediction_summary(summary: ChampionPredictionSummary) -> st
         format_table_row(headers, widths, aligns),
         format_table_separator(widths),
     ]
+    if summary.start_entry_point is not None:
+        lines[5:5] = [
+            format_runtime_status_line("起始阶段", summary.start_entry_label or summary.start_entry_point),
+            format_runtime_status_line("剩余赛程", " -> ".join(summary.remaining_stage_labels)),
+            *[
+                format_runtime_status_line(snapshot.label, format_tournament_input_snapshot(snapshot))
+                for snapshot in summary.input_context
+            ],
+        ]
     lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
     lines.extend(
         [
