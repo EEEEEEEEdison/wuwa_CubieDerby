@@ -30,6 +30,18 @@ Run with Season 2 rules. Season 2 uses a 32-position ring lap, special cells, an
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
 ```
 
+Run a Season 2 single-stage simulation with an explicit match type. The stage rules fill in the default qualify cutoff automatically:
+
+```powershell
+python cubie_derby.py --season 2 --match-type group-round-1 -n 100000 --runners 11 12 13 14 15 16 --seed 42
+```
+
+Run one full Season 2 tournament and print the champion plus every stage result:
+
+```powershell
+python cubie_derby.py --season 2 --champion-prediction random --seed 42
+```
+
 `--runners` selects the participants. You can freely change both the runner combination and the number of participants; see [Runner IDs and Skills](#runner-ids-and-skills) for the available ids, names, and skill notes.
 
 ## Parameter Guide
@@ -58,6 +70,58 @@ Examples:
 ```powershell
 python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10 --seed 42
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16 --seed 42
+```
+
+### `--match-type`
+
+Apply a built-in stage rule bundle. This is currently available for Season 2 and supports these stage keys:
+
+- `group-round-1`
+- `group-round-2`
+- `elimination`
+- `losers-bracket`
+- `winners-bracket`
+- `grand-final`
+
+Notes:
+
+- Chinese aliases such as `小组赛第一轮` and `总决赛` are also accepted.
+- `group-round-1` uses `--start "1:*"` automatically and does not show qualify statistics.
+- `group-round-2` uses the `--runners` order as the previous round ranking and auto-builds the seeded start layout `0 / -1 / -2 / -3`.
+- `elimination`, `losers-bracket`, and `winners-bracket` all use `--start "1:*"` automatically and qualify the top `3`.
+- `grand-final` uses `--start "1:*"` automatically and only tracks champion rate.
+- You can still override the start layout manually with `--start` in single-stage mode.
+
+Examples:
+
+```powershell
+python cubie_derby.py --season 2 --match-type group-round-2 -n 100000 --runners 11 12 13 14 15 16 --seed 42
+python cubie_derby.py --season 2 --match-type grand-final -n 100000 --runners 11 12 13 14 15 16 --seed 42
+```
+
+### `--champion-prediction`
+
+Run the full Season 2 tournament flow instead of a single stage.
+
+- `--champion-prediction random`: simulate one whole tournament and print each stage result plus the final champion.
+- `--champion-prediction monte-carlo`: simulate many whole tournaments and aggregate champion rates.
+
+Season 2 tournament flow:
+
+- 18 runners are randomly split into three 6-runner group-stage brackets.
+- Each bracket runs `group-round-1`, then `group-round-2`.
+- The top `4` from each second-round bracket advance.
+- The remaining 12 runners are randomly split into two 6-runner elimination brackets.
+- The top `3` from each elimination bracket enter the winners bracket, and the bottom `3` enter the losers bracket.
+- Winners-bracket top `3` go straight to the grand final.
+- Winners-bracket bottom `3` and losers-bracket top `3` meet in the second losers bracket.
+- The top `3` from that losers bracket join the grand final.
+
+Examples:
+
+```powershell
+python cubie_derby.py --season 2 --champion-prediction random --seed 42
+python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --seed 42 --workers 0
 ```
 
 ### `--season-roster-scan`

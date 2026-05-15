@@ -67,6 +67,32 @@ from cubie_derby_core.effects import (
     apply_shuffle_cell_effect as core_apply_shuffle_cell_effect,
     move_group_due_to_cell_effect as core_move_group_due_to_cell_effect,
 )
+from cubie_derby_core.match_types import (
+    MatchTypeRule,
+    effective_qualify_cutoff,
+    get_match_type_rule,
+    match_type_choices,
+    resolve_match_start_spec,
+)
+from cubie_derby_core.reporting import (
+    format_season_roster_scan_summary as core_format_season_roster_scan_summary,
+    format_skill_ablation_summary as core_format_skill_ablation_summary,
+    format_summary as core_format_summary,
+    season_roster_scan_races_per_second as core_season_roster_scan_races_per_second,
+    season_roster_scan_to_dict as core_season_roster_scan_to_dict,
+    skill_ablation_races_per_second as core_skill_ablation_races_per_second,
+    skill_ablation_to_dict as core_skill_ablation_to_dict,
+    summary_to_dict as core_summary_to_dict,
+)
+from cubie_derby_core.skill_hooks import (
+    SkillHookHelpers,
+    gather_runners_to_luno_cell as core_gather_runners_to_luno_cell,
+    maybe_trigger_aemeath_after_active_move as core_maybe_trigger_aemeath_after_active_move,
+    maybe_trigger_luno_after_action as core_maybe_trigger_luno_after_action,
+    maybe_trigger_player1_skill_after_action as core_maybe_trigger_player1_skill_after_action,
+    nearest_runner_progress_ahead as core_nearest_runner_progress_ahead,
+    record_hiyuki_npc_path_contact as core_record_hiyuki_npc_path_contact,
+)
 from cubie_derby_core.skills import (
     apply_chisa_bonus,
     apply_lynae_skill,
@@ -83,7 +109,28 @@ from cubie_derby_core.skills import (
     skill_enabled,
     skill_enabled_from_set,
 )
+from cubie_derby_core.stage_config import (
+    build_race_config as core_build_race_config,
+    default_initial_order_mode as core_default_initial_order_mode,
+    resolve_match_type_rule as core_resolve_match_type_rule,
+)
 from cubie_derby_core.tracing import TraceContext
+from cubie_derby_core.tournament import (
+    ChampionPredictionAccumulator,
+    ChampionPredictionSummary,
+    StageResult,
+    TournamentResult,
+    champion_prediction_races_per_second as core_champion_prediction_races_per_second,
+    champion_prediction_to_dict as core_champion_prediction_to_dict,
+    format_champion_prediction_summary as core_format_champion_prediction_summary,
+    format_tournament_result as core_format_tournament_result,
+    simulate_stage as core_simulate_stage,
+    simulate_tournament as core_simulate_tournament,
+    simulate_tournament_chunk as core_simulate_tournament_chunk,
+    stage_result_to_dict as core_stage_result_to_dict,
+    tournament_result_to_dict as core_tournament_result_to_dict,
+    validate_champion_prediction_season as core_validate_champion_prediction_season,
+)
 
 
 DEFAULT_LAP_LENGTH = 24
@@ -102,6 +149,7 @@ JINHSI_REORDER_CHANCE = 0.4
 CHANGLI_EXTRA_STEP_CHANCE = 0.65
 
 _EFFECT_HOOKS: EffectHooks | None = None
+_SKILL_HOOK_HELPERS: SkillHookHelpers | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +169,8 @@ class RaceConfig:
     initial_order_mode: str = "random"  # random, start, fixed
     fixed_initial_order: tuple[int, ...] = ()
     disabled_skills: frozenset[int] = field(default_factory=frozenset)
+    match_type: str | None = None
+    show_qualify_stats: bool = True
     name: str = "自定义"
 
 
@@ -1761,68 +1811,18 @@ def maybe_trigger_aemeath_after_active_move(
     movement_state: RaceMovementState | None = None,
     trace: TraceContext = False,
 ) -> None:
-    if (
-        skill_state is None
-        or not skill_state.aemeath_available
-        or not skill_state.aemeath_ready
-        or not skill_enabled(config, AEMEATH_ID)
-        or AEMEATH_ID not in progress
-        or not action_had_forward_movement
-    ):
-        return
-    end_progress = progress[AEMEATH_ID]
-    if end_progress >= config.track_length:
-        return
-    if trace:
-        log_timing(trace, "行动结束", f"{format_runner(AEMEATH_ID)}检查前方是否存在其他非NPC角色")
-    target_progress = nearest_runner_progress_ahead(
+    core_maybe_trigger_aemeath_after_active_move(
+        grid=grid,
         progress=progress,
-        from_progress=end_progress,
-        track_length=config.track_length,
-        excluded={AEMEATH_ID, NPC_ID},
-    )
-    if target_progress is None:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(AEMEATH_ID)}技能未触发：",
-                "原因：当前前方没有其他非NPC角色",
-                "效果：保留待判定状态，等待下次主动前进结束后继续检查",
-            )
-        return
-
-    current_pos = display_position(end_progress, config.track_length)
-    current_cell = grid.get(current_pos, [])
-    if AEMEATH_ID in current_cell:
-        current_cell[:] = [runner for runner in current_cell if runner != AEMEATH_ID]
-        if current_cell:
-            keep_npc_rightmost(current_cell)
-        else:
-            grid.pop(current_pos, None)
-
-    skill_state.aemeath_available = False
-    skill_state.aemeath_ready = False
-    record_skill_success(skill_state, AEMEATH_ID)
-    if trace:
-        log_block(
-            trace,
-            f"{format_runner(AEMEATH_ID)}技能触发：",
-            f"判定位置：{format_position(current_pos)}",
-            f"传送目标：{format_position(display_position(target_progress, config.track_length))}",
-            "效果：同行角色停留在原行动终点，爱弥斯单独传送到目标格最左侧",
-        )
-    add_group_to_position(
-        grid,
-        progress,
-        [AEMEATH_ID],
-        target_progress,
-        rng,
-        config,
-        active_player=AEMEATH_ID,
+        config=config,
+        start_progress=start_progress,
+        action_had_forward_movement=action_had_forward_movement,
+        rng=rng,
         skill_state=skill_state,
         movement_state=movement_state,
         trace=trace,
-        apply_effects=False,
+        helpers=_skill_hook_helpers(),
+        aemeath_trigger_cell=AEMEATH_TRIGGER_CELL,
     )
 
 
@@ -1834,58 +1834,15 @@ def maybe_trigger_luno_after_action(
     skill_state: RaceSkillState | None,
     trace: TraceContext = False,
 ) -> None:
-    if (
-        skill_state is None
-        or not skill_state.luno_available
-        or not skill_enabled(config, LUNO_ID)
-        or LUNO_ID not in progress
-    ):
-        return
-    end_progress = progress[LUNO_ID]
-    current_pos = display_position(end_progress, config.track_length)
-    if trace:
-        log_timing(trace, "行动结束", f"{format_runner(LUNO_ID)}检查自己是否已经经过第17格")
-    if end_progress < AEMEATH_TRIGGER_CELL:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(LUNO_ID)}技能未触发：",
-                f"原因：当前尚未经过{format_position(AEMEATH_TRIGGER_CELL)}",
-                f"判定位置：{format_position(current_pos)}",
-            )
-        return
-
-    ranking = current_rank(config.runners, progress, grid)
-    luno_rank_index = ranking.index(LUNO_ID)
-    if not (0 < luno_rank_index < len(ranking) - 1):
-        if trace:
-            reason = "去掉NPC后当前排名为第一名" if luno_rank_index == 0 else "去掉NPC后当前排名为最后一名"
-            log_block(
-                trace,
-                f"{format_runner(LUNO_ID)}技能未触发：",
-                f"原因：{reason}",
-                "效果：保留技能，等待下次主动行动结束后继续判定",
-                f"当前排名：{format_cell(ranking)}",
-            )
-        return
-
-    skill_state.luno_available = False
-    record_skill_success(skill_state, LUNO_ID)
-    gather_runners_to_luno_cell(
+    core_maybe_trigger_luno_after_action(
         grid=grid,
         progress=progress,
-        ranking=ranking,
-        target_progress=end_progress,
-        track_length=config.track_length,
+        config=config,
+        skill_state=skill_state,
+        trace=trace,
+        helpers=_skill_hook_helpers(),
+        aemeath_trigger_cell=AEMEATH_TRIGGER_CELL,
     )
-    if trace:
-        log_block(
-            trace,
-            f"{format_runner(LUNO_ID)}技能触发：",
-            f"判定位置：{format_position(current_pos)}",
-            f"汇集顺序：{format_cell(ranking)}",
-            f"格内顺序：{format_cell(grid[display_position(end_progress, config.track_length)])}",
-        )
 
 
 def nearest_runner_progress_ahead(
@@ -1895,13 +1852,12 @@ def nearest_runner_progress_ahead(
     track_length: int,
     excluded: set[int],
 ) -> int | None:
-    best: int | None = None
-    for runner, runner_progress in progress.items():
-        if runner <= 0 or runner in excluded or runner_progress <= from_progress or runner_progress >= track_length:
-            continue
-        if best is None or runner_progress < best:
-            best = runner_progress
-    return best
+    return core_nearest_runner_progress_ahead(
+        progress=progress,
+        from_progress=from_progress,
+        track_length=track_length,
+        excluded=excluded,
+    )
 
 
 def gather_runners_to_luno_cell(
@@ -1912,14 +1868,13 @@ def gather_runners_to_luno_cell(
     target_progress: int,
     track_length: int,
 ) -> None:
-    target_pos = display_position(target_progress, track_length)
-    npc_present = NPC_ID in grid.get(target_pos, [])
-    for runner in ranking:
-        remove_runner_from_grid(grid, runner)
-    for runner in ranking:
-        progress[runner] = target_progress
-    grid[target_pos] = list(ranking) + ([NPC_ID] if npc_present else [])
-    keep_npc_rightmost(grid[target_pos])
+    core_gather_runners_to_luno_cell(
+        grid=grid,
+        progress=progress,
+        ranking=ranking,
+        target_progress=target_progress,
+        track_length=track_length,
+    )
 
 
 def record_hiyuki_npc_path_contact(
@@ -1931,51 +1886,15 @@ def record_hiyuki_npc_path_contact(
     skill_state: RaceSkillState | None,
     trace: TraceContext = False,
 ) -> None:
-    if skill_state is None:
-        return
-    target_pos: int
-    contact_kind: str
-    if HIYUKI_ID in movers and NPC_ID in progress:
-        target_pos = display_position(progress[NPC_ID], track_length)
-        contact_kind = "hiyuki_to_npc"
-    elif NPC_ID in movers and HIYUKI_ID in progress:
-        target_pos = display_position(progress[HIYUKI_ID], track_length)
-        contact_kind = "npc_to_hiyuki"
-    else:
-        return
-    found = False
-    for pos in path:
-        if pos == target_pos:
-            found = True
-            break
-    if not found:
-        return
-    if skill_state.hiyuki_bonus_steps > 0:
-        if trace:
-            if contact_kind == "hiyuki_to_npc":
-                reason = f"{format_runner(HIYUKI_ID)}移动路径经过NPC所在{format_position(target_pos)}"
-            else:
-                reason = f"NPC移动路径经过{format_runner(HIYUKI_ID)}所在{format_position(target_pos)}"
-            log_block(
-                trace,
-                f"{format_runner(HIYUKI_ID)}技能不重复叠加：",
-                f"原因：{reason}",
-                "当前状态：已生效",
-            )
-        return
-    skill_state.hiyuki_bonus_steps += 1
-    record_skill_success(skill_state, HIYUKI_ID)
-    if trace:
-        if contact_kind == "hiyuki_to_npc":
-            reason = f"{format_runner(HIYUKI_ID)}移动路径经过NPC所在{format_position(target_pos)}"
-        else:
-            reason = f"NPC移动路径经过{format_runner(HIYUKI_ID)}所在{format_position(target_pos)}"
-        log_block(
-            trace,
-            f"{format_runner(HIYUKI_ID)}技能触发：",
-            f"原因：{reason}",
-            "效果：之后移动额外+1步",
-        )
+    core_record_hiyuki_npc_path_contact(
+        movers=movers,
+        progress=progress,
+        track_length=track_length,
+        path=path,
+        skill_state=skill_state,
+        trace=trace,
+        helpers=_skill_hook_helpers(),
+    )
 
 
 def record_hiyuki_npc_destination_contact_legacy(
@@ -2024,96 +1943,18 @@ def maybe_trigger_player1_skill_after_action(
     skill_state: RaceSkillState | None = None,
     trace: TraceContext = False,
 ) -> None:
-    if actor in (JINHSI_ID, NPC_ID) or JINHSI_ID not in progress or not skill_enabled_from_set(disabled_skills, JINHSI_ID):
-        return
-    if actor not in progress:
-        return
-
-    if trace:
-        log_timing(
-            trace,
-            "行动结束",
-            f"{format_runner(JINHSI_ID)}检查行动角色{format_runner(actor)}在本回合行动结算后是否位于自己紧邻左侧",
-        )
-
-    pos = display_position(progress[JINHSI_ID], track_length)
-    actor_pos = display_position(progress[actor], track_length)
-    if actor_pos != pos:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能不判定：",
-                f"行动角色：{format_runner(actor)}",
-                f"行动角色终点：{format_position(actor_pos)}",
-                f"{format_runner(JINHSI_ID)}位置：{format_position(pos)}",
-                "原因：行动角色终点未与自己同格",
-            )
-        return
-
-    cell = grid.get(pos)
-    if not cell or JINHSI_ID not in cell:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能不判定：",
-                f"位置：{format_position(pos)}",
-                f"原因：{format_runner(JINHSI_ID)}不在该格",
-            )
-        return
-
-    keep_npc_rightmost(cell)
-    one_idx = cell.index(JINHSI_ID)
-
-    if actor not in cell or one_idx == 0 or cell[one_idx - 1] != actor:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能不判定：",
-                f"行动角色：{format_runner(actor)}",
-                f"位置：{format_position(pos)}",
-                f"原因：行动角色不紧邻{format_runner(JINHSI_ID)}左侧",
-                f"格内顺序：{format_cell(cell)}",
-            )
-        return
-
-    left_runners = [actor]
-    if not left_runners:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能不判定：",
-                f"位置：{format_position(pos)}",
-                f"原因：左侧没有角色",
-                f"格内顺序：{format_cell(cell)}",
-            )
-        return
-
-    if trace:
-        log_block(
-            trace,
-            f"{format_runner(JINHSI_ID)}技能进入概率判定：",
-            f"左侧角色：{format_cell(left_runners)}",
-            f"格内顺序：{format_cell(cell)}",
-        )
-    if rng.random() <= JINHSI_REORDER_CHANCE:
-        cell[:] = [JINHSI_ID] + [runner for runner in cell if runner != JINHSI_ID]
-        keep_npc_rightmost(cell)
-        record_skill_success(skill_state, JINHSI_ID)
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能触发：",
-                f"原左侧角色：{format_cell(left_runners)}",
-                f"格内顺序：{format_cell(cell)}",
-            )
-    else:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(JINHSI_ID)}技能未触发：",
-                "原因：概率判定失败",
-                f"格内顺序：{format_cell(cell)}",
-            )
+    core_maybe_trigger_player1_skill_after_action(
+        grid=grid,
+        progress=progress,
+        actor=actor,
+        track_length=track_length,
+        rng=rng,
+        disabled_skills=disabled_skills,
+        skill_state=skill_state,
+        trace=trace,
+        helpers=_skill_hook_helpers(),
+        jinhsi_reorder_chance=JINHSI_REORDER_CHANCE,
+    )
 
 
 def check_player2_skill(
@@ -2154,6 +1995,72 @@ def current_rank(runners: Sequence[int], progress: dict[int, int], grid: dict[in
             if runner != NPC_ID and runner in selected:
                 cell_index[runner] = idx
     return sorted(runners, key=lambda runner: (-progress[runner], cell_index.get(runner, 9999)))
+
+
+def simulate_stage(
+    *,
+    season: int,
+    match_type: str,
+    runners: Sequence[int],
+    rng: random.Random,
+    start_spec: str | None = None,
+    track_length: int | None = None,
+    initial_order: str | None = None,
+    title: str | None = None,
+) -> StageResult:
+    return core_simulate_stage(
+        season=season,
+        match_type=match_type,
+        runners=runners,
+        rng=rng,
+        build_race_config_fn=build_race_config,
+        simulate_race_fn=simulate_race,
+        start_spec=start_spec,
+        track_length=track_length,
+        initial_order=initial_order,
+        title=title,
+    )
+
+
+def validate_champion_prediction_season(season: int) -> None:
+    core_validate_champion_prediction_season(season)
+
+
+def simulate_tournament(season: int, rng: random.Random) -> TournamentResult:
+    return core_simulate_tournament(
+        season,
+        rng,
+        season_runner_pool_fn=season_runner_pool,
+        simulate_stage_fn=simulate_stage,
+    )
+
+
+def simulate_tournament_chunk(
+    season: int,
+    iterations: int,
+    seed: int | None,
+    *,
+    start_index: int = 0,
+    progress: ProgressBar | None = None,
+) -> ChampionPredictionAccumulator:
+    return core_simulate_tournament_chunk(
+        season,
+        iterations,
+        seed,
+        season_runner_pool_fn=season_runner_pool,
+        simulate_tournament_fn=simulate_tournament,
+        derive_seed_fn=derive_race_seed,
+        progress_batch_size_fn=progress_batch_size,
+        start_index=start_index,
+        progress=progress,
+    )
+
+
+def simulate_tournament_chunk_from_tuple(
+    args: tuple[int, int, int | None, int],
+) -> ChampionPredictionAccumulator:
+    season, iterations, seed, start_index = args
+    return simulate_tournament_chunk(season, iterations, seed, start_index=start_index)
 
 
 def run_monte_carlo(
@@ -2199,6 +2106,55 @@ def run_monte_carlo(
                     acc.merge(part)
                     progress.advance(part.iterations)
         return acc.to_summary(config)
+    finally:
+        if owned_progress is not None:
+            owned_progress.close()
+
+
+def run_champion_prediction_monte_carlo(
+    season: int,
+    iterations: int,
+    *,
+    seed: int | None = None,
+    workers: int = 1,
+    show_progress: bool = False,
+) -> ChampionPredictionSummary:
+    validate_champion_prediction_season(season)
+    if iterations <= 0:
+        raise ValueError("iterations must be positive")
+    if workers == 0:
+        workers = mp.cpu_count()
+    workers = max(1, min(workers, iterations))
+
+    start_time = time.perf_counter()
+    owned_progress: ProgressBar | None = None
+    progress: ProgressBar | None = None
+    if show_progress:
+        owned_progress = ProgressBar(iterations, "冠军预测进度")
+        progress = owned_progress
+
+    try:
+        if workers == 1:
+            acc = simulate_tournament_chunk(season, iterations, seed, progress=progress)
+        else:
+            chunk_sizes = split_iterations(iterations, parallel_task_count(iterations, workers))
+            chunk_args: list[tuple[int, int, int | None, int]] = []
+            start_index = 0
+            for chunk_size in chunk_sizes:
+                if chunk_size > 0:
+                    chunk_args.append((season, chunk_size, seed, start_index))
+                start_index += chunk_size
+            acc = ChampionPredictionAccumulator(season_runner_pool(season))
+            with mp.Pool(processes=workers) as pool:
+                if progress is None:
+                    parts = pool.map(simulate_tournament_chunk_from_tuple, chunk_args)
+                    for part in parts:
+                        acc.merge(part)
+                else:
+                    for part in pool.imap_unordered(simulate_tournament_chunk_from_tuple, chunk_args):
+                        acc.merge(part)
+                        progress.advance(part.iterations)
+        return acc.to_summary(season=season, elapsed_seconds=time.perf_counter() - start_time)
     finally:
         if owned_progress is not None:
             owned_progress.close()
@@ -2574,6 +2530,47 @@ def parse_start_layout(spec: str) -> tuple[dict[int, tuple[int, ...]], int | Non
     return cells, random_start_position
 
 
+def resolve_match_type_rule(args: argparse.Namespace) -> MatchTypeRule | None:
+    return core_resolve_match_type_rule(
+        season=args.season,
+        match_type=getattr(args, "match_type", None),
+        get_match_type_rule_fn=get_match_type_rule,
+    )
+
+
+def build_race_config(
+    *,
+    season: int,
+    runners: Sequence[int],
+    start_spec: str,
+    track_length: int | None,
+    initial_order: str | None,
+    qualify_cutoff: int,
+    match_rule: MatchTypeRule | None = None,
+    name: str | None = None,
+) -> RaceConfig:
+    return core_build_race_config(
+        season=season,
+        runners=runners,
+        start_spec=start_spec,
+        track_length=track_length,
+        initial_order=initial_order,
+        qualify_cutoff=qualify_cutoff,
+        race_config_factory=RaceConfig,
+        season_rules_fn=season_rules,
+        parse_start_layout_fn=parse_start_layout,
+        validate_start_position_fn=validate_start_position,
+        empty_grid_fn=empty_grid,
+        make_start_grid_fn=make_start_grid,
+        validate_fixed_start_fn=validate_fixed_start,
+        validate_qualify_cutoff_fn=validate_qualify_cutoff,
+        parse_runner_tokens_fn=parse_runner_tokens,
+        validate_same_runners_fn=validate_same_runners,
+        match_rule=match_rule,
+        name=name,
+    )
+
+
 def build_config_from_args(
     args: argparse.Namespace,
     *,
@@ -2586,115 +2583,38 @@ def build_config_from_args(
         if runners_override is not None
         else parse_runner_tokens(args.runners, rng=random.Random(args.seed), runner_pool=runner_pool)
     )
-    rules = season_rules(season)
-    if not args.start:
-        raise ValueError("--start is required; pass a custom start grid such as '1:*' or '-3:2;-2:1,4;1:5'")
-
-    track_length = args.track_length or int(rules["track_length"])
-    start_cells, random_start_position = parse_start_layout(args.start)
-    if random_start_position is not None:
-        validate_start_position(random_start_position, track_length)
-        if runners is None:
-            raise ValueError("--runners is required when --start uses '*'")
-        grid = empty_grid(track_length)
+    match_rule = resolve_match_type_rule(args)
+    if match_rule is None:
+        if not args.start:
+            raise ValueError("--start is required; pass a custom start grid such as '1:*' or '-3:2;-2:1,4;1:5'")
+        start_spec = args.start
+        qualify_cutoff = resolve_qualify_cutoff(args)
     else:
         if runners is None:
-            runners = tuple(runner for _, cell in sorted(start_cells.items()) for runner in cell)
-        grid = make_start_grid(track_length, start_cells)
-        validate_fixed_start(runners, grid)
-    qualify_cutoff = resolve_qualify_cutoff(args)
-    validate_qualify_cutoff(qualify_cutoff, len(runners))
-    initial_order_mode = default_initial_order_mode(grid, random_start_position)
-    fixed_order: tuple[int, ...] = ()
-    if args.initial_order:
-        if args.initial_order == "random":
-            initial_order_mode = "random"
-        elif args.initial_order == "start":
-            initial_order_mode = "start"
-        else:
-            fixed_order = parse_runner_tokens([args.initial_order]) or ()
-            validate_same_runners(runners, fixed_order, "fixed initial order")
-            initial_order_mode = "fixed"
-    return RaceConfig(
-        runners=runners,
-        track_length=track_length,
-        start_grid=grid,
-        qualify_cutoff=qualify_cutoff,
+            raise ValueError("--runners is required when --match-type is used")
+        start_spec = args.start or resolve_match_start_spec(match_rule, runners)
+        qualify_cutoff = effective_qualify_cutoff(match_rule, len(runners))
+    return build_race_config(
         season=season,
-        forward_cells=rules["forward_cells"],
-        backward_cells=rules["backward_cells"],
-        shuffle_cells=rules["shuffle_cells"],
-        npc_enabled=bool(rules["npc_enabled"]),
-        random_start_stack=random_start_position is not None,
-        random_start_position=random_start_position or 0,
-        initial_order_mode=initial_order_mode,
-        fixed_initial_order=fixed_order,
-        name="自定义",
+        runners=runners or (),
+        start_spec=start_spec,
+        track_length=args.track_length,
+        initial_order=args.initial_order,
+        qualify_cutoff=qualify_cutoff,
+        match_rule=match_rule,
     )
 
 
 def default_initial_order_mode(grid: dict[int, Sequence[int]], random_start_position: int | None) -> str:
-    nonempty_positions = [pos for pos, cell in grid.items() if cell]
-    if random_start_position is not None:
-        return "start"
-    if nonempty_positions == [0]:
-        return "start"
-    return "random"
+    return core_default_initial_order_mode(grid, random_start_position)
 
 
 def summary_to_dict(summary: SimulationSummary) -> dict[str, object]:
-    return {
-        "iterations": summary.iterations,
-        "elapsed_seconds": summary.elapsed_seconds,
-        "races_per_second": races_per_second(summary),
-        "config": {
-            "name": summary.config.name,
-            "season": summary.config.season,
-            "runners": list(summary.config.runners),
-            "lap_length": summary.config.track_length,
-            "track_length": summary.config.track_length,
-            "qualify_cutoff": summary.config.qualify_cutoff,
-            "forward_cells": sorted(summary.config.forward_cells),
-            "backward_cells": sorted(summary.config.backward_cells),
-            "shuffle_cells": sorted(summary.config.shuffle_cells),
-            "npc_enabled": summary.config.npc_enabled,
-            "random_start_stack": summary.config.random_start_stack,
-            "random_start_position": summary.config.random_start_position,
-            "start_grid": {str(pos): list(cell) for pos, cell in sorted(summary.config.start_grid.items()) if cell},
-            "start_layout": (
-                None
-                if summary.config.random_start_stack
-                else format_start_layout(summary.config.start_grid)
-            ),
-            "disabled_skills": sorted(summary.config.disabled_skills),
-        },
-        "best": {
-            "runner": summary.best.runner,
-            "name": summary.best.name,
-            "win_rate": summary.best.win_rate,
-            "average_rank": summary.best.average_rank,
-        },
-        "rows": [
-            {
-                "runner": row.runner,
-                "name": row.name,
-                "wins": row.wins,
-                "win_rate": row.win_rate,
-                "qualify_count": row.qualify_count,
-                "qualify_rate": row.qualify_rate,
-                "average_rank": row.average_rank,
-                "rank_variance": row.rank_variance,
-                "winner_gap_per_race": row.winner_gap_per_race,
-                "average_winning_margin": row.average_winning_margin,
-                "lazy_win_rate": row.lazy_win_rate,
-                "winner_carried_steps": row.winner_carried_steps,
-                "winner_total_steps": row.winner_total_steps,
-                "skill_average_success_count": row.skill_average_success_count,
-                "skill_marginal_win_rate": row.skill_marginal_win_rate,
-            }
-            for row in summary.rows
-        ],
-    }
+    return core_summary_to_dict(
+        summary,
+        races_per_second_fn=races_per_second,
+        format_start_overview_fn=format_start_overview,
+    )
 
 
 def skill_ablation_to_dict(
@@ -2702,259 +2622,80 @@ def skill_ablation_to_dict(
     *,
     include_detail: bool = False,
 ) -> dict[str, object]:
-    rows = []
-    for row in sorted(summary.rows, key=lambda item: item.net_win_rate, reverse=True):
-        row_data: dict[str, object] = {
-            "runner": row.runner,
-            "name": row.name,
-            "enabled_win_rate": row.enabled_win_rate,
-            "disabled_win_rate": row.disabled_win_rate,
-            "net_win_rate": row.net_win_rate,
-            "skill_average_success_count": row.skill_average_success_count,
-            "skill_marginal_win_rate": row.skill_marginal_win_rate,
-        }
-        if include_detail:
-            row_data["success_distribution"] = [
-                {
-                    "success_count": bucket.success_count,
-                    "races": bucket.races,
-                    "wins": bucket.wins,
-                    "win_rate": bucket.win_rate,
-                }
-                for bucket in row.success_distribution
-            ]
-        rows.append(row_data)
-    return {
-        "iterations_per_scenario": summary.iterations,
-        "scenario_count": len(summary.rows) + 1,
-        "total_simulated_races": summary.total_simulated_races,
-        "elapsed_seconds": summary.elapsed_seconds,
-        "races_per_second": (
-            summary.total_simulated_races / summary.elapsed_seconds
-            if summary.elapsed_seconds and summary.elapsed_seconds > 0
-            else None
-        ),
-        "rows": rows,
-    }
+    return core_skill_ablation_to_dict(summary, include_detail=include_detail)
 
 
 def season_roster_scan_to_dict(summary: SeasonRosterScanSummary) -> dict[str, object]:
-    return {
-        "season": summary.season,
-        "roster": list(summary.roster),
-        "field_size": summary.field_size,
-        "qualify_cutoff": summary.qualify_cutoff,
-        "iterations_per_combination": summary.iterations_per_combination,
-        "combination_count": summary.combination_count,
-        "total_simulated_races": summary.total_simulated_races,
-        "start": summary.start_spec,
-        "track_length": summary.track_length,
-        "initial_order_mode": summary.initial_order_mode,
-        "elapsed_seconds": summary.elapsed_seconds,
-        "races_per_second": season_roster_scan_races_per_second(summary),
-        "best": {
-            "runner": summary.best.runner,
-            "name": summary.best.name,
-            "win_rate": summary.best.win_rate,
-            "average_rank": summary.best.average_rank,
-        },
-        "rows": [
-            {
-                "runner": row.runner,
-                "name": row.name,
-                "combination_count": row.combination_count,
-                "race_count": row.race_count,
-                "wins": row.wins,
-                "win_rate": row.win_rate,
-                "qualify_count": row.qualify_count,
-                "qualify_rate": row.qualify_rate,
-                "average_rank": row.average_rank,
-                "rank_variance": row.rank_variance,
-                "winner_gap_per_race": row.winner_gap_per_race,
-                "average_winning_margin": row.average_winning_margin,
-                "lazy_win_rate": row.lazy_win_rate,
-                "winner_carried_steps": row.winner_carried_steps,
-                "winner_total_steps": row.winner_total_steps,
-            }
-            for row in summary.rows
-        ],
-    }
+    return core_season_roster_scan_to_dict(summary)
+
+
+def stage_result_to_dict(result: StageResult) -> dict[str, object]:
+    return core_stage_result_to_dict(result)
+
+
+def tournament_result_to_dict(result: TournamentResult) -> dict[str, object]:
+    return core_tournament_result_to_dict(result)
+
+
+def champion_prediction_races_per_second(summary: ChampionPredictionSummary) -> float | None:
+    return core_champion_prediction_races_per_second(summary)
+
+
+def champion_prediction_to_dict(summary: ChampionPredictionSummary) -> dict[str, object]:
+    return core_champion_prediction_to_dict(summary)
 
 
 def format_summary(summary: SimulationSummary, sort_by_win_rate: bool = True) -> str:
-    rows = list(summary.rows)
-    if sort_by_win_rate:
-        rows.sort(key=lambda row: (row.win_rate, -row.average_rank), reverse=True)
-
-    headers = ("角色", "夺冠率", "晋级率", "平均名次", "名次方差", "场均领先", "胜时领先", "躺赢率")
-    table_rows = [
-        (
-            format_runner(row.runner),
-            f"{row.win_rate:.2%}",
-            f"{row.qualify_rate:.2%}",
-            f"{row.average_rank:.3f}",
-            f"{row.rank_variance:.3f}",
-            f"{row.winner_gap_per_race:.3f}",
-            f"{row.average_winning_margin:.3f}",
-            f"{row.lazy_win_rate:.2%}",
-        )
-        for row in rows
-    ]
-    columns = [headers, *table_rows]
-    widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
-    aligns = ("left", "right", "right", "right", "right", "right", "right", "right")
-
-    lines = format_simulation_overview_lines(
-        summary.config,
-        summary.iterations,
-        elapsed_seconds=summary.elapsed_seconds,
-        rate=races_per_second(summary),
+    return core_format_summary(
+        summary,
+        sort_by_win_rate=sort_by_win_rate,
+        format_runner_fn=format_runner,
+        display_width_fn=display_width,
+        format_simulation_overview_lines_fn=format_simulation_overview_lines,
+        format_table_row_fn=format_table_row,
+        format_table_separator_fn=format_table_separator,
+        races_per_second_fn=races_per_second,
     )
-    lines.extend(
-        [
-            "",
-            format_table_row(headers, widths, aligns),
-            format_table_separator(widths),
-        ]
-    )
-    lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
-    best = summary.best
-    lines.extend(
-        [
-            "",
-            f"推荐选择：{format_runner(best.runner)}，夺冠概率 {best.win_rate:.2%}。",
-        ]
-    )
-    return "\n".join(lines)
 
 
 def format_season_roster_scan_summary(summary: SeasonRosterScanSummary) -> str:
-    rows = sorted(summary.rows, key=lambda row: (row.win_rate, -row.average_rank), reverse=True)
-    headers = ("角色", "参赛组合", "夺冠率", "晋级率", "平均名次", "名次方差", "场均领先", "胜时领先", "躺赢率")
-    table_rows = [
-        (
-            format_runner(row.runner),
-            f"{row.combination_count:,}",
-            f"{row.win_rate:.2%}",
-            f"{row.qualify_rate:.2%}",
-            f"{row.average_rank:.3f}",
-            f"{row.rank_variance:.3f}",
-            f"{row.winner_gap_per_race:.3f}",
-            f"{row.average_winning_margin:.3f}",
-            f"{row.lazy_win_rate:.2%}",
-        )
-        for row in rows
-    ]
-    columns = [headers, *table_rows]
-    widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
-    aligns = ("left", "right", "right", "right", "right", "right", "right", "right", "right")
-    lines = format_season_roster_scan_overview_lines(
-        season=summary.season,
-        roster=summary.roster,
-        field_size=summary.field_size,
-        qualify_cutoff=summary.qualify_cutoff,
-        start_spec=summary.start_spec,
-        initial_order_mode=summary.initial_order_mode,
-        combination_count=summary.combination_count,
-        iterations_per_combination=summary.iterations_per_combination,
-        total_simulated_races=summary.total_simulated_races,
-        track_length=summary.track_length,
-        elapsed_seconds=summary.elapsed_seconds,
-        rate=season_roster_scan_races_per_second(summary),
+    return core_format_season_roster_scan_summary(
+        summary,
+        format_runner_fn=format_runner,
+        display_width_fn=display_width,
+        format_season_roster_scan_overview_lines_fn=format_season_roster_scan_overview_lines,
+        format_table_row_fn=format_table_row,
+        format_table_separator_fn=format_table_separator,
     )
-    lines.extend(
-        [
-            "",
-            format_table_row(headers, widths, aligns),
-            format_table_separator(widths),
-        ]
-    )
-    lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
-    best = summary.best
-    lines.extend(
-        [
-            "",
-            f"综合推荐：{format_runner(best.runner)}，综合夺冠率 {best.win_rate:.2%}。",
-        ]
-    )
-    return "\n".join(lines)
+
+
+def format_tournament_result(result: TournamentResult) -> str:
+    return core_format_tournament_result(result)
+
+
+def format_champion_prediction_summary(summary: ChampionPredictionSummary) -> str:
+    return core_format_champion_prediction_summary(summary)
 
 
 def format_skill_ablation_summary(summary: SkillAblationSummary, *, detail: bool = False) -> str:
-    rows = sorted(summary.rows, key=lambda row: row.net_win_rate, reverse=True)
-    headers = ("角色", "开启胜率", "关闭胜率", "净胜率", "平均成功次数", "单次边际胜率")
-    table_rows = [
-        (
-            format_runner(row.runner),
-            f"{row.enabled_win_rate:.2%}",
-            f"{row.disabled_win_rate:.2%}",
-            f"{row.net_win_rate:+.2%}",
-            f"{row.skill_average_success_count:.3f}",
-            format_optional_signed_percent(row.skill_marginal_win_rate),
-        )
-        for row in rows
-    ]
-    columns = [headers, *table_rows]
-    widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
-    aligns = ("left", "right", "right", "right", "right", "right")
-    lines = [
-        "技能消融统计：",
-        f"每组模拟：{summary.iterations:,} 局",
-        f"消融组数：{len(summary.rows)} 个角色 + 1 个技能全开基准",
-        f"总模拟局数：{summary.total_simulated_races:,}",
-        f"总用时：{format_elapsed(summary.elapsed_seconds)}",
-        f"总速度：{format_rate(skill_ablation_races_per_second(summary))}",
-        "",
-        format_table_row(headers, widths, aligns),
-        format_table_separator(widths),
-    ]
-    lines.extend(format_table_row(row, widths, aligns) for row in table_rows)
-    if detail:
-        lines.extend(format_skill_ablation_detail(rows))
-    return "\n".join(lines)
-
-
-def format_skill_ablation_detail(rows: Sequence[SkillAblationRow]) -> list[str]:
-    lines = ["", "详细统计（技能全开基准局，按成功次数分布）："]
-    for row in rows:
-        lines.append(f"{format_runner(row.runner)}：{format_success_distribution(row.success_distribution)}")
-    return lines
-
-
-def format_success_distribution(distribution: Sequence[SkillSuccessBucket]) -> str:
-    grouped: dict[str, list[int]] = {
-        "0次": [0, 0],
-        "1次": [0, 0],
-        "2次": [0, 0],
-        "3次及以上": [0, 0],
-    }
-    for bucket in distribution:
-        label = "3次及以上" if bucket.success_count >= 3 else f"{bucket.success_count}次"
-        grouped[label][0] += bucket.races
-        grouped[label][1] += bucket.wins
-    parts = []
-    for label, (races, wins) in grouped.items():
-        if races:
-            parts.append(f"{label} {races:,}局/{wins / races:.2%}")
-    return "；".join(parts) if parts else "无数据"
-
-
-def format_optional_signed_percent(value: float | None) -> str:
-    if value is None:
-        return "无数据"
-    return f"{value:+.2%}"
+    return core_format_skill_ablation_summary(
+        summary,
+        detail=detail,
+        format_runner_fn=format_runner,
+        display_width_fn=display_width,
+        format_table_row_fn=format_table_row,
+        format_table_separator_fn=format_table_separator,
+        format_elapsed_fn=format_elapsed,
+        format_rate_fn=format_rate,
+    )
 
 
 def skill_ablation_races_per_second(summary: SkillAblationSummary) -> float | None:
-    if summary.elapsed_seconds is None or summary.elapsed_seconds <= 0:
-        return None
-    return summary.total_simulated_races / summary.elapsed_seconds
+    return core_skill_ablation_races_per_second(summary)
 
 
 def season_roster_scan_races_per_second(summary: SeasonRosterScanSummary) -> float | None:
-    if summary.elapsed_seconds is None or summary.elapsed_seconds <= 0:
-        return None
-    return summary.total_simulated_races / summary.elapsed_seconds
+    return core_season_roster_scan_races_per_second(summary)
 
 
 def with_elapsed(summary: SimulationSummary, elapsed_seconds: float) -> SimulationSummary:
@@ -3005,13 +2746,17 @@ def format_simulation_overview_lines(
     lines = [
         format_runtime_status_line("赛制", config.name),
         format_runtime_status_line("赛季", f"第{config.season}季"),
+        format_runtime_status_line("登场角色", format_runner_list(config.runners)),
         format_runtime_status_line("模拟次数", f"{iterations:,}"),
         format_runtime_status_line("赛道长度", f"{config.track_length}格"),
-        format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)),
         format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
         format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
     ]
-    if not config.random_start_stack and config.start_grid:
+    if config.show_qualify_stats:
+        lines.insert(5, format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)))
+    if config.random_start_stack:
+        lines.append(format_runtime_status_line("起跑配置", format_random_start_layout(config.random_start_position)))
+    elif config.start_grid:
         lines.append(format_runtime_status_line("自定义站位", format_start_layout(config.start_grid)))
     return lines
 
@@ -3029,15 +2774,19 @@ def format_skill_ablation_overview_lines(
     lines = [
         format_runtime_status_line("赛制", config.name),
         format_runtime_status_line("赛季", f"第{config.season}季"),
+        format_runtime_status_line("登场角色", format_runner_list(config.runners)),
         format_runtime_status_line("每组模拟", f"{iterations:,}局"),
         format_runtime_status_line("消融组数", f"{scenario_count - 1}个角色 + 1个技能全开基准"),
         format_runtime_status_line("总模拟局数", f"{total_simulated_races:,}局"),
         format_runtime_status_line("赛道长度", f"{config.track_length}格"),
-        format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)),
         format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
         format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
     ]
-    if not config.random_start_stack and config.start_grid:
+    if config.show_qualify_stats:
+        lines.insert(7, format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)))
+    if config.random_start_stack:
+        lines.append(format_runtime_status_line("起跑配置", format_random_start_layout(config.random_start_position)))
+    elif config.start_grid:
         lines.append(format_runtime_status_line("自定义站位", format_start_layout(config.start_grid)))
     return lines
 
@@ -3159,6 +2908,16 @@ def format_start_layout(start_grid: dict[int, Sequence[int]]) -> str:
     return "；".join(parts) if parts else "无"
 
 
+def format_random_start_layout(position: int) -> str:
+    return f"{format_position(position)}（全部登场角色同格，每局随机堆叠顺序）"
+
+
+def format_start_overview(config: RaceConfig) -> str:
+    if config.random_start_stack:
+        return format_random_start_layout(config.random_start_position)
+    return format_start_layout(config.start_grid)
+
+
 def log(enabled: TraceContext, message: str) -> None:
     if not enabled:
         return
@@ -3231,12 +2990,40 @@ def _effect_hooks() -> EffectHooks:
     return _EFFECT_HOOKS
 
 
+def _skill_hook_helpers() -> SkillHookHelpers:
+    global _SKILL_HOOK_HELPERS
+    if _SKILL_HOOK_HELPERS is None:
+        _SKILL_HOOK_HELPERS = SkillHookHelpers(
+            add_group_to_position=add_group_to_position,
+            current_rank=current_rank,
+            format_cell=format_cell,
+            format_position=format_position,
+            format_runner=format_runner,
+            log_block=log_block,
+            log_timing=log_timing,
+        )
+    return _SKILL_HOOK_HELPERS
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Monte Carlo simulator for Wuthering Waves Cubie Derby.",
     )
     parser.add_argument("-n", "--iterations", type=int, default=100_000, help="number of races to simulate")
     parser.add_argument("--season", type=int, choices=[1, 2], default=1, help="season ruleset")
+    parser.add_argument(
+        "--match-type",
+        help=(
+            "season-aware stage rules, e.g. "
+            + ", ".join(match_type_choices())
+            + "; Chinese aliases are also supported"
+        ),
+    )
+    parser.add_argument(
+        "--champion-prediction",
+        choices=("random", "monte-carlo"),
+        help="run a full season tournament instead of a single-stage simulation",
+    )
     parser.add_argument(
         "--season-roster-scan",
         action="store_true",
@@ -3310,7 +3097,46 @@ def main(argv: Sequence[str] | None = None) -> int:
     season_scan_summary: SeasonRosterScanSummary | None = None
     show_progress = sys.stderr.isatty() and not args.json
     try:
+        if args.champion_prediction:
+            if args.season_roster_scan:
+                raise ValueError("--champion-prediction cannot be combined with --season-roster-scan")
+            if args.skill_ablation:
+                raise ValueError("--champion-prediction cannot be combined with --skill-ablation")
+            if args.trace or args.trace_log:
+                raise ValueError("--champion-prediction does not support trace output")
+            if args.runners is not None:
+                raise ValueError("--champion-prediction chooses the season roster automatically; do not pass --runners")
+            if args.start or args.initial_order:
+                raise ValueError("--champion-prediction uses stage rules automatically; do not pass --start or --initial-order")
+            if args.match_type:
+                raise ValueError("--champion-prediction already controls the full tournament; do not combine it with --match-type")
+            validate_champion_prediction_season(args.season)
+            if args.champion_prediction == "random":
+                start_time = time.perf_counter()
+                tournament = replace(
+                    simulate_tournament(args.season, random.Random(args.seed)),
+                    elapsed_seconds=time.perf_counter() - start_time,
+                )
+                if args.json:
+                    print(json.dumps(tournament_result_to_dict(tournament), ensure_ascii=False, indent=2))
+                else:
+                    print(format_tournament_result(tournament))
+                return 0
+            champion_summary = run_champion_prediction_monte_carlo(
+                args.season,
+                args.iterations,
+                seed=args.seed,
+                workers=args.workers,
+                show_progress=show_progress,
+            )
+            if args.json:
+                print(json.dumps(champion_prediction_to_dict(champion_summary), ensure_ascii=False, indent=2))
+            else:
+                print(format_champion_prediction_summary(champion_summary))
+            return 0
         if args.season_roster_scan:
+            if args.match_type:
+                raise ValueError("--match-type cannot be combined with --season-roster-scan")
             season_scan_summary = run_season_roster_scan(args, show_progress=show_progress)
             if args.json:
                 print(json.dumps(season_roster_scan_to_dict(season_scan_summary), ensure_ascii=False, indent=2))

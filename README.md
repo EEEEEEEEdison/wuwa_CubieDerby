@@ -30,6 +30,18 @@ python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
 ```
 
+如果你想让程序按某个比赛阶段的默认规则自动补齐参数，可以直接传 `--match-type`：
+
+```powershell
+python cubie_derby.py --season 2 --match-type group-round-1 -n 100000 --runners 11 12 13 14 15 16 --seed 42
+```
+
+如果你想直接跑完整个赛季 2 赛事流程，可以改用 `--champion-prediction`：
+
+```powershell
+python cubie_derby.py --season 2 --champion-prediction random --seed 42
+```
+
 `--runners` 用于选择参赛角色。你可以自由更改角色组合和参赛人数；可用编号、名称和技能说明见下方的[角色编号与技能](#角色编号与技能)。
 
 ## 参数说明
@@ -58,6 +70,58 @@ python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 1
 ```powershell
 python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10 --seed 42
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16 --seed 42
+```
+
+### `--match-type`
+
+按内置比赛阶段规则自动补齐参数。当前这套能力先支持第 2 季，阶段键包括：
+
+- `group-round-1`
+- `group-round-2`
+- `elimination`
+- `losers-bracket`
+- `winners-bracket`
+- `grand-final`
+
+说明：
+
+- 也支持中文别名，例如 `小组赛第一轮`、`总决赛`。
+- `group-round-1` 会自动使用 `--start "1:*"`，且不显示晋级统计。
+- `group-round-2` 会把 `--runners` 的顺序视为上一轮排名，并自动生成 `0 / -1 / -2 / -3` 的站位。
+- `elimination`、`losers-bracket`、`winners-bracket` 都会自动使用 `--start "1:*"`，默认取前三晋级。
+- `grand-final` 会自动使用 `--start "1:*"`，只统计夺冠率，不显示晋级率。
+- 在单阶段模式下，你仍然可以手动传 `--start` 覆盖默认站位。
+
+示例：
+
+```powershell
+python cubie_derby.py --season 2 --match-type group-round-2 -n 100000 --runners 11 12 13 14 15 16 --seed 42
+python cubie_derby.py --season 2 --match-type grand-final -n 100000 --runners 11 12 13 14 15 16 --seed 42
+```
+
+### `--champion-prediction`
+
+直接运行整届赛事，而不是只跑单个阶段。
+
+- `--champion-prediction random`：跑 1 届完整赛事，输出每个阶段的排名与晋级结果，以及最终冠军。
+- `--champion-prediction monte-carlo`：重复跑很多届完整赛事，并汇总角色夺冠率。
+
+当前赛季 2 的整届流程是：
+
+- 18 名角色先随机分成 3 个 6 人小组。
+- 每组先跑 `group-round-1`，再按上一轮排名跑 `group-round-2`。
+- 每组第二轮前 4 名晋级，共 12 人。
+- 12 人再随机分成 2 个 6 人淘汰赛组。
+- 每组淘汰赛前 3 名进入胜者组，后 3 名进入败者组第一轮。
+- 胜者组前 3 名直通总决赛。
+- 胜者组后 3 名与败者组第一轮前 3 名进入败者组第二轮。
+- 败者组第二轮前 3 名进入总决赛。
+
+示例：
+
+```powershell
+python cubie_derby.py --season 2 --champion-prediction random --seed 42
+python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --seed 42 --workers 0
 ```
 
 ### `--season-roster-scan`

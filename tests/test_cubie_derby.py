@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import random
 import tempfile
 import unittest
@@ -23,7 +24,10 @@ from cubie_derby import (
     display_width,
     format_summary,
     format_season_roster_scan_summary,
+    format_tournament_result,
     format_simulation_overview_lines,
+    champion_prediction_to_dict,
+    format_champion_prediction_summary,
     summary_to_dict,
     main,
     make_start_grid,
@@ -46,7 +50,10 @@ from cubie_derby import (
     rank_scope,
     run_skill_ablation,
     run_monte_carlo,
+    run_champion_prediction_monte_carlo,
     run_season_roster_scan,
+    simulate_stage,
+    simulate_tournament,
     season_rules,
     season_roster_combination_count,
     season_roster_scan_to_dict,
@@ -64,6 +71,8 @@ from cubie_derby import (
 def argparse_namespace(**kwargs):
     defaults = {
         "season": 1,
+        "match_type": None,
+        "champion_prediction": None,
         "runners": None,
         "track_length": None,
         "start": None,
@@ -333,9 +342,32 @@ class CubieDerbyTests(unittest.TestCase):
         text = format_summary(summary)
         data = summary_to_dict(summary)
 
+        self.assertIn("登场角色：卡卡罗, 守岸人, 布兰特, 赞妮", text)
         self.assertIn("自定义站位：第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]", text)
         self.assertEqual(data["config"]["start_layout"], "第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]")
         self.assertEqual(data["config"]["start_grid"], {"1": [10], "2": [4, 3], "3": [8]})
+
+    def test_format_summary_includes_random_stack_start_and_entrants(self):
+        config = RaceConfig(
+            runners=(11, 12, 13, 14, 15, 16),
+            track_length=32,
+            start_grid={},
+            season=2,
+            random_start_stack=True,
+            random_start_position=1,
+            name="自定义",
+        )
+
+        summary = run_monte_carlo(config, 10, seed=1)
+        text = format_summary(summary)
+        data = summary_to_dict(summary)
+
+        self.assertIn("登场角色：卡提希娅, 菲比, 西格莉卡, 陆赫斯, 达尼娅, 绯雪", text)
+        self.assertIn("起跑配置：第1格（全部登场角色同格，每局随机堆叠顺序）", text)
+        self.assertEqual(
+            data["config"]["start_layout"],
+            "第1格（全部登场角色同格，每局随机堆叠顺序）",
+        )
 
     def test_format_simulation_overview_lines_supports_pending_status(self):
         config = RaceConfig(
@@ -353,6 +385,7 @@ class CubieDerbyTests(unittest.TestCase):
             [
                 "赛制：自定义",
                 "赛季：第2季",
+                "登场角色：卡卡罗, 守岸人, 布兰特, 赞妮",
                 "模拟次数：1,000,000",
                 "赛道长度：24格",
                 "晋级统计：前4名",
@@ -361,6 +394,28 @@ class CubieDerbyTests(unittest.TestCase):
                 "自定义站位：第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]",
             ],
         )
+
+    def test_grand_final_summary_hides_qualify_stats(self):
+        config = RaceConfig(
+            runners=(11, 12, 13, 14, 15, 16),
+            track_length=32,
+            start_grid={1: (11, 12, 13, 14, 15, 16)},
+            qualify_cutoff=1,
+            season=2,
+            match_type="grand-final",
+            show_qualify_stats=False,
+            name="总决赛",
+        )
+
+        summary = run_monte_carlo(config, 10, seed=1)
+        text = format_summary(summary)
+        data = summary_to_dict(summary)
+
+        self.assertNotIn("晋级率", text)
+        self.assertNotIn("晋级统计", text)
+        self.assertFalse(data["config"]["show_qualify_stats"])
+        self.assertNotIn("qualify_cutoff", data["config"])
+        self.assertNotIn("qualify_rate", data["rows"][0])
 
     def test_progress_bar_renders_zero_percent_immediately(self):
         stream = io.StringIO()
@@ -544,6 +599,46 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertTrue(set(first.runners).issubset(set(season_runner_pool(2))))
         self.assertEqual(first.track_length, 32)
 
+    def test_match_type_group_round_one_applies_default_start_and_hides_qualify_stats(self):
+        args = argparse_namespace(
+            season=2,
+            match_type="group-round-1",
+            runners=["11", "12", "13", "14", "15", "16"],
+            start=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertEqual(config.match_type, "group-round-1")
+        self.assertTrue(config.random_start_stack)
+        self.assertEqual(config.random_start_position, 1)
+        self.assertEqual(config.qualify_cutoff, 6)
+        self.assertFalse(config.show_qualify_stats)
+        self.assertEqual(config.name, "小组赛第一轮")
+
+    def test_match_type_group_round_two_builds_seeded_start_from_runner_order(self):
+        args = argparse_namespace(
+            season=2,
+            match_type="group-round-2",
+            runners=["11", "12", "13", "14", "15", "16"],
+            start=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertEqual(config.match_type, "group-round-2")
+        self.assertEqual(
+            config.start_grid,
+            {
+                -3: (16,),
+                -2: (14, 15),
+                -1: (12, 13),
+                0: (11,),
+            },
+        )
+        self.assertEqual(config.qualify_cutoff, 4)
+        self.assertTrue(config.show_qualify_stats)
+
     def test_season_runner_pool_matches_expected_rosters(self):
         self.assertEqual(season_runner_pool(1), tuple(range(1, 13)))
         self.assertEqual(season_runner_pool(2), (1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23))
@@ -624,6 +719,45 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(config.runners, (1, 2, 3, 4, 5, 6))
         self.assertEqual(config.start_grid, {-3: (2,), -2: (1, 4), -1: (3, 6), 0: (5,)})
         self.assertEqual(config.initial_order_mode, "random")
+
+    def test_simulate_stage_group_round_one_emits_round_two_layout(self):
+        stage = simulate_stage(
+            season=2,
+            match_type="group-round-1",
+            runners=(11, 12, 13, 14, 15, 16),
+            rng=random.Random(1),
+        )
+
+        self.assertEqual(stage.match_type, "group-round-1")
+        self.assertEqual(len(stage.ranking), 6)
+        self.assertEqual(stage.qualified_runners, stage.ranking)
+        self.assertIsNotNone(stage.next_stage_start_spec)
+        self.assertIn("0:", stage.next_stage_start_spec)
+        self.assertIn("-1:", stage.next_stage_start_spec)
+
+    def test_simulate_tournament_returns_complete_season_two_flow(self):
+        result = simulate_tournament(2, random.Random(1))
+        text = format_tournament_result(result)
+
+        self.assertEqual(result.season, 2)
+        self.assertEqual(len(result.stages), 12)
+        self.assertEqual(result.stages[0].title, "小组赛第一轮 A组")
+        self.assertEqual(result.stages[-1].title, "总决赛")
+        self.assertIn(result.champion, season_runner_pool(2))
+        self.assertIn("总决赛", text)
+        self.assertIn("冠军", text)
+
+    def test_champion_prediction_monte_carlo_outputs_only_champion_rates(self):
+        summary = run_champion_prediction_monte_carlo(2, 8, seed=3, workers=1)
+        data = champion_prediction_to_dict(summary)
+        text = format_champion_prediction_summary(summary)
+
+        self.assertEqual(summary.iterations, 8)
+        self.assertEqual(len(summary.rows), len(season_runner_pool(2)))
+        self.assertAlmostEqual(sum(row.championships for row in summary.rows), 8)
+        self.assertEqual(data["iterations"], 8)
+        self.assertIn("冠军次数", text)
+        self.assertIn("夺冠率", text)
 
     def test_same_position_ranking_uses_cell_order(self):
         grid = {3: (4, 3, 8)}
@@ -2295,6 +2429,28 @@ class CubieDerbyTests(unittest.TestCase):
             order_text = lines[order_index + 1].strip()
             self.assertIn("NPC", order_text)
             self.assertEqual(order_text.count("->") + 1, 7)
+
+    def test_main_champion_prediction_random_json(self):
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--json",
+                    "--seed",
+                    "7",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["season"], 2)
+        self.assertIn("champion", data)
+        self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
 
 
 if __name__ == "__main__":
