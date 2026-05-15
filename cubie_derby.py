@@ -83,6 +83,14 @@ from cubie_derby_core.npc import (
     move_npc as core_move_npc,
     settle_npc_end_of_round as core_settle_npc_end_of_round,
 )
+from cubie_derby_core.ordering import (
+    add_npc_to_start as core_add_npc_to_start,
+    current_rank as core_current_rank,
+    format_round_dice as core_format_round_dice,
+    initial_player_order as core_initial_player_order,
+    next_round_action_order as core_next_round_action_order,
+    rank_scope as core_rank_scope,
+)
 from cubie_derby_core.reporting import (
     format_season_roster_scan_summary as core_format_season_roster_scan_summary,
     format_skill_ablation_summary as core_format_skill_ablation_summary,
@@ -1247,21 +1255,11 @@ def validate_positions(runners: Sequence[int], progress: dict[int, int]) -> None
 
 
 def initial_player_order(config: RaceConfig, grid: dict[int, Sequence[int]], rng: random.Random) -> list[int]:
-    if config.initial_order_mode == "random":
-        order = list(config.runners)
-        rng.shuffle(order)
-        return order
-    if config.initial_order_mode == "start":
-        order = [runner for _, cell in sorted(grid.items()) for runner in cell if runner != NPC_ID]
-        validate_same_runners(config.runners, order, "initial start order")
-        return order
-    if config.initial_order_mode == "fixed":
-        return list(config.fixed_initial_order)
-    raise ValueError(f"unknown initial_order_mode: {config.initial_order_mode}")
+    return core_initial_player_order(config, grid, rng, validate_same_runners_fn=validate_same_runners)
+
+
 def rank_scope(runners: Sequence[int], progress: dict[int, int], include_npc: bool) -> tuple[int, ...]:
-    if include_npc and NPC_ID in progress:
-        return tuple(runners) + (NPC_ID,)
-    return tuple(runners)
+    return core_rank_scope(runners, progress, include_npc)
 
 
 def next_round_action_order(
@@ -1271,32 +1269,20 @@ def next_round_action_order(
     include_npc: bool,
     forced_last_runners: Sequence[int] = (),
 ) -> list[int]:
-    order = list(runners)
-    if include_npc:
-        order.append(NPC_ID)
-    rng.shuffle(order)
-    trailing: list[int] = []
-    trailing_set: set[int] = set()
-    for runner in forced_last_runners:
-        if runner in order and runner not in trailing_set:
-            trailing.append(runner)
-            trailing_set.add(runner)
-    if trailing:
-        order = [runner for runner in order if runner not in trailing_set] + trailing
-    return order
+    return core_next_round_action_order(
+        runners=runners,
+        rng=rng,
+        include_npc=include_npc,
+        forced_last_runners=forced_last_runners,
+    )
 
 
 def add_npc_to_start(grid: dict[int, list[int]]) -> None:
-    remove_runner_from_grid(grid, NPC_ID)
-    if grid.get(0):
-        grid[0] = list(grid[0]) + [NPC_ID]
-    else:
-        grid[0] = [NPC_ID]
-    keep_npc_rightmost(grid[0])
+    core_add_npc_to_start(grid)
 
 
 def format_round_dice(round_dice: dict[int, int], player_order: Sequence[int]) -> str:
-    return "；".join(f"{format_runner(player)}={round_dice[player]}" for player in player_order if player in round_dice)
+    return core_format_round_dice(round_dice, player_order, format_runner_fn=format_runner)
 
 
 def move_single_runner(
@@ -1767,13 +1753,7 @@ def check_player2_skill(
 
 
 def current_rank(runners: Sequence[int], progress: dict[int, int], grid: dict[int, Sequence[int]]) -> list[int]:
-    selected = set(runners)
-    cell_index: dict[int, int] = {}
-    for cell in grid.values():
-        for idx, runner in enumerate(cell):
-            if runner != NPC_ID and runner in selected:
-                cell_index[runner] = idx
-    return sorted(runners, key=lambda runner: (-progress[runner], cell_index.get(runner, 9999)))
+    return core_current_rank(runners, progress, grid)
 
 
 def simulate_stage(
