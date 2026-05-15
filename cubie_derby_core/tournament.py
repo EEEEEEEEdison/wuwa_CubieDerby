@@ -103,6 +103,13 @@ class TournamentEntryPointDefinition:
     requirements: tuple[TournamentInputRequirement, ...]
 
 
+@dataclass(frozen=True)
+class TournamentEntryRequest:
+    season: int
+    entry_point: str
+    inputs: dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]]
+
+
 SEASON2_TOURNAMENT_PHASES: dict[str, TournamentPhaseDefinition] = {
     "group-round-1": TournamentPhaseDefinition(
         key="group-round-1",
@@ -660,6 +667,80 @@ def tournament_entry_requirements(season: int, entry_point: str) -> tuple[Tourna
     return get_tournament_entry_point_definition(season, entry_point).requirements
 
 
+def normalize_tournament_input_value(
+    requirement: TournamentInputRequirement,
+    value: Sequence[int] | Sequence[Sequence[int]],
+) -> tuple[int, ...] | tuple[tuple[int, ...], ...]:
+    if requirement.kind == "grouped-entrants":
+        groups = tuple(tuple(group) for group in value)  # type: ignore[arg-type]
+        if requirement.group_count is None or requirement.group_size is None:
+            raise ValueError(f"{requirement.label} is missing group validation metadata")
+        if len(groups) != requirement.group_count:
+            raise ValueError(
+                f"{requirement.label} requires exactly {requirement.group_count} groups, got {len(groups)}"
+            )
+        if any(len(group) != requirement.group_size for group in groups):
+            raise ValueError(
+                f"{requirement.label} requires groups of exactly {requirement.group_size} runners"
+            )
+        flattened = tuple(runner for group in groups for runner in group)
+        if len(flattened) != requirement.runner_count:
+            raise ValueError(
+                f"{requirement.label} requires exactly {requirement.runner_count} runners, got {len(flattened)}"
+            )
+        if len(set(flattened)) != len(flattened):
+            raise ValueError(f"{requirement.label} contains duplicate runners")
+        return groups
+    runners = tuple(value)  # type: ignore[arg-type]
+    if len(runners) != requirement.runner_count:
+        raise ValueError(
+            f"{requirement.label} requires exactly {requirement.runner_count} runners, got {len(runners)}"
+        )
+    if len(set(runners)) != len(runners):
+        raise ValueError(f"{requirement.label} contains duplicate runners")
+    return runners
+
+
+def build_tournament_entry_request(
+    *,
+    season: int,
+    entry_point: str,
+    inputs: dict[str, Sequence[int] | Sequence[Sequence[int]]],
+) -> TournamentEntryRequest:
+    definition = get_tournament_entry_point_definition(season, entry_point)
+    normalized_inputs: dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]] = {}
+    season_roster: tuple[int, ...] | None = None
+    grouped_flattened: tuple[int, ...] | None = None
+    all_runners: list[int] = []
+    for requirement in definition.requirements:
+        raw_value = inputs.get(requirement.key)
+        if raw_value is None:
+            if requirement.optional:
+                continue
+            raise ValueError(f"missing required tournament input: {requirement.label}")
+        normalized_value = normalize_tournament_input_value(requirement, raw_value)
+        normalized_inputs[requirement.key] = normalized_value
+        if requirement.key == "season-roster":
+            season_roster = normalized_value  # type: ignore[assignment]
+        elif requirement.key == "group-stage-groups":
+            grouped_flattened = tuple(runner for group in normalized_value for runner in group)  # type: ignore[misc]
+        if requirement.kind == "grouped-entrants":
+            if requirement.key != "group-stage-groups":
+                all_runners.extend(runner for group in normalized_value for runner in group)  # type: ignore[misc]
+        else:
+            all_runners.extend(normalized_value)  # type: ignore[arg-type]
+    if season_roster is not None and grouped_flattened is not None:
+        if set(season_roster) != set(grouped_flattened):
+            raise ValueError("小组赛分组与本届参赛角色名单不一致")
+    if len(set(all_runners)) != len(all_runners):
+        raise ValueError(f"{definition.label} inputs contain duplicate runners across requirements")
+    return TournamentEntryRequest(
+        season=season,
+        entry_point=definition.key,
+        inputs=normalized_inputs,
+    )
+
+
 def resolve_tournament_start_entrants(request: TournamentStartRequest) -> tuple[int, ...]:
     if request.grouped_entrants is not None:
         flattened = tuple(runner for group in request.grouped_entrants for runner in group)
@@ -907,6 +988,432 @@ def simulate_tournament(
     stages.append(grand_final)
     return TournamentResult(
         season=season,
+        stages=tuple(stages),
+        champion=grand_final.ranking[0],
+    )
+
+
+def _group_round_one_title(group_label: str) -> str:
+    return f"小组赛第一轮 {group_label}组"
+
+
+def _group_round_two_title(group_label: str) -> str:
+    return f"小组赛第二轮 {group_label}组"
+
+
+def _elimination_title(group_label: str) -> str:
+    return f"淘汰赛 {group_label}组"
+
+
+def _simulate_group_round_one_and_two(
+    *,
+    season: int,
+    group_label: str,
+    round_one_entrants: Sequence[int],
+    rng: random.Random,
+    simulate_stage_fn: Callable[..., StageResult],
+) -> tuple[StageResult, StageResult]:
+    round_one = simulate_stage_fn(
+        season=season,
+        match_type="group-round-1",
+        runners=round_one_entrants,
+        rng=rng,
+        title=_group_round_one_title(group_label),
+    )
+    round_two = simulate_stage_fn(
+        season=season,
+        match_type="group-round-2",
+        runners=round_one.ranking,
+        rng=rng,
+        title=_group_round_two_title(group_label),
+    )
+    return round_one, round_two
+
+
+def _simulate_group_round_two_only(
+    *,
+    season: int,
+    group_label: str,
+    ranking_order_entrants: Sequence[int],
+    rng: random.Random,
+    simulate_stage_fn: Callable[..., StageResult],
+) -> StageResult:
+    return simulate_stage_fn(
+        season=season,
+        match_type="group-round-2",
+        runners=ranking_order_entrants,
+        rng=rng,
+        title=_group_round_two_title(group_label),
+    )
+
+
+def _simulate_elimination_stage(
+    *,
+    season: int,
+    group_label: str,
+    entrants: Sequence[int],
+    rng: random.Random,
+    simulate_stage_fn: Callable[..., StageResult],
+) -> StageResult:
+    return simulate_stage_fn(
+        season=season,
+        match_type="elimination",
+        runners=entrants,
+        rng=rng,
+        title=_elimination_title(group_label),
+    )
+
+
+def _simulate_losers_round_one(
+    *,
+    season: int,
+    entrants: Sequence[int],
+    rng: random.Random,
+    simulate_stage_fn: Callable[..., StageResult],
+) -> StageResult:
+    return simulate_stage_fn(
+        season=season,
+        match_type="losers-bracket",
+        runners=entrants,
+        rng=rng,
+        title="败者组第一轮",
+    )
+
+
+def _simulate_winners_round_two(
+    *,
+    season: int,
+    entrants: Sequence[int],
+    rng: random.Random,
+    simulate_stage_fn: Callable[..., StageResult],
+) -> StageResult:
+    return simulate_stage_fn(
+        season=season,
+        match_type="winners-bracket",
+        runners=entrants,
+        rng=rng,
+        title="胜者组第二轮",
+    )
+
+
+def _simulate_losers_round_two(
+    *,
+    season: int,
+    entrants: Sequence[int],
+    rng: random.Random,
+    simulate_stage_fn: Callable[..., StageResult],
+) -> StageResult:
+    return simulate_stage_fn(
+        season=season,
+        match_type="losers-bracket",
+        runners=entrants,
+        rng=rng,
+        title="败者组第二轮",
+    )
+
+
+def _simulate_grand_final(
+    *,
+    season: int,
+    entrants: Sequence[int],
+    rng: random.Random,
+    simulate_stage_fn: Callable[..., StageResult],
+) -> StageResult:
+    return simulate_stage_fn(
+        season=season,
+        match_type="grand-final",
+        runners=entrants,
+        rng=rng,
+        title="总决赛",
+    )
+
+
+def _input_runners(
+    request: TournamentEntryRequest,
+    key: str,
+) -> tuple[int, ...]:
+    value = request.inputs.get(key)
+    if value is None:
+        raise ValueError(f"missing tournament input: {key}")
+    if value and isinstance(value[0], tuple):  # type: ignore[index]
+        raise ValueError(f"tournament input {key} must be a flat runner list")
+    return tuple(value)  # type: ignore[arg-type]
+
+
+def _input_grouped_runners(
+    request: TournamentEntryRequest,
+    key: str,
+) -> tuple[tuple[int, ...], ...] | None:
+    value = request.inputs.get(key)
+    if value is None:
+        return None
+    if value and not isinstance(value[0], tuple):  # type: ignore[index]
+        raise ValueError(f"tournament input {key} must be grouped")
+    return tuple(tuple(group) for group in value)  # type: ignore[arg-type]
+
+
+def simulate_tournament_from_entry_request(
+    request: TournamentEntryRequest,
+    rng: random.Random,
+    *,
+    simulate_stage_fn: Callable[..., StageResult],
+) -> TournamentResult:
+    validate_champion_prediction_season(request.season)
+    entry = get_tournament_entry_point_definition(request.season, request.entry_point)
+    group_entry_keys = {
+        "group-a-round-1",
+        "group-a-round-2",
+        "group-b-round-1",
+        "group-b-round-2",
+        "group-c-round-1",
+        "group-c-round-2",
+    }
+    pre_losers_round_one_keys = group_entry_keys | {"elimination-a", "elimination-b", "losers-round-1"}
+    pre_winners_round_two_keys = pre_losers_round_one_keys | {"winners-round-2"}
+    stages: list[StageResult] = []
+    qualifiers_a: tuple[int, ...] = ()
+    qualifiers_b: tuple[int, ...] = ()
+    qualifiers_c: tuple[int, ...] = ()
+    winners_round_two_entrants: tuple[int, ...] = ()
+    losers_round_one_entrants: tuple[int, ...] = ()
+    winners_round_two_qualified: tuple[int, ...] = ()
+
+    if entry.key == "group-a-round-1":
+        roster = _input_runners(request, "season-roster")
+        group_stage_groups = _input_grouped_runners(request, "group-stage-groups")
+        if group_stage_groups is None:
+            group_stage_groups = split_random_groups(roster, group_count=3, group_size=6, rng=rng)
+        for label, entrants in zip(("A", "B", "C"), group_stage_groups, strict=True):
+            round_one, round_two = _simulate_group_round_one_and_two(
+                season=request.season,
+                group_label=label,
+                round_one_entrants=entrants,
+                rng=rng,
+                simulate_stage_fn=simulate_stage_fn,
+            )
+            stages.extend((round_one, round_two))
+            if label == "A":
+                qualifiers_a = round_two.qualified_runners
+            elif label == "B":
+                qualifiers_b = round_two.qualified_runners
+            else:
+                qualifiers_c = round_two.qualified_runners
+    elif entry.key == "group-a-round-2":
+        round_two = _simulate_group_round_two_only(
+            season=request.season,
+            group_label="A",
+            ranking_order_entrants=_input_runners(request, "group-a-round-2-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(round_two)
+        qualifiers_a = round_two.qualified_runners
+        for label, key in (("B", "group-b-round-1-entrants"), ("C", "group-c-round-1-entrants")):
+            round_one, next_round_two = _simulate_group_round_one_and_two(
+                season=request.season,
+                group_label=label,
+                round_one_entrants=_input_runners(request, key),
+                rng=rng,
+                simulate_stage_fn=simulate_stage_fn,
+            )
+            stages.extend((round_one, next_round_two))
+            if label == "B":
+                qualifiers_b = next_round_two.qualified_runners
+            else:
+                qualifiers_c = next_round_two.qualified_runners
+    elif entry.key == "group-b-round-1":
+        qualifiers_a = _input_runners(request, "group-a-round-2-qualified")
+        for label, key in (("B", "group-b-round-1-entrants"), ("C", "group-c-round-1-entrants")):
+            round_one, round_two = _simulate_group_round_one_and_two(
+                season=request.season,
+                group_label=label,
+                round_one_entrants=_input_runners(request, key),
+                rng=rng,
+                simulate_stage_fn=simulate_stage_fn,
+            )
+            stages.extend((round_one, round_two))
+            if label == "B":
+                qualifiers_b = round_two.qualified_runners
+            else:
+                qualifiers_c = round_two.qualified_runners
+    elif entry.key == "group-b-round-2":
+        qualifiers_a = _input_runners(request, "group-a-round-2-qualified")
+        round_two = _simulate_group_round_two_only(
+            season=request.season,
+            group_label="B",
+            ranking_order_entrants=_input_runners(request, "group-b-round-2-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(round_two)
+        qualifiers_b = round_two.qualified_runners
+        round_one, next_round_two = _simulate_group_round_one_and_two(
+            season=request.season,
+            group_label="C",
+            round_one_entrants=_input_runners(request, "group-c-round-1-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.extend((round_one, next_round_two))
+        qualifiers_c = next_round_two.qualified_runners
+    elif entry.key == "group-c-round-1":
+        qualifiers_a = _input_runners(request, "group-a-round-2-qualified")
+        qualifiers_b = _input_runners(request, "group-b-round-2-qualified")
+        round_one, round_two = _simulate_group_round_one_and_two(
+            season=request.season,
+            group_label="C",
+            round_one_entrants=_input_runners(request, "group-c-round-1-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.extend((round_one, round_two))
+        qualifiers_c = round_two.qualified_runners
+    elif entry.key == "group-c-round-2":
+        qualifiers_a = _input_runners(request, "group-a-round-2-qualified")
+        qualifiers_b = _input_runners(request, "group-b-round-2-qualified")
+        round_two = _simulate_group_round_two_only(
+            season=request.season,
+            group_label="C",
+            ranking_order_entrants=_input_runners(request, "group-c-round-2-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(round_two)
+        qualifiers_c = round_two.qualified_runners
+    elif entry.key == "elimination-a":
+        elimination_a = _simulate_elimination_stage(
+            season=request.season,
+            group_label="A",
+            entrants=_input_runners(request, "elimination-a-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        elimination_b = _simulate_elimination_stage(
+            season=request.season,
+            group_label="B",
+            entrants=_input_runners(request, "elimination-b-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.extend((elimination_a, elimination_b))
+        winners_round_two_entrants = tuple(elimination_a.qualified_runners + elimination_b.qualified_runners)
+        losers_round_one_entrants = tuple(elimination_a.eliminated_runners + elimination_b.eliminated_runners)
+    elif entry.key == "elimination-b":
+        elimination_a_ranking = _input_runners(request, "elimination-a-ranking")
+        winners_round_two_entrants = tuple(elimination_a_ranking[:3])
+        losers_round_one_entrants = tuple(elimination_a_ranking[3:])
+        elimination_b = _simulate_elimination_stage(
+            season=request.season,
+            group_label="B",
+            entrants=_input_runners(request, "elimination-b-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(elimination_b)
+        winners_round_two_entrants = tuple(winners_round_two_entrants + elimination_b.qualified_runners)
+        losers_round_one_entrants = tuple(losers_round_one_entrants + elimination_b.eliminated_runners)
+    elif entry.key == "losers-round-1":
+        losers_round_one_entrants = _input_runners(request, "losers-round-1-entrants")
+        winners_round_two_entrants = _input_runners(request, "winners-round-2-entrants")
+    elif entry.key == "winners-round-2":
+        losers_round_one = None
+        winners_round_two_entrants = _input_runners(request, "winners-round-2-entrants")
+        losers_round_one_qualified = _input_runners(request, "losers-round-1-qualified")
+    elif entry.key == "losers-round-2":
+        winners_round_two_qualified = _input_runners(request, "winners-round-2-qualified")
+        losers_round_two = _simulate_losers_round_two(
+            season=request.season,
+            entrants=_input_runners(request, "losers-round-2-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(losers_round_two)
+        grand_final = _simulate_grand_final(
+            season=request.season,
+            entrants=tuple(winners_round_two_qualified + losers_round_two.qualified_runners),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(grand_final)
+        return TournamentResult(season=request.season, stages=tuple(stages), champion=grand_final.ranking[0])
+    elif entry.key == "grand-final":
+        grand_final = _simulate_grand_final(
+            season=request.season,
+            entrants=_input_runners(request, "grand-final-entrants"),
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(grand_final)
+        return TournamentResult(season=request.season, stages=tuple(stages), champion=grand_final.ranking[0])
+    else:
+        raise ValueError(f"unsupported tournament entry point: {entry.key}")
+
+    if entry.key in group_entry_keys:
+        elimination_groups = split_random_groups(
+            tuple(qualifiers_a + qualifiers_b + qualifiers_c),
+            group_count=2,
+            group_size=6,
+            rng=rng,
+        )
+        elimination_a = _simulate_elimination_stage(
+            season=request.season,
+            group_label="A",
+            entrants=elimination_groups[0],
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        elimination_b = _simulate_elimination_stage(
+            season=request.season,
+            group_label="B",
+            entrants=elimination_groups[1],
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.extend((elimination_a, elimination_b))
+        winners_round_two_entrants = tuple(elimination_a.qualified_runners + elimination_b.qualified_runners)
+        losers_round_one_entrants = tuple(elimination_a.eliminated_runners + elimination_b.eliminated_runners)
+
+    if entry.key in pre_losers_round_one_keys:
+        losers_round_one = _simulate_losers_round_one(
+            season=request.season,
+            entrants=losers_round_one_entrants,
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(losers_round_one)
+        losers_round_one_qualified = losers_round_one.qualified_runners
+    else:
+        losers_round_one_qualified = _input_runners(request, "losers-round-1-qualified") if entry.key == "winners-round-2" else ()
+
+    if entry.key in pre_winners_round_two_keys:
+        winners_round_two = _simulate_winners_round_two(
+            season=request.season,
+            entrants=winners_round_two_entrants,
+            rng=rng,
+            simulate_stage_fn=simulate_stage_fn,
+        )
+        stages.append(winners_round_two)
+        winners_round_two_qualified = winners_round_two.qualified_runners
+        losers_round_two_entrants = tuple(winners_round_two.eliminated_runners + losers_round_one_qualified)
+    else:
+        losers_round_two_entrants = _input_runners(request, "losers-round-2-entrants")
+
+    losers_round_two = _simulate_losers_round_two(
+        season=request.season,
+        entrants=losers_round_two_entrants,
+        rng=rng,
+        simulate_stage_fn=simulate_stage_fn,
+    )
+    stages.append(losers_round_two)
+    grand_final = _simulate_grand_final(
+        season=request.season,
+        entrants=tuple(winners_round_two_qualified + losers_round_two.qualified_runners),
+        rng=rng,
+        simulate_stage_fn=simulate_stage_fn,
+    )
+    stages.append(grand_final)
+    return TournamentResult(
+        season=request.season,
         stages=tuple(stages),
         champion=grand_final.ranking[0],
     )

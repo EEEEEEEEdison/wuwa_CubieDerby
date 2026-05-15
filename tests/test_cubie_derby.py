@@ -53,9 +53,12 @@ from cubie_derby import (
     run_champion_prediction_monte_carlo,
     run_season_roster_scan,
     simulate_stage,
+    simulate_tournament_from_entry_request,
     simulate_tournament,
+    TournamentEntryRequest,
     get_tournament_entry_point_definition,
     TournamentStartRequest,
+    build_tournament_entry_request,
     build_tournament_plan,
     tournament_entry_point_choices,
     tournament_entry_requirements,
@@ -826,6 +829,77 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(len(requirements), 1)
         self.assertEqual(requirements[0].key, "grand-final-entrants")
         self.assertEqual(requirements[0].runner_count, 6)
+
+    def test_build_tournament_entry_request_accepts_matching_manual_groups(self):
+        entrants = tuple(season_runner_pool(2))
+        request = build_tournament_entry_request(
+            season=2,
+            entry_point="group-a-round-1",
+            inputs={
+                "season-roster": entrants,
+                "group-stage-groups": (entrants[:6], entrants[6:12], entrants[12:18]),
+            },
+        )
+
+        self.assertEqual(request.entry_point, "group-a-round-1")
+        self.assertIn("group-stage-groups", request.inputs)
+
+    def test_build_tournament_entry_request_rejects_mismatched_manual_groups(self):
+        entrants = tuple(season_runner_pool(2))
+
+        with self.assertRaisesRegex(ValueError, "分组与本届参赛角色名单不一致"):
+            build_tournament_entry_request(
+                season=2,
+                entry_point="group-a-round-1",
+                inputs={
+                    "season-roster": entrants,
+                    "group-stage-groups": (entrants[:6], entrants[6:12], entrants[12:17] + (999,)),
+                },
+            )
+
+    def test_build_tournament_entry_request_rejects_duplicates_across_requirements(self):
+        with self.assertRaisesRegex(ValueError, "duplicate runners across requirements"):
+            build_tournament_entry_request(
+                season=2,
+                entry_point="elimination-b",
+                inputs={
+                    "elimination-a-ranking": (11, 12, 13, 14, 15, 16),
+                    "elimination-b-entrants": (16, 17, 18, 19, 20, 21),
+                },
+            )
+
+    def test_simulate_tournament_from_grand_final_runs_single_stage(self):
+        request = build_tournament_entry_request(
+            season=2,
+            entry_point="grand-final",
+            inputs={"grand-final-entrants": (11, 12, 13, 14, 15, 16)},
+        )
+
+        result = simulate_tournament_from_entry_request(request, random.Random(1))
+
+        self.assertEqual(result.season, 2)
+        self.assertEqual(len(result.stages), 1)
+        self.assertEqual(result.stages[0].title, "总决赛")
+        self.assertIn(result.champion, result.stages[0].entrants)
+
+    def test_simulate_tournament_from_group_b_round_one_finishes_remaining_stages(self):
+        pool = tuple(season_runner_pool(2))
+        request = build_tournament_entry_request(
+            season=2,
+            entry_point="group-b-round-1",
+            inputs={
+                "group-a-round-2-qualified": pool[:4],
+                "group-b-round-1-entrants": pool[4:10],
+                "group-c-round-1-entrants": pool[10:16],
+            },
+        )
+
+        result = simulate_tournament_from_entry_request(request, random.Random(1))
+
+        self.assertEqual(len(result.stages), 10)
+        self.assertEqual(result.stages[0].title, "小组赛第一轮 B组")
+        self.assertEqual(result.stages[-1].title, "总决赛")
+        self.assertIn(result.champion, tuple(runner for value in request.inputs.values() for runner in value))
 
     def test_group_round_one_tournament_plan_covers_remaining_season_flow(self):
         plan = build_tournament_plan(

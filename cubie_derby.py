@@ -209,7 +209,9 @@ from cubie_derby_core.turn_flow import (
 from cubie_derby_core.tournament import (
     ChampionPredictionAccumulator,
     ChampionPredictionSummary,
+    build_tournament_entry_request,
     TournamentEntryPointDefinition,
+    TournamentEntryRequest,
     TournamentInputRequirement,
     StageResult,
     TournamentPhaseDefinition,
@@ -226,6 +228,7 @@ from cubie_derby_core.tournament import (
     normalize_tournament_phase,
     remaining_tournament_phases,
     simulate_stage as core_simulate_stage,
+    simulate_tournament_from_entry_request as core_simulate_tournament_from_entry_request,
     simulate_tournament as core_simulate_tournament,
     simulate_tournament_chunk as core_simulate_tournament_chunk,
     stage_result_to_dict as core_stage_result_to_dict,
@@ -1323,6 +1326,17 @@ def simulate_tournament(season: int, rng: random.Random) -> TournamentResult:
         season,
         rng,
         season_runner_pool_fn=season_runner_pool,
+        simulate_stage_fn=simulate_stage,
+    )
+
+
+def simulate_tournament_from_entry_request(
+    request: TournamentEntryRequest,
+    rng: random.Random,
+) -> TournamentResult:
+    return core_simulate_tournament_from_entry_request(
+        request,
+        rng,
         simulate_stage_fn=simulate_stage,
     )
 
