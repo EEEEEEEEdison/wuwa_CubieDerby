@@ -67,6 +67,10 @@ from cubie_derby_core.effects import (
     apply_shuffle_cell_effect as core_apply_shuffle_cell_effect,
     move_group_due_to_cell_effect as core_move_group_due_to_cell_effect,
 )
+from cubie_derby_core.action_flow import (
+    PostActionHelpers,
+    resolve_post_action_effects as core_resolve_post_action_effects,
+)
 from cubie_derby_core.match_types import (
     MatchTypeRule,
     effective_qualify_cutoff,
@@ -155,6 +159,7 @@ CHANGLI_EXTRA_STEP_CHANCE = 0.65
 
 _EFFECT_HOOKS: EffectHooks | None = None
 _NPC_HELPERS: NPCHelpers | None = None
+_POST_ACTION_HELPERS: PostActionHelpers | None = None
 _SKILL_HOOK_HELPERS: SkillHookHelpers | None = None
 
 
@@ -1128,55 +1133,26 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 finished = True
                 break
 
-            maybe_trigger_player1_skill_after_action(
+            post_action_state = core_resolve_post_action_effects(
                 grid=grid,
                 progress=progress,
-                actor=player,
-                track_length=track_length,
+                player=player,
+                runners=runners,
+                config=config,
+                npc_rank_active=npc_rank_active,
+                action_start_progress=action_start_progress,
+                total_steps=total_steps,
                 rng=rng,
-                disabled_skills=config.disabled_skills,
                 skill_state=skill_state,
+                movement_state=movement_state,
                 trace=trace,
+                cartethyia_available=cartethyia_available,
+                cartethyia_extra_steps=cartethyia_extra_steps,
+                helpers=_post_action_helpers(),
             )
-
-            if player == AEMEATH_ID:
-                maybe_trigger_aemeath_after_active_move(
-                    grid=grid,
-                    progress=progress,
-                    config=config,
-                    start_progress=action_start_progress,
-                    action_had_forward_movement=total_steps > 0,
-                    rng=rng,
-                    skill_state=skill_state,
-                    movement_state=movement_state,
-                    trace=trace,
-                )
-                new_progress = progress[player]
-
-            if player == LUNO_ID:
-                maybe_trigger_luno_after_action(
-                    grid=grid,
-                    progress=progress,
-                    config=config,
-                    skill_state=skill_state,
-                    trace=trace,
-                )
-                new_progress = progress[player]
-
-            if player == CARTETHYIA_ID and skill_enabled(config, CARTETHYIA_ID) and cartethyia_available:
-                if trace:
-                    log_timing(trace, "行动结束", f"{format_runner(player)}检查是否处于最后一名，以决定本场后续强化")
-                rank_for_decision = current_rank(rank_scope(runners, progress, npc_rank_active), progress, grid)
-                log_rank_decision(trace, rank_for_decision, npc_rank_active)
-                if rank_for_decision[-1] == player:
-                    cartethyia_extra_steps = True
-                    cartethyia_available = False
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能进入强化状态：", "效果：本场剩余回合可判定额外+2步")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未进入强化状态：", "原因：行动结束后不是最后一名")
+            new_progress = post_action_state.new_progress
+            cartethyia_available = post_action_state.cartethyia_available
+            cartethyia_extra_steps = post_action_state.cartethyia_extra_steps
 
             if trace:
                 log_grid(trace, grid, title="行动后位置分布：")
@@ -2907,6 +2883,23 @@ def _npc_helpers() -> NPCHelpers:
             record_hiyuki_npc_path_contact=record_hiyuki_npc_path_contact,
         )
     return _NPC_HELPERS
+
+
+def _post_action_helpers() -> PostActionHelpers:
+    global _POST_ACTION_HELPERS
+    if _POST_ACTION_HELPERS is None:
+        _POST_ACTION_HELPERS = PostActionHelpers(
+            current_rank=current_rank,
+            format_runner=format_runner,
+            log_block=log_block,
+            log_rank_decision=log_rank_decision,
+            log_timing=log_timing,
+            maybe_trigger_aemeath_after_active_move=maybe_trigger_aemeath_after_active_move,
+            maybe_trigger_luno_after_action=maybe_trigger_luno_after_action,
+            maybe_trigger_player1_skill_after_action=maybe_trigger_player1_skill_after_action,
+            rank_scope=rank_scope,
+        )
+    return _POST_ACTION_HELPERS
 
 
 def _skill_hook_helpers() -> SkillHookHelpers:
