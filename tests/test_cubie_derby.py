@@ -1547,6 +1547,43 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(config.track_length, 32)
         self.assertTrue(config.npc_enabled)
         self.assertEqual(config.forward_cells, season_rules(2)["forward_cells"])
+        self.assertEqual(config.forward_cells, frozenset({3, 11, 16, 23}))
+        self.assertEqual(config.backward_cells, frozenset({10, 28}))
+        self.assertEqual(config.shuffle_cells, frozenset({6, 20}))
+
+    def test_season_two_group_match_type_uses_group_stage_map(self):
+        args = argparse_namespace(
+            season=2,
+            match_type="group-round-1",
+            runners=["11", "12", "13", "14", "15", "16"],
+            start=None,
+            track_length=None,
+            initial_order=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertEqual(config.match_type, "group-round-1")
+        self.assertEqual(config.forward_cells, frozenset({3, 11, 16, 23}))
+        self.assertEqual(config.backward_cells, frozenset({10, 28}))
+        self.assertEqual(config.shuffle_cells, frozenset({6, 20}))
+
+    def test_season_two_knockout_match_type_uses_knockout_stage_map(self):
+        args = argparse_namespace(
+            season=2,
+            match_type="elimination",
+            runners=["11", "12", "13", "14", "15", "16"],
+            start=None,
+            track_length=None,
+            initial_order=None,
+        )
+
+        config = build_config_from_args(args)
+
+        self.assertEqual(config.match_type, "elimination")
+        self.assertEqual(config.forward_cells, frozenset({4, 10, 20}))
+        self.assertEqual(config.backward_cells, frozenset({16, 26, 30}))
+        self.assertEqual(config.shuffle_cells, frozenset({6, 14, 23}))
 
     def test_season_two_forward_cell_moves_group_one_more(self):
         config = RaceConfig(

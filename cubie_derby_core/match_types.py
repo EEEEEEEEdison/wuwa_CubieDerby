@@ -19,6 +19,7 @@ class MatchTypeRule:
     qualify_cutoff: int | None = None
     seeded_from_runner_order: bool = False
     emits_seed_layout: bool = False
+    map_variant: str = "default"
 
     @property
     def show_qualify_stats(self) -> bool:
@@ -33,6 +34,7 @@ SEASON2_MATCH_TYPES: dict[str, MatchTypeRule] = {
         default_start="1:*",
         advancement_mode=ADVANCEMENT_ALL,
         emits_seed_layout=True,
+        map_variant="group-stage",
     ),
     "group-round-2": MatchTypeRule(
         key="group-round-2",
@@ -42,6 +44,7 @@ SEASON2_MATCH_TYPES: dict[str, MatchTypeRule] = {
         advancement_mode=ADVANCEMENT_TOP_N,
         qualify_cutoff=4,
         seeded_from_runner_order=True,
+        map_variant="group-stage",
     ),
     "elimination": MatchTypeRule(
         key="elimination",
@@ -50,6 +53,7 @@ SEASON2_MATCH_TYPES: dict[str, MatchTypeRule] = {
         default_start="1:*",
         advancement_mode=ADVANCEMENT_TOP_N,
         qualify_cutoff=3,
+        map_variant="knockout-stage",
     ),
     "losers-bracket": MatchTypeRule(
         key="losers-bracket",
@@ -58,6 +62,7 @@ SEASON2_MATCH_TYPES: dict[str, MatchTypeRule] = {
         default_start="1:*",
         advancement_mode=ADVANCEMENT_TOP_N,
         qualify_cutoff=3,
+        map_variant="knockout-stage",
     ),
     "winners-bracket": MatchTypeRule(
         key="winners-bracket",
@@ -66,6 +71,7 @@ SEASON2_MATCH_TYPES: dict[str, MatchTypeRule] = {
         default_start="1:*",
         advancement_mode=ADVANCEMENT_TOP_N,
         qualify_cutoff=3,
+        map_variant="knockout-stage",
     ),
     "grand-final": MatchTypeRule(
         key="grand-final",
@@ -73,6 +79,7 @@ SEASON2_MATCH_TYPES: dict[str, MatchTypeRule] = {
         season=2,
         default_start="1:*",
         advancement_mode=ADVANCEMENT_NONE,
+        map_variant="knockout-stage",
     ),
 }
 

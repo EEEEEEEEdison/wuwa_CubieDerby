@@ -15,7 +15,7 @@ ParseStartLayoutFn = Callable[[str], tuple[dict[int, tuple[int, ...]], int | Non
 ResolveMatchStartSpecFn = Callable[[MatchTypeRule, Sequence[int]], str]
 EffectiveQualifyCutoffFn = Callable[[MatchTypeRule, int], int]
 ResolveQualifyCutoffFn = Callable[[argparse.Namespace], int]
-SeasonRulesFn = Callable[[int], dict[str, object]]
+SeasonRulesFn = Callable[..., dict[str, object]]
 SeasonRunnerPoolFn = Callable[[int], Sequence[int]]
 ValidateQualifyCutoffFn = Callable[[int, int], None]
 ValidateSameRunnersFn = Callable[[Sequence[int], Sequence[int], str], None]
@@ -97,7 +97,7 @@ def build_race_config(
     match_rule: MatchTypeRule | None = None,
     name: str | None = None,
 ) -> Any:
-    rules = season_rules_fn(season)
+    rules = season_rules_fn(season, match_rule=match_rule)
     selected_runners = tuple(runners)
     resolved_track_length = track_length or int(rules["track_length"])
     start_cells, random_start_position = parse_start_layout_fn(start_spec)

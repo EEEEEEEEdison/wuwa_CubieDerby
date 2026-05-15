@@ -252,9 +252,12 @@ from cubie_derby_core.tournament import (
 DEFAULT_LAP_LENGTH = 24
 SEASON2_LAP_LENGTH = 32
 AEMEATH_TRIGGER_CELL = 17
-SEASON2_FORWARD_CELLS = frozenset({3, 11, 16, 23})
-SEASON2_BACKWARD_CELLS = frozenset({10, 28})
-SEASON2_SHUFFLE_CELLS = frozenset({6, 20})
+SEASON2_GROUP_FORWARD_CELLS = frozenset({3, 11, 16, 23})
+SEASON2_GROUP_BACKWARD_CELLS = frozenset({10, 28})
+SEASON2_GROUP_SHUFFLE_CELLS = frozenset({6, 20})
+SEASON2_KNOCKOUT_FORWARD_CELLS = frozenset({4, 10, 20})
+SEASON2_KNOCKOUT_BACKWARD_CELLS = frozenset({16, 26, 30})
+SEASON2_KNOCKOUT_SHUFFLE_CELLS = frozenset({6, 14, 23})
 RNG_SEED_MASK = (1 << 64) - 1
 CAMELLYA_SOLO_ACTION_CHANCE = 0.5
 ZANI_EXTRA_STEPS_CHANCE = 0.4
@@ -548,7 +551,7 @@ class SeasonRosterScanAccumulator(CoreSeasonRosterScanAccumulator):
         )
 
 
-def season_rules(season: int) -> dict[str, object]:
+def season_rules(season: int, match_rule: MatchTypeRule | None = None) -> dict[str, object]:
     if season == 1:
         return {
             "track_length": DEFAULT_LAP_LENGTH,
@@ -558,11 +561,22 @@ def season_rules(season: int) -> dict[str, object]:
             "npc_enabled": False,
         }
     if season == 2:
+        map_variant = match_rule.map_variant if match_rule is not None else "group-stage"
+        if map_variant == "knockout-stage":
+            forward_cells = SEASON2_KNOCKOUT_FORWARD_CELLS
+            backward_cells = SEASON2_KNOCKOUT_BACKWARD_CELLS
+            shuffle_cells = SEASON2_KNOCKOUT_SHUFFLE_CELLS
+        elif map_variant == "group-stage":
+            forward_cells = SEASON2_GROUP_FORWARD_CELLS
+            backward_cells = SEASON2_GROUP_BACKWARD_CELLS
+            shuffle_cells = SEASON2_GROUP_SHUFFLE_CELLS
+        else:
+            raise ValueError(f"unknown season 2 map variant: {map_variant}")
         return {
             "track_length": SEASON2_LAP_LENGTH,
-            "forward_cells": SEASON2_FORWARD_CELLS,
-            "backward_cells": SEASON2_BACKWARD_CELLS,
-            "shuffle_cells": SEASON2_SHUFFLE_CELLS,
+            "forward_cells": forward_cells,
+            "backward_cells": backward_cells,
+            "shuffle_cells": shuffle_cells,
             "npc_enabled": True,
         }
     raise ValueError(f"unknown season: {season}")
