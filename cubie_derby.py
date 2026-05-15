@@ -120,6 +120,15 @@ from cubie_derby_core.race_runtime import (
     build_race_result as core_build_race_result,
     initialize_race_runtime as core_initialize_race_runtime,
 )
+from cubie_derby_core.setup_validation import (
+    empty_grid as core_empty_grid,
+    make_start_grid as core_make_start_grid,
+    validate_fixed_start as core_validate_fixed_start,
+    validate_positions as core_validate_positions,
+    validate_qualify_cutoff as core_validate_qualify_cutoff,
+    validate_same_runners as core_validate_same_runners,
+    validate_track_length as core_validate_track_length,
+)
 from cubie_derby_core.skill_hooks import (
     SkillHookHelpers,
     gather_runners_to_luno_cell as core_gather_runners_to_luno_cell,
@@ -681,53 +690,40 @@ def season_runner_pool(season: int) -> tuple[int, ...]:
 
 
 def empty_grid(track_length: int) -> dict[int, tuple[int, ...]]:
-    validate_track_length(track_length)
-    return {}
+    return core_empty_grid(track_length)
 
 
 def validate_track_length(track_length: int) -> None:
-    if track_length <= 0:
-        raise ValueError("track_length must be positive")
+    core_validate_track_length(track_length)
 
 
 def make_start_grid(track_length: int, cells: dict[int, Sequence[int]]) -> dict[int, tuple[int, ...]]:
-    validate_track_length(track_length)
-    grid: dict[int, tuple[int, ...]] = {}
-    seen: set[int] = set()
-    for pos, runners in cells.items():
-        validate_start_position(pos, track_length)
-        cell = tuple(runners)
-        for runner in cell:
-            if runner in seen:
-                raise ValueError(f"runner {runner} appears more than once in start grid")
-            seen.add(runner)
-        if cell:
-            grid[pos] = cell
-    return grid
+    return core_make_start_grid(
+        track_length,
+        cells,
+        validate_start_position_fn=validate_start_position,
+    )
 
 
 def validate_fixed_start(runners: Sequence[int], grid: dict[int, Sequence[int]]) -> None:
-    seen = tuple(runner for _, cell in sorted(grid.items()) for runner in cell)
-    validate_same_runners(runners, seen, "start grid")
+    core_validate_fixed_start(
+        runners,
+        grid,
+        validate_same_runners_fn=validate_same_runners,
+    )
 
 
 def validate_same_runners(expected: Sequence[int], actual: Sequence[int], label: str) -> None:
-    expected_set = set(expected)
-    actual_set = set(actual)
-    missing = expected_set - actual_set
-    extra = actual_set - expected_set
-    if missing or extra:
-        parts = []
-        if missing:
-            parts.append(f"missing runners: {format_runner_list(sorted(missing))}")
-        if extra:
-            parts.append(f"extra runners: {format_runner_list(sorted(extra))}")
-        raise ValueError(f"{label} does not match selected runners ({'; '.join(parts)})")
+    core_validate_same_runners(
+        expected,
+        actual,
+        label,
+        format_runner_list_fn=format_runner_list,
+    )
 
 
 def validate_qualify_cutoff(qualify_cutoff: int, field_size: int) -> None:
-    if qualify_cutoff < 1:
-        raise ValueError("qualify cutoff must be at least 1")
+    core_validate_qualify_cutoff(qualify_cutoff, field_size)
 
 
 def resolve_qualify_cutoff(args: argparse.Namespace) -> int:
@@ -905,9 +901,11 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
 
 
 def validate_positions(runners: Sequence[int], progress: dict[int, int]) -> None:
-    missing = set(runners) - set(progress)
-    if missing:
-        raise ValueError(f"missing start positions for: {format_runner_list(sorted(missing))}")
+    core_validate_positions(
+        runners,
+        progress,
+        format_runner_list_fn=format_runner_list,
+    )
 
 
 def initial_player_order(config: RaceConfig, grid: dict[int, Sequence[int]], rng: random.Random) -> list[int]:
