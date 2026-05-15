@@ -95,6 +95,10 @@ from cubie_derby_core.pre_action import (
     PreActionHelpers,
     resolve_pre_action_state as core_resolve_pre_action_state,
 )
+from cubie_derby_core.parallel_jobs import (
+    run_champion_prediction_monte_carlo as core_run_champion_prediction_monte_carlo,
+    run_monte_carlo as core_run_monte_carlo,
+)
 from cubie_derby_core.reporting import (
     format_season_roster_scan_summary as core_format_season_roster_scan_summary,
     format_skill_ablation_summary as core_format_skill_ablation_summary,
@@ -1485,43 +1489,22 @@ def run_monte_carlo(
     show_progress: bool = False,
     progress: ProgressBar | None = None,
 ) -> SimulationSummary:
-    if iterations <= 0:
-        raise ValueError("iterations must be positive")
-    if workers == 0:
-        workers = mp.cpu_count()
-    workers = max(1, min(workers, iterations))
-
-    owned_progress: ProgressBar | None = None
-    if progress is None and show_progress:
-        owned_progress = ProgressBar(iterations, "模拟进度")
-        progress = owned_progress
-
-    try:
-        if workers == 1:
-            acc = simulate_chunk(config, iterations, seed, progress=progress)
-            return acc.to_summary(config)
-
-        chunk_sizes = split_iterations(iterations, parallel_task_count(iterations, workers))
-        chunk_args: list[tuple[RaceConfig, int, int | None, int]] = []
-        start_index = 0
-        for chunk_size in chunk_sizes:
-            if chunk_size > 0:
-                chunk_args.append((config, chunk_size, seed, start_index))
-            start_index += chunk_size
-        acc = MonteCarloAccumulator(config.runners, config.qualify_cutoff)
-        with mp.Pool(processes=workers) as pool:
-            if progress is None:
-                parts = pool.map(simulate_chunk_from_tuple, chunk_args)
-                for part in parts:
-                    acc.merge(part)
-            else:
-                for part in pool.imap_unordered(simulate_chunk_from_tuple, chunk_args):
-                    acc.merge(part)
-                    progress.advance(part.iterations)
-        return acc.to_summary(config)
-    finally:
-        if owned_progress is not None:
-            owned_progress.close()
+    return core_run_monte_carlo(
+        config,
+        iterations,
+        seed=seed,
+        workers=workers,
+        show_progress=show_progress,
+        progress=progress,
+        cpu_count_fn=mp.cpu_count,
+        progress_factory=ProgressBar,
+        parallel_task_count_fn=parallel_task_count,
+        split_iterations_fn=split_iterations,
+        simulate_chunk_fn=simulate_chunk,
+        simulate_chunk_from_tuple_fn=simulate_chunk_from_tuple,
+        accumulator_factory=MonteCarloAccumulator,
+        pool_factory=mp.Pool,
+    )
 
 
 def run_champion_prediction_monte_carlo(
@@ -1533,44 +1516,27 @@ def run_champion_prediction_monte_carlo(
     show_progress: bool = False,
 ) -> ChampionPredictionSummary:
     validate_champion_prediction_season(season)
-    if iterations <= 0:
-        raise ValueError("iterations must be positive")
-    if workers == 0:
-        workers = mp.cpu_count()
-    workers = max(1, min(workers, iterations))
-
-    start_time = time.perf_counter()
-    owned_progress: ProgressBar | None = None
-    progress: ProgressBar | None = None
-    if show_progress:
-        owned_progress = ProgressBar(iterations, "冠军预测进度")
-        progress = owned_progress
-
-    try:
-        if workers == 1:
-            acc = simulate_tournament_chunk(season, iterations, seed, progress=progress)
-        else:
-            chunk_sizes = split_iterations(iterations, parallel_task_count(iterations, workers))
-            chunk_args: list[tuple[int, int, int | None, int]] = []
-            start_index = 0
-            for chunk_size in chunk_sizes:
-                if chunk_size > 0:
-                    chunk_args.append((season, chunk_size, seed, start_index))
-                start_index += chunk_size
-            acc = ChampionPredictionAccumulator(season_runner_pool(season))
-            with mp.Pool(processes=workers) as pool:
-                if progress is None:
-                    parts = pool.map(simulate_tournament_chunk_from_tuple, chunk_args)
-                    for part in parts:
-                        acc.merge(part)
-                else:
-                    for part in pool.imap_unordered(simulate_tournament_chunk_from_tuple, chunk_args):
-                        acc.merge(part)
-                        progress.advance(part.iterations)
-        return acc.to_summary(season=season, elapsed_seconds=time.perf_counter() - start_time)
-    finally:
-        if owned_progress is not None:
-            owned_progress.close()
+    return core_run_champion_prediction_monte_carlo(
+        season,
+        iterations,
+        seed=seed,
+        workers=workers,
+        show_progress=show_progress,
+        cpu_count_fn=mp.cpu_count,
+        progress_factory=ProgressBar,
+        parallel_task_count_fn=parallel_task_count,
+        split_iterations_fn=split_iterations,
+        simulate_tournament_chunk_fn=simulate_tournament_chunk,
+        simulate_tournament_chunk_from_tuple_fn=simulate_tournament_chunk_from_tuple,
+        accumulator_factory=ChampionPredictionAccumulator,
+        season_runner_pool_fn=season_runner_pool,
+        pool_factory=mp.Pool,
+        perf_counter_fn=time.perf_counter,
+        summary_factory=lambda acc, *, season, elapsed_seconds: acc.to_summary(
+            season=season,
+            elapsed_seconds=elapsed_seconds,
+        ),
+    )
 
 
 def run_skill_ablation(
