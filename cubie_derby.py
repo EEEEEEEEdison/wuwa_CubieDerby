@@ -91,6 +91,10 @@ from cubie_derby_core.ordering import (
     next_round_action_order as core_next_round_action_order,
     rank_scope as core_rank_scope,
 )
+from cubie_derby_core.pre_action import (
+    PreActionHelpers,
+    resolve_pre_action_state as core_resolve_pre_action_state,
+)
 from cubie_derby_core.reporting import (
     format_season_roster_scan_summary as core_format_season_roster_scan_summary,
     format_skill_ablation_summary as core_format_skill_ablation_summary,
@@ -173,6 +177,7 @@ CHANGLI_EXTRA_STEP_CHANCE = 0.65
 
 _EFFECT_HOOKS: EffectHooks | None = None
 _NPC_HELPERS: NPCHelpers | None = None
+_PRE_ACTION_HELPERS: PreActionHelpers | None = None
 _POST_ACTION_HELPERS: PostActionHelpers | None = None
 _RUNNER_ACTION_HELPERS: RunnerActionHelpers | None = None
 _SKILL_HOOK_HELPERS: SkillHookHelpers | None = None
@@ -864,218 +869,38 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 )
 
             dice = round_dice[player]
-            extra_steps = 0
-            skip_carried_runners = False
-            cantarella_move = False
-            augusta_skip_turn = False
-
-            if player == AUGUSTA_ID and skill_enabled(config, AUGUSTA_ID):
-                non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
-                if skill_state.augusta_force_last_next_round:
-                    skill_state.augusta_force_last_next_round = False
-                    if trace:
-                        log_block(
-                            trace,
-                            f"{format_runner(player)}技能本回合不判定：",
-                            "原因：上一回合已触发停行动作",
-                            "效果：本回合仅保留固定最后行动",
-                        )
-                elif round_number == 1 and config.random_start_stack:
-                    if trace:
-                        log_block(
-                            trace,
-                            f"{format_runner(player)}技能本回合不判定：",
-                            "原因：随机同格开局时，第一回合不发动技能",
-                        )
-                else:
-                    if trace:
-                        log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最左侧且同格存在其他角色")
-                    if len(non_npc_cell) > 1 and non_npc_cell[0] == player:
-                        augusta_skip_turn = True
-                        skill_state.augusta_force_last_next_round = True
-                        record_skill_success(skill_state, player)
-                        if trace:
-                            log_block(
-                                trace,
-                                f"{format_runner(player)}技能触发：",
-                                "原因：自己位于同格最左侧，且同格存在其他角色",
-                                "效果：本回合不行动，下回合固定最后行动且不再判定自身技能",
-                            )
-                    elif trace:
-                        log_block(
-                            trace,
-                            f"{format_runner(player)}技能未触发：",
-                            "原因：当前不满足最左侧且同格有其他角色",
-                            f"格内顺序：{format_cell(current_cell)}",
-                        )
-
-            if player == DENIA_ID and skill_enabled(config, DENIA_ID):
-                extra_steps += check_denia_skill(skill_state, dice, trace)
-            if player == CHISA_ID and skill_enabled(config, CHISA_ID):
-                extra_steps += apply_chisa_bonus(skill_state, chisa_bonus_active, trace)
-
-            if player == CALCHARO_ID and skill_enabled(config, CALCHARO_ID):
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为最后一名")
-                rank_for_decision = current_rank(rank_scope(runners, progress, npc_rank_active), progress, grid)
-                log_rank_decision(trace, rank_for_decision, npc_rank_active)
-                if rank_for_decision[-1] == player:
-                    extra_steps = 3
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能触发：", "原因：当前最后一名", "效果：额外+3步")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：当前不是最后一名")
-            elif player == CAMELLYA_ID and skill_enabled(config, CAMELLYA_ID):
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}进行50%独自行动判定")
-                if rng.random() <= CAMELLYA_SOLO_ACTION_CHANCE:
-                    extra_steps = len(current_cell) - 1
-                    skip_carried_runners = True
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：独自行动", f"额外步数：+{extra_steps}")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
-            elif player == ROCCIA_ID and skill_enabled(config, ROCCIA_ID):
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最后行动者")
-                if player_order[-1] == player:
-                    extra_steps = 2
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能触发：", "原因：本轮最后行动", "效果：额外+2步")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：不是本轮最后行动者")
-            elif player == BRANT_ID and skill_enabled(config, BRANT_ID):
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最先行动者")
-                if player_order[0] == player:
-                    extra_steps = 2
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能触发：", "原因：本轮最先行动", "效果：额外+2步")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：不是本轮最先行动者")
-            elif player == CANTARELLA_ID and skill_enabled(config, CANTARELLA_ID):
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}检查是否处于逐格移动状态")
-                cantarella_move = cantarella_state == 1
-                if cantarella_move:
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能生效：", "效果：本次逐格移动")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未生效：", "原因：不处于逐格移动状态")
-            elif player == ZANI_ID and skill_enabled(config, ZANI_ID):
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}先结算上次保留的额外步数，再检查同格触发")
-                extra_steps = zani_extra_steps
-                if len(current_cell) > 1 and rng.random() <= ZANI_EXTRA_STEPS_CHANCE:
-                    zani_extra_steps = 2
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：下一次行动额外+2步")
-                else:
-                    zani_extra_steps = 0
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未触发：", "效果：下一次行动无额外步数")
-            elif player == CARTETHYIA_ID and skill_enabled(config, CARTETHYIA_ID):
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}若已进入强化状态，则检查60%额外+2步")
-                if cartethyia_extra_steps and rng.random() <= CARTETHYIA_EXTRA_STEPS_CHANCE:
-                    extra_steps = 2
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：额外+2步")
-                elif cartethyia_extra_steps:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：本次60%判定失败")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未判定：", "原因：尚未进入强化状态")
-            elif player == PHOEBE_ID and skill_enabled(config, PHOEBE_ID):
-                if trace:
-                    log_timing(trace, "行动开始", f"{format_runner(player)}进行50%额外+1步判定")
-                if rng.random() <= PHOEBE_EXTRA_STEP_CHANCE:
-                    extra_steps = 1
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：额外+1步")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
-            elif player == HIYUKI_ID and skill_enabled(config, HIYUKI_ID):
-                extra_steps += check_hiyuki_bonus(skill_state, trace)
-
-            total_steps = dice + extra_steps
-            if player == POTATO_ID and skill_enabled(config, POTATO_ID):
-                if trace:
-                    log_timing(trace, "骰子后", f"{format_runner(player)}进行重复本次骰子的判定")
-                if rng.random() <= POTATO_REPEAT_DICE_CHANCE:
-                    total_steps += dice
-                    record_skill_success(skill_state, player)
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：重复本次骰子", f"总步数：{total_steps}")
-                else:
-                    if trace:
-                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：本次不重复骰子")
-
-            if player == LYNAE_ID and skill_enabled(config, LYNAE_ID):
-                total_steps, lynae_step_adjustment = apply_lynae_skill(
-                    skill_state,
-                    rng,
-                    dice=dice,
-                    total_steps=total_steps,
-                    trace=trace,
-                )
-                extra_steps += lynae_step_adjustment
-
-            if player == PHROLOVA_ID and skill_enabled(config, PHROLOVA_ID):
-                non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
-                if round_number == 1 and config.random_start_stack:
-                    if trace:
-                        log_block(
-                            trace,
-                            f"{format_runner(player)}技能本回合不判定：",
-                            "原因：随机同格开局时，第一回合不发动技能",
-                        )
-                else:
-                    if trace:
-                        log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最右侧且同格存在其他角色")
-                    if len(non_npc_cell) > 1 and non_npc_cell[-1] == player:
-                        extra_steps += 3
-                        total_steps += 3
-                        record_skill_success(skill_state, player)
-                        if trace:
-                            log_block(
-                                trace,
-                                f"{format_runner(player)}技能触发：",
-                                "原因：自己位于同格最右侧，且同格存在其他角色",
-                                "效果：本回合额外前进3格",
-                            )
-                    elif trace:
-                        log_block(
-                            trace,
-                            f"{format_runner(player)}技能未触发：",
-                            "原因：当前不满足最右侧且同格有其他角色",
-                            f"格内顺序：{format_cell(current_cell)}",
-                        )
-
-            if augusta_skip_turn:
-                total_steps = 0
-
-            total_steps = apply_sigrika_debuff(
+            pre_action = core_resolve_pre_action_state(
                 player=player,
-                total_steps=total_steps,
-                debuffed=sigrika_debuffed,
+                current_cell=current_cell,
+                grid=grid,
+                progress=progress,
+                config=config,
+                runners=runners,
+                player_order=player_order,
+                round_number=round_number,
+                npc_rank_active=npc_rank_active,
+                dice=dice,
+                rng=rng,
                 skill_state=skill_state,
                 trace=trace,
+                chisa_bonus_active=chisa_bonus_active,
+                sigrika_debuffed=sigrika_debuffed,
+                cantarella_state=cantarella_state,
+                zani_extra_steps=zani_extra_steps,
+                cartethyia_extra_steps=cartethyia_extra_steps,
+                helpers=_pre_action_helpers(),
+                camellya_solo_action_chance=CAMELLYA_SOLO_ACTION_CHANCE,
+                zani_extra_steps_chance=ZANI_EXTRA_STEPS_CHANCE,
+                cartethyia_extra_steps_chance=CARTETHYIA_EXTRA_STEPS_CHANCE,
+                phoebe_extra_step_chance=PHOEBE_EXTRA_STEP_CHANCE,
+                potato_repeat_dice_chance=POTATO_REPEAT_DICE_CHANCE,
             )
+            extra_steps = pre_action.extra_steps
+            total_steps = pre_action.total_steps
+            skip_carried_runners = pre_action.skip_carried_runners
+            cantarella_move = pre_action.cantarella_move
+            augusta_skip_turn = pre_action.augusta_skip_turn
+            zani_extra_steps = pre_action.zani_extra_steps
 
             if trace:
                 log_block(
@@ -2762,6 +2587,21 @@ def _npc_helpers() -> NPCHelpers:
             record_hiyuki_npc_path_contact=record_hiyuki_npc_path_contact,
         )
     return _NPC_HELPERS
+
+
+def _pre_action_helpers() -> PreActionHelpers:
+    global _PRE_ACTION_HELPERS
+    if _PRE_ACTION_HELPERS is None:
+        _PRE_ACTION_HELPERS = PreActionHelpers(
+            current_rank=current_rank,
+            format_cell=format_cell,
+            format_runner=format_runner,
+            log_block=log_block,
+            log_rank_decision=log_rank_decision,
+            log_timing=log_timing,
+            rank_scope=rank_scope,
+        )
+    return _PRE_ACTION_HELPERS
 
 
 def _post_action_helpers() -> PostActionHelpers:
