@@ -3112,6 +3112,7 @@ class CubieDerbyTests(unittest.TestCase):
             "builtins.input",
             side_effect=[
                 "10",
+                "1",
                 "2",
                 " ".join(str(runner) for runner in losers_round_one),
                 " ".join(str(runner) for runner in winners_round_two),
@@ -3207,6 +3208,44 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(data["start_entry_point"], "elimination-b")
         self.assertEqual(data["stages"][0]["entrants"], list(qualifiers[6:12]))
+        self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
+
+    def test_main_interactive_winners_round_can_derive_from_elimination_and_losers_rankings(self):
+        stdout = io.StringIO()
+        pool = tuple(season_runner_pool(2))
+        elimination_a = pool[:6]
+        elimination_b = pool[6:12]
+        losers_round_one = pool[12:18]
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "10",
+                "2",
+                " ".join(str(runner) for runner in elimination_a),
+                " ".join(str(runner) for runner in elimination_b),
+                " ".join(str(runner) for runner in losers_round_one),
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "winners-round-2")
+        self.assertEqual(data["stages"][0]["entrants"], list(elimination_a[:3] + elimination_b[:3]))
         self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
 
 

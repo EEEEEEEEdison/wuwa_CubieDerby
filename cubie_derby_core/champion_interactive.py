@@ -381,6 +381,49 @@ def _collect_derived_entry_inputs(
                 "losers-round-1-entrants": elimination_a[3:] + elimination_b[3:],
                 "winners-round-2-entrants": elimination_a[:3] + elimination_b[:3],
             }
+    if entry_point == "winners-round-2":
+        mode = _prompt_choice(
+            "胜者组的补录方式",
+            (
+                ("direct", "直接输入胜者组名单和败者组第一轮晋级名单"),
+                ("derive", "输入淘汰赛 A/B 和败者组第一轮完整排名，自动推导剩余上下文"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            elimination_a = _prompt_runner_list(
+                "请输入淘汰赛A完整排名（6名）",
+                description="系统会自动取前 3 名进入胜者组，后 3 名视作已进入败者组第一轮。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            elimination_b = _prompt_runner_list(
+                "请输入淘汰赛B完整排名（6名）",
+                description="系统会自动取前 3 名进入胜者组，后 3 名视作已进入败者组第一轮。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            losers_round_one = _prompt_runner_list(
+                "请输入败者组第一轮完整排名（6名）",
+                description="系统会自动取前 3 名继续进入败者组第二轮。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "winners-round-2-entrants": elimination_a[:3] + elimination_b[:3],
+                "losers-round-1-qualified": losers_round_one[:3],
+            }
     if entry_point == "losers-round-2":
         mode = _prompt_choice(
             "败者组第二轮的补录方式",
