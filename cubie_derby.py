@@ -70,16 +70,8 @@ from cubie_derby_core.effects import (
 from cubie_derby_core.helper_factories import (
     build_effect_hooks as core_build_effect_hooks,
     build_npc_helpers as core_build_npc_helpers,
-    build_post_action_helpers as core_build_post_action_helpers,
-    build_pre_action_helpers as core_build_pre_action_helpers,
-    build_round_flow_helpers as core_build_round_flow_helpers,
     build_runner_action_helpers as core_build_runner_action_helpers,
     build_skill_hook_helpers as core_build_skill_hook_helpers,
-    build_turn_flow_helpers as core_build_turn_flow_helpers,
-)
-from cubie_derby_core.action_flow import (
-    PostActionHelpers,
-    resolve_post_action_effects as core_resolve_post_action_effects,
 )
 from cubie_derby_core.accumulators import (
     MonteCarloAccumulator as CoreMonteCarloAccumulator,
@@ -131,10 +123,6 @@ from cubie_derby_core.ordering import (
     next_round_action_order as core_next_round_action_order,
     rank_scope as core_rank_scope,
 )
-from cubie_derby_core.pre_action import (
-    PreActionHelpers,
-    resolve_pre_action_state as core_resolve_pre_action_state,
-)
 from cubie_derby_core.parallel_jobs import (
     run_champion_prediction_from_entry_request_monte_carlo as core_run_champion_prediction_from_entry_request_monte_carlo,
     run_champion_prediction_monte_carlo as core_run_champion_prediction_monte_carlo,
@@ -156,15 +144,6 @@ from cubie_derby_core.runner_actions import (
     move_cantarella as core_move_cantarella,
     move_runner_with_left_side as core_move_runner_with_left_side,
     move_single_runner as core_move_single_runner,
-)
-from cubie_derby_core.round_flow import (
-    RoundFlowHelpers,
-    finalize_round as core_finalize_round,
-    prepare_round as core_prepare_round,
-)
-from cubie_derby_core.race_runtime import (
-    build_race_result as core_build_race_result,
-    initialize_race_runtime as core_initialize_race_runtime,
 )
 from cubie_derby_core.setup_validation import (
     empty_grid as core_empty_grid,
@@ -208,10 +187,6 @@ from cubie_derby_core.stage_config import (
     resolve_match_type_rule as core_resolve_match_type_rule,
 )
 from cubie_derby_core.tracing import TraceContext
-from cubie_derby_core.turn_flow import (
-    TurnFlowHelpers,
-    execute_player_turn as core_execute_player_turn,
-)
 from cubie_derby_core.tournament import (
     ChampionPredictionAccumulator,
     ChampionPredictionSummary,
@@ -274,12 +249,8 @@ CHANGLI_EXTRA_STEP_CHANCE = 0.65
 
 _EFFECT_HOOKS: EffectHooks | None = None
 _NPC_HELPERS: NPCHelpers | None = None
-_PRE_ACTION_HELPERS: PreActionHelpers | None = None
-_POST_ACTION_HELPERS: PostActionHelpers | None = None
-_ROUND_FLOW_HELPERS: RoundFlowHelpers | None = None
 _RUNNER_ACTION_HELPERS: RunnerActionHelpers | None = None
 _SKILL_HOOK_HELPERS: SkillHookHelpers | None = None
-_TURN_FLOW_HELPERS: TurnFlowHelpers | None = None
 
 
 @dataclass(frozen=True)
@@ -661,57 +632,136 @@ def record_movement(
 def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = False) -> RaceResult:
     runners = config.runners
     track_length = config.track_length
-    runtime = core_initialize_race_runtime(
-        config=config,
-        rng=rng,
-        trace=trace,
-        add_npc_to_start_fn=add_npc_to_start,
-        format_position_list_fn=format_position_list,
-        initial_player_order_fn=initial_player_order,
-        log_block_fn=log_block,
-        movement_state_factory=RaceMovementState,
-        skill_state_factory=RaceSkillState,
-        validate_positions_fn=validate_positions,
-        validate_start_position_fn=validate_start_position,
-    )
-    grid = runtime.grid
-    progress = runtime.progress
-    player_order = runtime.player_order
-    cantarella_state = runtime.cantarella_state
-    cantarella_group = runtime.cantarella_group
-    zani_extra_steps = runtime.zani_extra_steps
-    cartethyia_available = runtime.cartethyia_available
-    cartethyia_extra_steps = runtime.cartethyia_extra_steps
-    skill_state = runtime.skill_state
-    movement_state = runtime.movement_state
-    npc_progress = runtime.npc_progress
-    npc_active = runtime.npc_active
-    npc_rank_active = runtime.npc_rank_active
-    round_number = runtime.round_number
-    round_helpers = _round_flow_helpers()
-    turn_helpers = _turn_flow_helpers()
-    npc_helpers = _npc_helpers()
-    while True:
-        round_start = core_prepare_round(
-            config=config,
-            runners=runners,
-            grid=grid,
-            progress=progress,
-            player_order=player_order,
-            round_number=round_number,
-            npc_active=npc_active,
-            npc_progress=npc_progress,
-            skill_state=skill_state,
-            rng=rng,
-            trace=trace,
-            helpers=round_helpers,
+    grid = {pos: list(cell) for pos, cell in config.start_grid.items() if cell}
+
+    if config.random_start_stack:
+        validate_start_position(config.random_start_position, track_length)
+        start_stack = list(runners)
+        rng.shuffle(start_stack)
+        grid = {config.random_start_position: start_stack}
+    if config.npc_enabled:
+        add_npc_to_start(grid)
+
+    progress: dict[int, int] = {}
+    for pos, cell in grid.items():
+        for runner in cell:
+            if runner == NPC_ID:
+                continue
+            progress[runner] = pos
+    validate_positions(runners, progress)
+
+    player_order = initial_player_order(config, grid, rng)
+    cantarella_state = 1
+    cantarella_group: list[int] = []
+    zani_extra_steps = 0
+    cartethyia_available = True
+    cartethyia_extra_steps = False
+    skill_state = RaceSkillState()
+    movement_state = RaceMovementState()
+    npc_progress = 0
+    npc_active = False
+    npc_rank_active = False
+
+    round_number = 1
+    if trace:
+        log_block(
+            trace,
+            "模拟配置：",
+            f"赛制：{config.name}",
+            f"赛季：{config.season}",
+            f"环形赛道：{track_length}格",
         )
-        npc_active = round_start.npc_active
-        npc_progress = round_start.npc_progress
-        npc_rank_active = round_start.npc_rank_active
-        sigrika_debuffed = round_start.sigrika_debuffed
-        round_dice = round_start.round_dice
-        chisa_bonus_active = round_start.chisa_bonus_active
+        log_block(
+            trace,
+            "特殊格：",
+            f"前进一格：{format_position_list(sorted(config.forward_cells))}",
+            f"后退一格：{format_position_list(sorted(config.backward_cells))}",
+            f"随机打乱：{format_position_list(sorted(config.shuffle_cells))}",
+            f"NPC：{'开启' if config.npc_enabled else '关闭'}",
+        )
+    cached_cell_index: dict[int, int] | None = None
+    cached_rankings: dict[bool, list[int]] = {}
+    ranked_runners_with_npc = runners + ((NPC_ID,) if config.npc_enabled else ())
+
+    def invalidate_rank_views() -> None:
+        nonlocal cached_cell_index
+        cached_rankings.clear()
+        cached_cell_index = None
+
+    def current_cell_index() -> dict[int, int]:
+        nonlocal cached_cell_index
+        if cached_cell_index is None:
+            cached_cell_index = {}
+            for cell in grid.values():
+                for idx, runner in enumerate(cell):
+                    if runner != NPC_ID:
+                        cached_cell_index[runner] = idx
+        return cached_cell_index
+
+    def ranking_for(include_npc: bool) -> list[int]:
+        rank_key = include_npc and NPC_ID in progress
+        ranking = cached_rankings.get(rank_key)
+        if ranking is None:
+            scope = ranked_runners_with_npc if rank_key else runners
+            ranking = current_rank(scope, progress, grid)
+            cached_rankings[rank_key] = ranking
+        return ranking
+
+    def is_last_ranked(player: int, include_npc: bool) -> bool:
+        if trace:
+            rank_for_decision = ranking_for(include_npc)
+            log_rank_decision(trace, rank_for_decision, include_npc)
+            return rank_for_decision[-1] == player
+        cell_index = current_cell_index()
+        player_progress = progress[player]
+        player_cell_index = cell_index.get(player, 9999)
+        scope = ranked_runners_with_npc if include_npc and NPC_ID in progress else runners
+        for other in scope:
+            if other == player:
+                continue
+            other_progress = progress[other]
+            other_cell_index = cell_index.get(other, 9999)
+            if other_progress < player_progress or (
+                other_progress == player_progress and other_cell_index > player_cell_index
+            ):
+                return False
+        return True
+    while True:
+        npc_rank_active = False
+        if config.npc_enabled and round_number >= config.npc_start_round and not npc_active:
+            npc_active = True
+            npc_progress = 0
+            add_npc_to_start(grid)
+            progress[NPC_ID] = npc_progress
+            invalidate_rank_views()
+            if trace:
+                log_block(trace, "NPC登场：", f"出发位置：{format_position(0)}")
+
+        if trace:
+            log(trace, f"\\n=== 第{round_number}轮 ===")
+            log_grid(trace, grid, title="本轮开始时位置分布：")
+        if trace and npc_active:
+            log_block(trace, "NPC状态：", f"当前位置：{format_position(display_position(npc_progress, track_length))}")
+        sigrika_debuffed = mark_sigrika_debuffs(
+            runners=runners,
+            progress=progress,
+            grid=grid,
+            round_number=round_number,
+            skip_first_round=config.random_start_stack,
+            disabled_skills=config.disabled_skills,
+            trace=trace,
+        )
+        round_dice = roll_round_dice(player_order, rng, config=config, skill_state=skill_state)
+        chisa_bonus_active = (
+            CHISA_ID in player_order
+            and skill_enabled(config, CHISA_ID)
+            and chisa_has_lowest_dice(round_dice[CHISA_ID], round_dice)
+        )
+        if trace:
+            log_block(trace, "本轮行动顺序：", format_runner_arrow_list(player_order))
+            log_block(trace, "本轮骰点：", format_round_dice(round_dice, player_order))
+            if CHISA_ID in player_order and skill_enabled(config, CHISA_ID):
+                log_chisa_round_check(round_dice[CHISA_ID], round_dice, chisa_bonus_active, trace)
 
         finished = False
         for player in list(player_order):
@@ -722,7 +772,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                     if trace:
                         log(trace, "--- NPC行动 ---")
                         log_timing(trace, "NPC行动轮到时", "从当前位置按反方向移动1~6步")
-                    npc_progress = core_move_npc(
+                    npc_progress = move_npc(
                         grid=grid,
                         progress=progress,
                         config=config,
@@ -733,8 +783,8 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                         movement_state=movement_state,
                         ignore_waiting_stack=round_number == config.npc_start_round,
                         trace=trace,
-                        helpers=npc_helpers,
                     )
+                    invalidate_rank_views()
                     npc_rank_active = True
                     if trace:
                         log_grid(trace, grid, title="NPC行动后位置分布：")
@@ -743,78 +793,436 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
             if progress[player] >= track_length:
                 continue
 
-            turn_state = core_execute_player_turn(
-                grid=grid,
-                progress=progress,
-                config=config,
-                runners=runners,
-                player_order=player_order,
+            action_start_progress = progress[player]
+            current_pos = display_position(action_start_progress, track_length)
+            current_cell = grid[current_pos]
+            if player not in current_cell:
+                raise RuntimeError(f"runner {player} is missing from position {current_pos}")
+            idx_in_cell = current_cell.index(player)
+
+            if trace:
+                log(trace, f"--- {format_runner(player)}行动 ---")
+                log_block(
+                    trace,
+                    "行动开始：",
+                    f"角色：{format_runner(player)}",
+                    f"位置：{format_position(current_pos)}",
+                    f"格内顺序：{format_cell(current_cell)}",
+                )
+
+            dice = round_dice[player]
+            extra_steps = 0
+            skip_carried_runners = False
+            cantarella_move = False
+            augusta_skip_turn = False
+
+            if player == AUGUSTA_ID and skill_enabled(config, AUGUSTA_ID):
+                non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
+                if skill_state.augusta_force_last_next_round:
+                    skill_state.augusta_force_last_next_round = False
+                    if trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能本回合不判定：",
+                            "原因：上一回合已触发停行动作",
+                            "效果：本回合仅保留固定最后行动",
+                        )
+                elif round_number == 1 and config.random_start_stack:
+                    if trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能本回合不判定：",
+                            "原因：随机同格开局时，第一回合不发动技能",
+                        )
+                else:
+                    if trace:
+                        log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最左侧且同格存在其他角色")
+                    if len(non_npc_cell) > 1 and non_npc_cell[0] == player:
+                        augusta_skip_turn = True
+                        skill_state.augusta_force_last_next_round = True
+                        record_skill_success(skill_state, player)
+                        if trace:
+                            log_block(
+                                trace,
+                                f"{format_runner(player)}技能触发：",
+                                "原因：自己位于同格最左侧，且同格存在其他角色",
+                                "效果：本回合不行动，下回合固定最后行动且不再判定自身技能",
+                            )
+                    elif trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能未触发：",
+                            "原因：当前不满足最左侧且同格有其他角色",
+                            f"格内顺序：{format_cell(current_cell)}",
+                        )
+
+            if player == DENIA_ID and skill_enabled(config, DENIA_ID):
+                extra_steps += check_denia_skill(skill_state, dice, trace)
+            if player == CHISA_ID and skill_enabled(config, CHISA_ID):
+                extra_steps += apply_chisa_bonus(skill_state, chisa_bonus_active, trace)
+
+            if player == CALCHARO_ID and skill_enabled(config, CALCHARO_ID):
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为最后一名")
+                if is_last_ranked(player, npc_rank_active):
+                    extra_steps = 3
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能触发：", "原因：当前最后一名", "效果：额外+3步")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：当前不是最后一名")
+            elif player == CAMELLYA_ID and skill_enabled(config, CAMELLYA_ID):
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}进行50%独自行动判定")
+                if rng.random() <= CAMELLYA_SOLO_ACTION_CHANCE:
+                    extra_steps = len(current_cell) - 1
+                    skip_carried_runners = True
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：独自行动", f"额外步数：+{extra_steps}")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
+            elif player == ROCCIA_ID and skill_enabled(config, ROCCIA_ID):
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最后行动者")
+                if player_order[-1] == player:
+                    extra_steps = 2
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能触发：", "原因：本轮最后行动", "效果：额外+2步")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：不是本轮最后行动者")
+            elif player == BRANT_ID and skill_enabled(config, BRANT_ID):
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最先行动者")
+                if player_order[0] == player:
+                    extra_steps = 2
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能触发：", "原因：本轮最先行动", "效果：额外+2步")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：不是本轮最先行动者")
+            elif player == CANTARELLA_ID and skill_enabled(config, CANTARELLA_ID):
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}检查是否处于逐格移动状态")
+                cantarella_move = cantarella_state == 1
+                if cantarella_move:
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能生效：", "效果：本次逐格移动")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未生效：", "原因：不处于逐格移动状态")
+            elif player == ZANI_ID and skill_enabled(config, ZANI_ID):
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}先结算上次保留的额外步数，再检查同格触发")
+                extra_steps = zani_extra_steps
+                if len(current_cell) > 1 and rng.random() <= ZANI_EXTRA_STEPS_CHANCE:
+                    zani_extra_steps = 2
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：下一次行动额外+2步")
+                else:
+                    zani_extra_steps = 0
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未触发：", "效果：下一次行动无额外步数")
+            elif player == CARTETHYIA_ID and skill_enabled(config, CARTETHYIA_ID):
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}若已进入强化状态，则检查60%额外+2步")
+                if cartethyia_extra_steps and rng.random() <= CARTETHYIA_EXTRA_STEPS_CHANCE:
+                    extra_steps = 2
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：额外+2步")
+                elif cartethyia_extra_steps:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：本次60%判定失败")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未判定：", "原因：尚未进入强化状态")
+            elif player == PHOEBE_ID and skill_enabled(config, PHOEBE_ID):
+                if trace:
+                    log_timing(trace, "行动开始", f"{format_runner(player)}进行50%额外+1步判定")
+                if rng.random() <= PHOEBE_EXTRA_STEP_CHANCE:
+                    extra_steps = 1
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：额外+1步")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
+            elif player == HIYUKI_ID and skill_enabled(config, HIYUKI_ID):
+                extra_steps += check_hiyuki_bonus(skill_state, trace)
+
+            total_steps = dice + extra_steps
+            if player == POTATO_ID and skill_enabled(config, POTATO_ID):
+                if trace:
+                    log_timing(trace, "骰子后", f"{format_runner(player)}进行重复本次骰子的判定")
+                if rng.random() <= POTATO_REPEAT_DICE_CHANCE:
+                    total_steps += dice
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能触发：", "效果：重复本次骰子", f"总步数：{total_steps}")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未触发：", "原因：本次不重复骰子")
+
+            if player == LYNAE_ID and skill_enabled(config, LYNAE_ID):
+                total_steps, lynae_step_adjustment = apply_lynae_skill(
+                    skill_state,
+                    rng,
+                    dice=dice,
+                    total_steps=total_steps,
+                    trace=trace,
+                )
+                extra_steps += lynae_step_adjustment
+
+            if player == PHROLOVA_ID and skill_enabled(config, PHROLOVA_ID):
+                non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
+                if round_number == 1 and config.random_start_stack:
+                    if trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能本回合不判定：",
+                            "原因：随机同格开局时，第一回合不发动技能",
+                        )
+                else:
+                    if trace:
+                        log_timing(trace, "行动开始", f"{format_runner(player)}检查自己是否位于同格最右侧且同格存在其他角色")
+                    if len(non_npc_cell) > 1 and non_npc_cell[-1] == player:
+                        extra_steps += 3
+                        total_steps += 3
+                        record_skill_success(skill_state, player)
+                        if trace:
+                            log_block(
+                                trace,
+                                f"{format_runner(player)}技能触发：",
+                                "原因：自己位于同格最右侧，且同格存在其他角色",
+                                "效果：本回合额外前进3格",
+                            )
+                    elif trace:
+                        log_block(
+                            trace,
+                            f"{format_runner(player)}技能未触发：",
+                            "原因：当前不满足最右侧且同格有其他角色",
+                            f"格内顺序：{format_cell(current_cell)}",
+                        )
+
+            if augusta_skip_turn:
+                total_steps = 0
+
+            total_steps = apply_sigrika_debuff(
                 player=player,
-                round_number=round_number,
-                npc_rank_active=npc_rank_active,
-                round_dice=round_dice,
-                rng=rng,
+                total_steps=total_steps,
+                debuffed=sigrika_debuffed,
                 skill_state=skill_state,
-                movement_state=movement_state,
                 trace=trace,
-                track_length=track_length,
-                chisa_bonus_active=chisa_bonus_active,
-                sigrika_debuffed=sigrika_debuffed,
-                cantarella_state=cantarella_state,
-                cantarella_group=cantarella_group,
-                zani_extra_steps=zani_extra_steps,
-                cartethyia_available=cartethyia_available,
-                cartethyia_extra_steps=cartethyia_extra_steps,
-                helpers=turn_helpers,
             )
-            cantarella_state = turn_state.cantarella_state
-            cantarella_group = turn_state.cantarella_group
-            zani_extra_steps = turn_state.zani_extra_steps
-            cartethyia_available = turn_state.cartethyia_available
-            cartethyia_extra_steps = turn_state.cartethyia_extra_steps
-            if turn_state.finished:
+
+            if trace:
+                log_block(
+                    trace,
+                    f"{format_runner(player)}掷骰结果：",
+                    f"骰子：{dice}",
+                    f"额外步数：{extra_steps}",
+                    f"总步数：{total_steps}",
+                )
+
+            if total_steps <= 0:
+                new_progress = progress[player]
+                current_pos = display_position(new_progress, track_length)
+                if trace:
+                    log_block(
+                        trace,
+                        f"{format_runner(player)}本回合无法移动：",
+                        "移动结算：视为主动移动0格，原地停留",
+                        "后续：若当前停留格是打乱格，则触发打乱效果；随后仍按行动结束后的最终站位结算今汐技能判定",
+                    )
+                if current_pos in config.shuffle_cells:
+                    if trace:
+                        log_timing(trace, "行动结束", f"检查{format_position(current_pos)}是否为打乱顺序格")
+                    apply_shuffle_cell_effect(grid, current_pos, rng, trace=trace)
+                    invalidate_rank_views()
+                new_progress = progress[player]
+            elif cantarella_move:
+                new_progress, cantarella_state, cantarella_group = move_cantarella(
+                    grid=grid,
+                    progress=progress,
+                    config=config,
+                    player=player,
+                    total_steps=total_steps,
+                    rng=rng,
+                    cantarella_state=cantarella_state,
+                    cantarella_group=cantarella_group,
+                    skill_state=skill_state,
+                    movement_state=movement_state,
+                    trace=trace,
+                )
+                invalidate_rank_views()
+            elif skip_carried_runners:
+                new_progress = move_single_runner(
+                    grid=grid,
+                    progress=progress,
+                    config=config,
+                    player=player,
+                    total_steps=total_steps,
+                    rng=rng,
+                    skill_state=skill_state,
+                    movement_state=movement_state,
+                    trace=trace,
+                )
+                invalidate_rank_views()
+            else:
+                new_progress = move_runner_with_left_side(
+                    grid=grid,
+                    progress=progress,
+                    config=config,
+                    player=player,
+                    idx_in_cell=idx_in_cell,
+                    total_steps=total_steps,
+                    rng=rng,
+                    skill_state=skill_state,
+                    movement_state=movement_state,
+                    trace=trace,
+                )
+                invalidate_rank_views()
+
+            if new_progress >= track_length:
+                if trace:
+                    log_grid(trace, grid, title="行动后位置分布：")
+                    log_timing(trace, "移动结算后", "到达或经过终点，立即进行冠军判定")
                 finished = True
                 break
 
-        if finished:
-            return core_build_race_result(
-                config=config,
-                runners=runners,
+            maybe_trigger_player1_skill_after_action(
                 grid=grid,
                 progress=progress,
-                movement_state=movement_state,
+                actor=player,
+                track_length=track_length,
+                rng=rng,
+                disabled_skills=config.disabled_skills,
                 skill_state=skill_state,
                 trace=trace,
-                current_rank_fn=core_current_rank,
-                format_runner_fn=format_runner,
-                format_runner_list_fn=format_runner_list,
-                log_block_fn=log_block,
-                log_fn=log,
-                race_result_factory=RaceResult,
             )
+            invalidate_rank_views()
 
-        round_end = core_finalize_round(
-            config=config,
+            if player == AEMEATH_ID:
+                maybe_trigger_aemeath_after_active_move(
+                    grid=grid,
+                    progress=progress,
+                    config=config,
+                    start_progress=action_start_progress,
+                    action_had_forward_movement=total_steps > 0,
+                    rng=rng,
+                    skill_state=skill_state,
+                    movement_state=movement_state,
+                    trace=trace,
+                )
+                invalidate_rank_views()
+                new_progress = progress[player]
+
+            if player == LUNO_ID:
+                maybe_trigger_luno_after_action(
+                    grid=grid,
+                    progress=progress,
+                    config=config,
+                    skill_state=skill_state,
+                    trace=trace,
+                )
+                invalidate_rank_views()
+                new_progress = progress[player]
+
+            if player == CARTETHYIA_ID and skill_enabled(config, CARTETHYIA_ID) and cartethyia_available:
+                if trace:
+                    log_timing(trace, "行动结束", f"{format_runner(player)}检查是否处于最后一名，以决定本场后续强化")
+                if is_last_ranked(player, npc_rank_active):
+                    cartethyia_extra_steps = True
+                    cartethyia_available = False
+                    record_skill_success(skill_state, player)
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能进入强化状态：", "效果：本场剩余回合可判定额外+2步")
+                else:
+                    if trace:
+                        log_block(trace, f"{format_runner(player)}技能未进入强化状态：", "原因：行动结束后不是最后一名")
+
+            if trace:
+                log_grid(trace, grid, title="行动后位置分布：")
+
+        if finished:
+            ranking = ranking_for(False)
+            second_position = progress[ranking[1]] if len(ranking) > 1 else track_length
+            winner = grid[0][0]
+            result = RaceResult(
+                winner=winner,
+                ranking=tuple(ranking),
+                second_position=second_position,
+                winner_margin=max(0, track_length - second_position),
+                winner_carried_steps=movement_state.carried_steps.get(winner, 0),
+                winner_total_steps=movement_state.total_steps.get(winner, 0),
+                movement_stats=tuple(
+                    (runner, movement_state.total_steps.get(runner, 0), movement_state.carried_steps.get(runner, 0))
+                    for runner in runners
+                ),
+                skill_success_counts=tuple(sorted(skill_state.success_counts.items())),
+            )
+            if trace:
+                log(trace, "比赛结束：")
+                log_block(
+                    trace,
+                    "结果：",
+                    f"冠军：{format_runner(result.winner)}",
+                    f"排名：{format_runner_list(result.ranking)}",
+                    f"领先距离：{result.winner_margin}",
+                )
+            return result
+
+        if npc_active:
+            if trace:
+                log(trace, "")
+                log_timing(trace, "回合结束", "NPC检查自身位置是否小于最后一名位置，若小于则回到第0格")
+            npc_progress = settle_npc_end_of_round(
+                grid=grid,
+                progress=progress,
+                runners=runners,
+                npc_progress=npc_progress,
+                track_length=track_length,
+                trace=trace,
+            )
+            invalidate_rank_views()
+
+        if CHANGLI_ID in runners:
+            if trace:
+                log(trace, "")
+                log_timing(trace, "回合结束", f"{format_runner(CHANGLI_ID)}检查是否在同格最右侧之外，以决定下一轮是否最后行动")
+            next_turn_last = check_player2_skill(
+                grid,
+                rng,
+                disabled_skills=config.disabled_skills,
+                skill_state=skill_state,
+                trace=trace,
+            )
+        else:
+            next_turn_last = False
+        forced_last_runners: list[int] = []
+        if skill_state.augusta_force_last_next_round and AUGUSTA_ID in runners:
+            forced_last_runners.append(AUGUSTA_ID)
+        if next_turn_last and CHANGLI_ID in runners:
+            forced_last_runners.append(CHANGLI_ID)
+
+        player_order = next_round_action_order(
             runners=runners,
-            grid=grid,
-            progress=progress,
-            npc_active=npc_active,
-            npc_progress=npc_progress,
-            round_number=round_number,
-            player_order=player_order,
             rng=rng,
-            trace=trace,
-            skill_state=skill_state,
-            cantarella_state=cantarella_state,
-            helpers=round_helpers,
+            include_npc=config.npc_enabled and round_number + 1 >= config.npc_start_round,
+            forced_last_runners=tuple(forced_last_runners),
         )
-        npc_progress = round_end.npc_progress
-        player_order = round_end.player_order
-        cantarella_state = round_end.cantarella_state
+
+        if cantarella_state == 2:
+            cantarella_state = 0
 
         round_number += 1
-
-
 def validate_positions(runners: Sequence[int], progress: dict[int, int]) -> None:
     core_validate_positions(
         runners,
@@ -2279,63 +2687,6 @@ def _npc_helpers() -> NPCHelpers:
     return _NPC_HELPERS
 
 
-def _pre_action_helpers() -> PreActionHelpers:
-    global _PRE_ACTION_HELPERS
-    if _PRE_ACTION_HELPERS is None:
-        _PRE_ACTION_HELPERS = core_build_pre_action_helpers(
-            current_rank=core_current_rank,
-            format_cell=format_cell,
-            format_runner=format_runner,
-            log_block=log_block,
-            log_rank_decision=log_rank_decision,
-            log_timing=log_timing,
-            rank_scope=rank_scope,
-        )
-    return _PRE_ACTION_HELPERS
-
-
-def _post_action_helpers() -> PostActionHelpers:
-    global _POST_ACTION_HELPERS
-    if _POST_ACTION_HELPERS is None:
-        _POST_ACTION_HELPERS = core_build_post_action_helpers(
-            current_rank=core_current_rank,
-            format_runner=format_runner,
-            log_block=log_block,
-            log_rank_decision=log_rank_decision,
-            log_timing=log_timing,
-            maybe_trigger_aemeath_after_active_move=maybe_trigger_aemeath_after_active_move,
-            maybe_trigger_luno_after_action=maybe_trigger_luno_after_action,
-            maybe_trigger_player1_skill_after_action=maybe_trigger_player1_skill_after_action,
-            rank_scope=rank_scope,
-        )
-    return _POST_ACTION_HELPERS
-
-
-def _round_flow_helpers() -> RoundFlowHelpers:
-    global _ROUND_FLOW_HELPERS
-    if _ROUND_FLOW_HELPERS is None:
-        _ROUND_FLOW_HELPERS = core_build_round_flow_helpers(
-            add_npc_to_start=add_npc_to_start,
-            check_player2_skill=check_player2_skill,
-            chisa_has_lowest_dice=chisa_has_lowest_dice,
-            format_position=format_position,
-            format_round_dice=format_round_dice,
-            format_runner=format_runner,
-            format_runner_arrow_list=format_runner_arrow_list,
-            log=log,
-            log_block=log_block,
-            log_chisa_round_check=log_chisa_round_check,
-            log_grid=log_grid,
-            log_timing=log_timing,
-            mark_sigrika_debuffs=mark_sigrika_debuffs,
-            next_round_action_order=next_round_action_order,
-            roll_round_dice=roll_round_dice,
-            settle_npc_end_of_round=settle_npc_end_of_round,
-            skill_enabled=skill_enabled,
-        )
-    return _ROUND_FLOW_HELPERS
-
-
 def _runner_action_helpers() -> RunnerActionHelpers:
     global _RUNNER_ACTION_HELPERS
     if _RUNNER_ACTION_HELPERS is None:
@@ -2379,205 +2730,6 @@ def _runner_action_helpers() -> RunnerActionHelpers:
             record_hiyuki_npc_path_contact=record_hiyuki_npc_path_contact,
         )
     return _RUNNER_ACTION_HELPERS
-
-
-def _turn_flow_helpers() -> TurnFlowHelpers:
-    global _TURN_FLOW_HELPERS
-    if _TURN_FLOW_HELPERS is None:
-        effect_hooks = _effect_hooks()
-        runner_helpers = _runner_action_helpers()
-        pre_helpers = _pre_action_helpers()
-        post_helpers = _post_action_helpers()
-
-        def apply_shuffle_cell_effect_core(
-            grid: dict[int, list[int]],
-            pos: int,
-            rng: random.Random,
-            *,
-            trace: TraceContext = False,
-        ) -> None:
-            core_apply_shuffle_cell_effect(grid, pos, rng, hooks=effect_hooks, trace=trace)
-
-        def move_cantarella_core(
-            *,
-            grid: dict[int, list[int]],
-            progress: dict[int, int],
-            config: RaceConfig,
-            player: int,
-            total_steps: int,
-            rng: random.Random,
-            cantarella_state: int,
-            cantarella_group: list[int],
-            trace: TraceContext,
-            skill_state: RaceSkillState | None = None,
-            movement_state: RaceMovementState | None = None,
-        ) -> tuple[int, int, list[int]]:
-            return core_move_cantarella(
-                grid=grid,
-                progress=progress,
-                config=config,
-                player=player,
-                total_steps=total_steps,
-                rng=rng,
-                cantarella_state=cantarella_state,
-                cantarella_group=cantarella_group,
-                trace=trace,
-                skill_state=skill_state,
-                movement_state=movement_state,
-                helpers=runner_helpers,
-            )
-
-        def move_runner_with_left_side_core(
-            *,
-            grid: dict[int, list[int]],
-            progress: dict[int, int],
-            config: RaceConfig,
-            player: int,
-            idx_in_cell: int,
-            total_steps: int,
-            rng: random.Random,
-            skill_state: RaceSkillState | None = None,
-            movement_state: RaceMovementState | None = None,
-            trace: TraceContext = False,
-        ) -> int:
-            return core_move_runner_with_left_side(
-                grid=grid,
-                progress=progress,
-                config=config,
-                player=player,
-                idx_in_cell=idx_in_cell,
-                total_steps=total_steps,
-                rng=rng,
-                skill_state=skill_state,
-                movement_state=movement_state,
-                trace=trace,
-                helpers=runner_helpers,
-            )
-
-        def move_single_runner_core(
-            *,
-            grid: dict[int, list[int]],
-            progress: dict[int, int],
-            config: RaceConfig,
-            player: int,
-            total_steps: int,
-            rng: random.Random,
-            skill_state: RaceSkillState | None = None,
-            movement_state: RaceMovementState | None = None,
-            trace: TraceContext = False,
-        ) -> int:
-            return core_move_single_runner(
-                grid=grid,
-                progress=progress,
-                config=config,
-                player=player,
-                total_steps=total_steps,
-                rng=rng,
-                skill_state=skill_state,
-                movement_state=movement_state,
-                trace=trace,
-                helpers=runner_helpers,
-            )
-
-        def resolve_pre_action_state_for_turn(
-            *,
-            player: int,
-            current_cell: Sequence[int],
-            grid: dict[int, Sequence[int]],
-            progress: dict[int, int],
-            config: RaceConfig,
-            runners: Sequence[int],
-            player_order: Sequence[int],
-            round_number: int,
-            npc_rank_active: bool,
-            dice: int,
-            rng: random.Random,
-            skill_state: RaceSkillState,
-            trace: TraceContext,
-            chisa_bonus_active: bool,
-            sigrika_debuffed: set[int],
-            cantarella_state: int,
-            zani_extra_steps: int,
-            cartethyia_extra_steps: bool,
-        ) -> object:
-            return core_resolve_pre_action_state(
-                helpers=pre_helpers,
-                camellya_solo_action_chance=CAMELLYA_SOLO_ACTION_CHANCE,
-                zani_extra_steps_chance=ZANI_EXTRA_STEPS_CHANCE,
-                cartethyia_extra_steps_chance=CARTETHYIA_EXTRA_STEPS_CHANCE,
-                phoebe_extra_step_chance=PHOEBE_EXTRA_STEP_CHANCE,
-                potato_repeat_dice_chance=POTATO_REPEAT_DICE_CHANCE,
-                player=player,
-                current_cell=current_cell,
-                grid=grid,
-                progress=progress,
-                config=config,
-                runners=runners,
-                player_order=player_order,
-                round_number=round_number,
-                npc_rank_active=npc_rank_active,
-                dice=dice,
-                rng=rng,
-                skill_state=skill_state,
-                trace=trace,
-                chisa_bonus_active=chisa_bonus_active,
-                sigrika_debuffed=sigrika_debuffed,
-                cantarella_state=cantarella_state,
-                zani_extra_steps=zani_extra_steps,
-                cartethyia_extra_steps=cartethyia_extra_steps,
-            )
-
-        def resolve_post_action_effects_for_turn(
-            *,
-            grid: dict[int, list[int]],
-            progress: dict[int, int],
-            player: int,
-            runners: Sequence[int],
-            config: RaceConfig,
-            npc_rank_active: bool,
-            action_start_progress: int,
-            total_steps: int,
-            rng: random.Random,
-            skill_state: RaceSkillState | None,
-            movement_state: RaceMovementState | None = None,
-            trace: TraceContext = False,
-            cartethyia_available: bool,
-            cartethyia_extra_steps: bool,
-        ) -> object:
-            return core_resolve_post_action_effects(
-                helpers=post_helpers,
-                grid=grid,
-                progress=progress,
-                player=player,
-                runners=runners,
-                config=config,
-                npc_rank_active=npc_rank_active,
-                action_start_progress=action_start_progress,
-                total_steps=total_steps,
-                rng=rng,
-                skill_state=skill_state,
-                movement_state=movement_state,
-                trace=trace,
-                cartethyia_available=cartethyia_available,
-                cartethyia_extra_steps=cartethyia_extra_steps,
-            )
-
-        _TURN_FLOW_HELPERS = TurnFlowHelpers(
-            apply_shuffle_cell_effect=apply_shuffle_cell_effect_core,
-            format_cell=format_cell,
-            format_position=format_position,
-            format_runner=format_runner,
-            log=log,
-            log_block=log_block,
-            log_grid=log_grid,
-            log_timing=log_timing,
-            move_cantarella=move_cantarella_core,
-            move_runner_with_left_side=move_runner_with_left_side_core,
-            move_single_runner=move_single_runner_core,
-            resolve_post_action_effects=resolve_post_action_effects_for_turn,
-            resolve_pre_action_state=resolve_pre_action_state_for_turn,
-        )
-    return _TURN_FLOW_HELPERS
 
 
 def _skill_hook_helpers() -> SkillHookHelpers:
