@@ -375,14 +375,28 @@ def _emit_runner_progress(
     prompt_output_fn: Callable[[str], None],
     lang: str,
 ) -> None:
+    collapse_after = 3
+    visible_tail = 3
+    hidden_count = max(0, len(runners) - visible_tail)
+    display_runners = runners if len(runners) <= collapse_after else runners[-visible_tail:]
     if lang == "en":
-        prompt_output_fn(f"Recorded {len(runners)}/{expected_count} runners:")
-        for index, runner in enumerate(runners, start=1):
+        if hidden_count > 0:
+            prompt_output_fn(f"Recorded {len(runners)}/{expected_count} runners (collapsed first {hidden_count}):")
+            prompt_output_fn(f"  ... {hidden_count} earlier runners hidden")
+        else:
+            prompt_output_fn(f"Recorded {len(runners)}/{expected_count} runners:")
+        start_index = len(runners) - len(display_runners) + 1
+        for index, runner in enumerate(display_runners, start=start_index):
             prompt_output_fn(f"  {index:>2}. {_runner_display_name(runner, lang=lang)}")
         prompt_output_fn(f"{expected_count - len(runners)} runners remaining.")
     else:
-        prompt_output_fn(f"当前已记录 {len(runners)}/{expected_count} 名：")
-        for index, runner in enumerate(runners, start=1):
+        if hidden_count > 0:
+            prompt_output_fn(f"当前已记录 {len(runners)}/{expected_count} 名（已折叠前 {hidden_count} 名）：")
+            prompt_output_fn(f"  ... 前 {hidden_count} 名已折叠")
+        else:
+            prompt_output_fn(f"当前已记录 {len(runners)}/{expected_count} 名：")
+        start_index = len(runners) - len(display_runners) + 1
+        for index, runner in enumerate(display_runners, start=start_index):
             prompt_output_fn(f"  {index:>2} = {_runner_display_name(runner, lang=lang)}")
         prompt_output_fn(f"还需要输入 {expected_count - len(runners)} 名角色。")
 

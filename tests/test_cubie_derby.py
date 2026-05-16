@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cubie_derby_core.champion_interactive import _prompt_line, _prompt_yes_no, _runner_catalog_lines
+from cubie_derby_core.champion_interactive import _emit_runner_progress, _prompt_line, _prompt_yes_no, _runner_catalog_lines
 from cubie_derby_core.interactive_i18n import translate_interactive_text
 from cubie_derby_core.tournament_context import (
     tournament_entry_request_from_dict,
@@ -258,6 +258,28 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertTrue(any("1 = jinhsi" in line for line in en_lines))
         self.assertTrue(any("|" in line for line in en_lines[2:]))
         self.assertFalse(any("今汐" in line for line in en_lines))
+
+    def test_runner_progress_collapses_earlier_entries_after_threshold(self):
+        lines: list[str] = []
+
+        _emit_runner_progress(
+            (1, 3, 11, 21, 16),
+            expected_count=6,
+            prompt_output_fn=lines.append,
+            lang="zh",
+        )
+
+        self.assertEqual(
+            lines,
+            [
+                "当前已记录 5/6 名（已折叠前 2 名）：",
+                "  ... 前 2 名已折叠",
+                "   3 = 卡提希娅",
+                "   4 = 奥古斯塔",
+                "   5 = 绯雪",
+                "还需要输入 1 名角色。",
+            ],
+        )
 
     def test_single_runner_always_wins(self):
         config = RaceConfig(
@@ -3563,8 +3585,9 @@ class CubieDerbyTests(unittest.TestCase):
         prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
         self.assertEqual(data["config"]["runners"], [1, 3, 11, 21, 16, 22])
-        self.assertIn("当前已记录 5/6 名：", prompt_text)
-        self.assertIn("1 = 今汐", prompt_text)
+        self.assertIn("当前已记录 5/6 名（已折叠前 2 名）：", prompt_text)
+        self.assertIn("... 前 2 名已折叠", prompt_text)
+        self.assertIn("3 = 卡提希娅", prompt_text)
         self.assertIn("5 = 绯雪", prompt_text)
         self.assertIn("还需要输入 1 名角色。", prompt_text)
 
@@ -3642,8 +3665,9 @@ class CubieDerbyTests(unittest.TestCase):
         prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
         self.assertEqual(data["stages"][0]["entrants"], [11, 12, 13, 14, 15, 16])
-        self.assertIn("当前已记录 5/6 名：", prompt_text)
-        self.assertIn("1 = 卡提希娅", prompt_text)
+        self.assertIn("当前已记录 5/6 名（已折叠前 2 名）：", prompt_text)
+        self.assertIn("... 前 2 名已折叠", prompt_text)
+        self.assertIn("3 = 西格莉卡", prompt_text)
         self.assertIn("5 = 达尼娅", prompt_text)
         self.assertIn("还需要输入 1 名角色。", prompt_text)
 
