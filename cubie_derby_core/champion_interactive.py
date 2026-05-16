@@ -1040,6 +1040,8 @@ def run_interactive_command(
     raw_prompt_output_fn = prompt_output_fn
     input_fn = lambda prompt: raw_input_fn(translate_fn(prompt))
     prompt_output_fn = lambda text: raw_prompt_output_fn(translate_fn(text))
+    if getattr(args, "_interactive_defaulted_season", False):
+        prompt_output_fn("未指定赛季，交互向导默认使用第2季；如果你想覆盖，可以下次带上 --season。")
     if args.champion_prediction or args.tournament_context_in or args.tournament_context_out:
         return run_interactive_champion_prediction_command(
             args,

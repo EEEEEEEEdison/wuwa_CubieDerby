@@ -16,6 +16,9 @@ TRANSLATIONS_EN: dict[str, str] = {
     "你正在进入“赛事冠军预测”；下一步会选择单届演示或 Monte Carlo 统计。": (
         "You are entering tournament champion prediction. Next you will choose a single-run demo or Monte Carlo statistics."
     ),
+    "未指定赛季，交互向导默认使用第2季；如果你想覆盖，可以下次带上 --season。": (
+        "No season was specified, so the interactive wizard defaults to Season 2. Add --season next time if you want to override it."
+    ),
     "请选择冠军预测方式": "Choose champion prediction mode",
     "单届演示（跑 1 届完整赛事）": "Single-run demo (simulate 1 full tournament)",
     "Monte Carlo 分析（重复统计夺冠率）": "Monte Carlo analysis (repeat tournaments and estimate champion rates)",

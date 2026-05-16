@@ -42,10 +42,12 @@ python cubie_derby.py --season 2 --match-type group-round-1 -n 100000 --runners 
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 ```
 
-如果你想让程序一步一步引导你输入比赛阶段、登场角色或赛事上下文，可以改用 `--interactive`。如果你想用英文提示，可以再加上 `--interactive-language en`：
+如果你想一步一步引导输入，现在直接运行 `python cubie_derby.py` 就会进入向导。你也可以带上部分启动参数，让向导只补剩下缺的信息。如果你想用英文提示，可以再加上 `--interactive-language en`：
 
 ```powershell
+python cubie_derby.py
 python cubie_derby.py --interactive --season 2
+python cubie_derby.py --season 2 --iterations 10000 --json
 python cubie_derby.py --interactive --interactive-language en --season 2 --json
 ```
 
@@ -143,6 +145,7 @@ python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --se
 - 当前交互式冠军预测支持从赛季 2 的任意赛事入口开始，例如 `小组A第二轮`、`淘汰赛A`、`胜者组`、`总决赛`。
 - 对很多中途入口，向导支持“输入完整排名后自动推导后续名单”，减少手工拆分。
 - 交互提示会先说明“当前起始阶段”和“后续将依次模拟哪些阶段”，再开始提问。
+- 如果你直接运行 `python cubie_derby.py`，向导会自动进入交互模式，并默认使用第 2 季；你也可以先带上 `--season`、`--iterations`、`--json` 等参数，再由向导补齐剩余输入。
 - `--interactive-language en` 会把交互向导提示切到英文，便于英文环境演示或录屏；JSON 结构不变。
 
 示例：

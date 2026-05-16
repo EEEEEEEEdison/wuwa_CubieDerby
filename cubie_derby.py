@@ -2788,7 +2788,32 @@ def normalize_cli_args(argv: Sequence[str]) -> list[str]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = make_parser()
-    args = parser.parse_args(normalize_cli_args(list(sys.argv[1:] if argv is None else argv)))
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    normalized_argv = normalize_cli_args(raw_argv)
+    args = parser.parse_args(normalized_argv)
+    season_explicit = any(arg == "--season" or arg.startswith("--season=") for arg in normalized_argv)
+    auto_interactive = not args.interactive and not any(
+        (
+            args.champion_prediction,
+            args.match_type,
+            args.season_roster_scan,
+            args.skill_ablation,
+            args.trace,
+            args.trace_log,
+            args.runners is not None,
+            args.start,
+            args.initial_order,
+            args.tournament_context_in,
+            args.tournament_context_out,
+        )
+    )
+    if auto_interactive:
+        args.interactive = True
+    setattr(args, "_interactive_auto_entry", auto_interactive)
+    setattr(args, "_season_explicit", season_explicit)
+    if args.interactive and not season_explicit:
+        args.season = 2
+        setattr(args, "_interactive_defaulted_season", True)
     show_progress = sys.stderr.isatty() and not args.json
     try:
         if args.tournament_context_out and not args.interactive:

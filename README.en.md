@@ -42,10 +42,12 @@ Run one full Season 2 tournament and print the champion plus every stage result:
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 ```
 
-If you want the program to guide you step by step through stage selection, runner input, or tournament context entry, use `--interactive`. If you want English wizard prompts explicitly, add `--interactive-language en`:
+If you want guided input, you can now run `python cubie_derby.py` directly and the wizard will start automatically. You can also pass a few startup parameters first and let the wizard fill in the rest. If you want English wizard prompts explicitly, add `--interactive-language en`:
 
 ```powershell
+python cubie_derby.py
 python cubie_derby.py --interactive --season 2
+python cubie_derby.py --season 2 --iterations 10000 --json
 python cubie_derby.py --interactive --interactive-language en --season 2 --json
 ```
 
@@ -143,6 +145,7 @@ Notes:
 - Interactive champion prediction currently supports starting from any Season 2 tournament entry point, such as `group-a-round-2`, `elimination-a`, `winners-round-2`, or `grand-final`.
 - For many mid-tournament entry points, the wizard can derive later rosters automatically from full rankings so you do not have to split lists manually.
 - The prompts first explain the current entry stage and which later stages will still be simulated, then ask for the required inputs.
+- If you run `python cubie_derby.py` directly, the wizard now enters interactive mode automatically and defaults to Season 2. You can also prefill flags such as `--season`, `--iterations`, or `--json`, then let the wizard ask only for the remaining inputs.
 - `--interactive-language en` switches the wizard prompts to English for demos and English-speaking users. The JSON structure itself is unchanged.
 
 Examples:
