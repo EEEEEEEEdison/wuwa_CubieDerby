@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cubie_derby_core.champion_interactive import _prompt_line, _prompt_yes_no
+from cubie_derby_core.champion_interactive import _prompt_line, _prompt_yes_no, _runner_catalog_lines
 from cubie_derby_core.interactive_i18n import translate_interactive_text
 from cubie_derby_core.tournament_context import (
     tournament_entry_request_from_dict,
@@ -196,57 +196,66 @@ def first_trace_action(text: str, runner_name: str) -> str:
 
 
 class CubieDerbyTests(unittest.TestCase):
-    def test_prompt_line_formats_default_without_brackets_in_chinese(self):
+    def test_prompt_line_requires_explicit_input_in_chinese(self):
         prompts: list[str] = []
 
         value = _prompt_line(
             "请输入序号",
-            default="1",
-            input_fn=lambda prompt: prompts.append(prompt) or "",
+            input_fn=lambda prompt: prompts.append(prompt) or "1",
             translate_fn=lambda text: translate_interactive_text(text, "zh"),
         )
 
         self.assertEqual(value, "1")
-        self.assertEqual(prompts, ["请输入序号（默认 1）: "])
+        self.assertEqual(prompts, ["请输入序号: "])
 
-    def test_prompt_line_formats_default_without_brackets_in_english(self):
+    def test_prompt_line_requires_explicit_input_in_english(self):
         prompts: list[str] = []
 
         value = _prompt_line(
             "请输入序号",
-            default="1",
-            input_fn=lambda prompt: prompts.append(prompt) or "",
+            input_fn=lambda prompt: prompts.append(prompt) or "1",
             translate_fn=lambda text: translate_interactive_text(text, "en"),
         )
 
         self.assertEqual(value, "1")
-        self.assertEqual(prompts, ["Enter number (default 1): "])
+        self.assertEqual(prompts, ["Enter number: "])
 
-    def test_prompt_yes_no_formats_default_without_brackets_in_chinese(self):
+    def test_prompt_yes_no_requires_explicit_input_in_chinese(self):
         prompts: list[str] = []
 
         value = _prompt_yes_no(
             "是否输出 JSON 结果",
-            default=True,
-            input_fn=lambda prompt: prompts.append(prompt) or "",
+            input_fn=lambda prompt: prompts.append(prompt) or "是",
             translate_fn=lambda text: translate_interactive_text(text, "zh"),
         )
 
         self.assertTrue(value)
-        self.assertEqual(prompts, ["是否输出 JSON 结果（默认是）: "])
+        self.assertEqual(prompts, ["是否输出 JSON 结果（是/否）: "])
 
-    def test_prompt_yes_no_formats_default_without_brackets_in_english(self):
+    def test_prompt_yes_no_requires_explicit_input_in_english(self):
         prompts: list[str] = []
 
         value = _prompt_yes_no(
             "是否输出 JSON 结果",
-            default=False,
-            input_fn=lambda prompt: prompts.append(prompt) or "",
+            input_fn=lambda prompt: prompts.append(prompt) or "no",
             translate_fn=lambda text: translate_interactive_text(text, "en"),
         )
 
         self.assertFalse(value)
-        self.assertEqual(prompts, ["Output JSON result (default no): "])
+        self.assertEqual(prompts, ["Output JSON result (yes/no): "])
+
+    def test_runner_catalog_lines_follow_prompt_language(self):
+        pool = tuple(season_runner_pool(2))
+
+        zh_lines = _runner_catalog_lines(season=2, runner_pool=pool, lang="zh")
+        en_lines = _runner_catalog_lines(season=2, runner_pool=pool, lang="en")
+
+        self.assertIn("支持输入角色编号、中文名或英文别名。", zh_lines)
+        self.assertTrue(any("1=今汐" in line for line in zh_lines))
+        self.assertFalse(any("/jinhsi" in line for line in zh_lines))
+        self.assertIn("You may enter runner IDs, Chinese names, or English aliases.", en_lines)
+        self.assertTrue(any("1=jinhsi" in line for line in en_lines))
+        self.assertFalse(any("今汐" in line for line in en_lines))
 
     def test_single_runner_always_wins(self):
         config = RaceConfig(
@@ -2944,9 +2953,8 @@ class CubieDerbyTests(unittest.TestCase):
                 "1",
                 "1",
                 "12",
-                "",
+                "1",
                 "11 12 13 14 15 16",
-                "",
                 "n",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -2976,12 +2984,8 @@ class CubieDerbyTests(unittest.TestCase):
             "builtins.input",
             side_effect=[
                 "12",
-                "",
+                "1",
                 "11 12 13 14 15 16",
-                "",
-                "",
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3016,13 +3020,8 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "2",
                 "3",
-                "3",
                 "11 12 13 14 15 16",
-                "",
-                "",
-                "",
-                "",
-                "",
+                "n",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3110,11 +3109,7 @@ class CubieDerbyTests(unittest.TestCase):
                 "2",
                 "3",
                 "11 12 13 14 15 16",
-                "",
-                "",
-                "",
-                "",
-                "",
+                "n",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3148,8 +3143,6 @@ class CubieDerbyTests(unittest.TestCase):
                     "12",
                     "1",
                     "11 12 13 14 15 16",
-                    "",
-                    "",
                 ],
             ), contextlib.redirect_stdout(stdout):
                 exit_code = main(
@@ -3191,10 +3184,7 @@ class CubieDerbyTests(unittest.TestCase):
             )
             with patch(
                 "builtins.input",
-                side_effect=[
-                    "",
-                    "",
-                ],
+                side_effect=AssertionError("interactive context load should not prompt for input"),
             ), contextlib.redirect_stdout(stdout):
                 exit_code = main(
                     [
@@ -3228,8 +3218,6 @@ class CubieDerbyTests(unittest.TestCase):
                 "2",
                 " ".join(str(runner) for runner in winners),
                 " ".join(str(runner) for runner in losers),
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3255,19 +3243,18 @@ class CubieDerbyTests(unittest.TestCase):
     def test_main_interactive_winners_round_can_derive_qualifiers_from_full_ranking(self):
         stdout = io.StringIO()
         pool = tuple(season_runner_pool(2))
-        losers_round_one = pool[:6]
-        winners_round_two = pool[6:12]
+        elimination_a = pool[:6]
+        elimination_b = pool[6:12]
+        losers_round_one = pool[12:18]
 
         with patch(
             "builtins.input",
             side_effect=[
                 "10",
-                "1",
                 "2",
+                " ".join(str(runner) for runner in elimination_a),
+                " ".join(str(runner) for runner in elimination_b),
                 " ".join(str(runner) for runner in losers_round_one),
-                " ".join(str(runner) for runner in winners_round_two),
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3300,8 +3287,6 @@ class CubieDerbyTests(unittest.TestCase):
                 "7",
                 "2",
                 " ".join(str(runner) for runner in qualifiers),
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3337,8 +3322,6 @@ class CubieDerbyTests(unittest.TestCase):
                 "2",
                 " ".join(str(runner) for runner in qualifiers),
                 " ".join(str(runner) for runner in elimination_a),
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3373,8 +3356,6 @@ class CubieDerbyTests(unittest.TestCase):
                 "2",
                 " ".join(str(runner) for runner in group_a),
                 " ".join(str(runner) for runner in remaining),
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3413,8 +3394,6 @@ class CubieDerbyTests(unittest.TestCase):
                 " ".join(str(runner) for runner in group_a),
                 " ".join(str(runner) for runner in group_b),
                 " ".join(str(runner) for runner in group_c),
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3451,8 +3430,6 @@ class CubieDerbyTests(unittest.TestCase):
                 " ".join(str(runner) for runner in elimination_a),
                 " ".join(str(runner) for runner in elimination_b),
                 " ".join(str(runner) for runner in losers_round_one),
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3482,10 +3459,8 @@ class CubieDerbyTests(unittest.TestCase):
             "builtins.input",
             side_effect=[
                 "12",
-                "",
+                "1",
                 "11 12 13 14 15 16",
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(
@@ -3518,13 +3493,8 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "2",
                 "3",
-                "3",
                 "11 12 13 14 15 16",
-                "",
-                "",
-                "",
-                "",
-                "",
+                "n",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(
@@ -3549,7 +3519,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("请选择单场模拟阶段", prompt_text)
         self.assertIn("当前模拟阶段：淘汰赛", prompt_text)
         self.assertIn("支持输入角色编号、中文名或英文别名", prompt_text)
-        self.assertIn("1=今汐/jinhsi", prompt_text)
+        self.assertIn("1=今汐", prompt_text)
         self.assertIn("请输入 6 名登场角色", prompt_text)
         self.assertIn("默认起跑配置会根据当前阶段自动适配", prompt_text)
 
@@ -3562,13 +3532,8 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "2",
                 "3",
-                "3",
                 "11 12 13 14 15 16",
-                "",
-                "",
-                "",
-                "",
-                "",
+                "n",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(
@@ -3594,7 +3559,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("Choose single-stage simulation stage", prompt_text)
         self.assertIn("Current simulation stage: Elimination", prompt_text)
         self.assertIn("You may enter runner IDs, Chinese names, or English aliases.", prompt_text)
-        self.assertIn("1=今汐/jinhsi", prompt_text)
+        self.assertIn("1=jinhsi", prompt_text)
         self.assertIn("Enter 6 runners", prompt_text)
 
     def test_main_interactive_champion_prompts_support_english(self):
@@ -3609,8 +3574,6 @@ class CubieDerbyTests(unittest.TestCase):
                 "12",
                 "1",
                 "11 12 13 14 15 16",
-                "",
-                "",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(

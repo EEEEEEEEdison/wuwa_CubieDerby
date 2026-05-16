@@ -56,33 +56,24 @@ def _with_args(args: Any, **updates: Any) -> Any:
 def _prompt_line(
     prompt: str,
     *,
-    default: str | None = None,
     input_fn: Callable[[str], str],
     translate_fn: Callable[[str], str] | None = None,
+    allow_empty: bool = False,
 ) -> str:
     if translate_fn is None:
         translate_fn = lambda text: text
-    translated_prompt = translate_fn(prompt)
-    english_mode = translate_fn("请输入序号") != "请输入序号"
-    prompt_text = translated_prompt
-    if default is not None:
-        if english_mode:
-            prompt_text += f" (default {default})"
-        else:
-            prompt_text += f"（默认 {default}）"
-    prompt_text += ": "
+    prompt_text = translate_fn(prompt) + ": "
     while True:
         value = input_fn(prompt_text).strip()
         if value:
             return value
-        if default is not None:
-            return default
+        if allow_empty:
+            return ""
 
 
 def _prompt_yes_no(
     prompt: str,
     *,
-    default: bool,
     input_fn: Callable[[str], str],
     translate_fn: Callable[[str], str] | None = None,
 ) -> bool:
@@ -90,15 +81,11 @@ def _prompt_yes_no(
         translate_fn = lambda text: text
     english_mode = translate_fn("请输入序号") != "请输入序号"
     if english_mode:
-        default_text = "yes" if default else "no"
-        prompt_text = f"{translate_fn(prompt)} (default {default_text}): "
+        prompt_text = f"{translate_fn(prompt)} (yes/no): "
     else:
-        default_text = "是" if default else "否"
-        prompt_text = f"{translate_fn(prompt)}（默认{default_text}）: "
+        prompt_text = f"{translate_fn(prompt)}（是/否）: "
     while True:
         value = input_fn(prompt_text).strip().lower()
-        if not value:
-            return default
         if value in {"y", "yes", "是"}:
             return True
         if value in {"n", "no", "否"}:
@@ -109,7 +96,6 @@ def _prompt_choice(
     title: str,
     options: Sequence[tuple[str, str]],
     *,
-    default_key: str | None = None,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
     translate_fn: Callable[[str], str] | None = None,
@@ -119,14 +105,8 @@ def _prompt_choice(
     prompt_output_fn(title)
     for index, (_, label) in enumerate(options, start=1):
         prompt_output_fn(f"{index}. {translate_fn(label)}")
-    default_display = None
-    if default_key is not None:
-        for index, (key, _) in enumerate(options, start=1):
-            if key == default_key:
-                default_display = str(index)
-                break
     while True:
-        raw = _prompt_line("请输入序号", default=default_display, input_fn=input_fn, translate_fn=translate_fn)
+        raw = _prompt_line("请输入序号", input_fn=input_fn, translate_fn=translate_fn)
         if raw.isdigit():
             choice_index = int(raw) - 1
             if 0 <= choice_index < len(options):
@@ -142,12 +122,10 @@ def _runner_catalog_lines(
 ) -> list[str]:
     entries = []
     for runner in runner_pool:
-        display_name = RUNNER_NAMES.get(runner, str(runner))
-        alias = PRIMARY_RUNNER_ALIASES.get(runner)
-        if alias:
-            entries.append(f"{runner}={display_name}/{alias}")
+        if lang == "en":
+            entries.append(f"{runner}={PRIMARY_RUNNER_ALIASES.get(runner, str(runner))}")
         else:
-            entries.append(f"{runner}={display_name}")
+            entries.append(f"{runner}={RUNNER_NAMES.get(runner, str(runner))}")
     chunk_size = 6
     chunks = [entries[index : index + chunk_size] for index in range(0, len(entries), chunk_size)]
     if lang == "en":
@@ -360,7 +338,6 @@ def _prompt_qualified_runner_list(
             ("direct", "直接输入晋级名单"),
             ("ranking", "输入上一阶段完整排名（6名）自动截取晋级名单"),
         ),
-        default_key="direct",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
@@ -416,7 +393,6 @@ def _prompt_grouped_runner_list(
     if requirement.optional:
         wants_manual = _prompt_yes_no(
             f"{requirement.label}是否手动输入",
-            default=False,
             input_fn=input_fn,
             translate_fn=translate_fn,
         )
@@ -507,7 +483,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "分别输入小组A第二轮顺序，以及小组B/C第一轮名单"),
                 ("derive", "输入小组A第一轮完整排名 + 小组B/C第一轮名单（共12名）"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -542,7 +517,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "分别输入小组A晋级名单，以及小组B/C第一轮名单"),
                 ("derive", "输入小组A第二轮完整排名 + 小组B/C第一轮名单（共12名）"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -577,7 +551,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "分别输入小组A晋级名单、小组B第二轮顺序和小组C第一轮名单"),
                 ("derive", "输入小组A第二轮完整排名 + 小组B第一轮完整排名 + 小组C第一轮名单"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -621,7 +594,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "分别输入小组A/B晋级名单和小组C第一轮名单"),
                 ("derive", "输入小组A/B第二轮完整排名 + 小组C第一轮名单"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -665,7 +637,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "分别输入小组A/B晋级名单和小组C第二轮顺序"),
                 ("derive", "输入小组A/B第二轮完整排名 + 小组C第一轮完整排名"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -709,7 +680,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "直接输入淘汰赛 A/B 两组名单"),
                 ("ordered-qualified", "输入 12 名晋级者，前 6 名视为淘汰赛 A，后 6 名视为 B"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -734,7 +704,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "直接输入淘汰赛 A 排名和淘汰赛 B 名单"),
                 ("derive", "输入 12 名晋级者和淘汰赛 A 完整排名，自动反推淘汰赛 B 名单"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -777,7 +746,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "直接输入败者组与胜者组当前名单"),
                 ("derive", "输入淘汰赛 A/B 完整排名，自动推导胜者组和败者组名单"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -811,7 +779,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "直接输入胜者组名单和败者组第一轮晋级名单"),
                 ("derive", "输入淘汰赛 A/B 和败者组第一轮完整排名，自动推导剩余上下文"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -854,7 +821,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "直接输入败者组第二轮名单和胜者组直通名单"),
                 ("derive", "输入胜者组与败者组第一轮完整排名，自动推导剩余上下文"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -888,7 +854,6 @@ def _collect_derived_entry_inputs(
                 ("direct", "直接输入总决赛 6 名角色"),
                 ("derive", "输入胜者组与败者组第二轮完整排名，自动生成总决赛名单"),
             ),
-            default_key="direct",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
@@ -993,7 +958,6 @@ def run_interactive_simulation_command(
         match_type = args.match_type or _prompt_choice(
             "请选择单场模拟阶段",
             match_options,
-            default_key="elimination",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
             translate_fn=translate_fn,
@@ -1014,51 +978,59 @@ def run_interactive_simulation_command(
     )
     if season == 2:
         prompt_output_fn("默认起跑配置会根据当前阶段自动适配；如果你想覆盖，下一步可以手动输入自定义起跑。")
-        use_custom_start = _prompt_yes_no(
-            "是否覆盖默认起跑配置",
-            default=bool(args.start),
-            input_fn=input_fn,
-            translate_fn=translate_fn,
-        )
-        start_spec = args.start if use_custom_start and args.start else None
-        if use_custom_start and start_spec is None:
-            start_spec = _prompt_line(
-                "请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8",
+        if getattr(args, "_start_explicit", False):
+            start_spec = args.start
+        else:
+            use_custom_start = _prompt_yes_no(
+                "是否覆盖默认起跑配置",
                 input_fn=input_fn,
                 translate_fn=translate_fn,
             )
+            start_spec = None
+            if use_custom_start:
+                start_spec = _prompt_line(
+                    "请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8",
+                    input_fn=input_fn,
+                    translate_fn=translate_fn,
+                )
     else:
-        start_spec = args.start or _prompt_line(
-            "请输入起跑配置，例如 1:* 或 -3:2;-2:1,4;1:5",
+        if getattr(args, "_start_explicit", False):
+            start_spec = args.start
+        else:
+            start_spec = _prompt_line(
+                "请输入起跑配置，例如 1:* 或 -3:2;-2:1,4;1:5",
+                input_fn=input_fn,
+                translate_fn=translate_fn,
+            )
+    iterations = args.iterations
+    if not getattr(args, "_iterations_explicit", False):
+        iterations = int(
+            _prompt_line(
+                "请输入 Monte Carlo 模拟次数",
+                input_fn=input_fn,
+                translate_fn=translate_fn,
+            )
+        )
+    seed = args.seed
+    if not getattr(args, "_seed_explicit", False):
+        seed_text = _prompt_line(
+            "请输入随机种子，留空表示不固定",
             input_fn=input_fn,
             translate_fn=translate_fn,
+            allow_empty=True,
         )
-    iterations = int(
-        _prompt_line(
-            "请输入 Monte Carlo 模拟次数",
-            default=str(args.iterations),
-            input_fn=input_fn,
-            translate_fn=translate_fn,
+        seed = int(seed_text) if seed_text else None
+    workers = args.workers
+    if not getattr(args, "_workers_explicit", False):
+        workers = int(
+            _prompt_line(
+                "请输入 workers 数量，0 表示使用 CPU 核心数",
+                input_fn=input_fn,
+                translate_fn=translate_fn,
+            )
         )
-    )
-    seed_text = _prompt_line(
-        "请输入随机种子，留空表示不固定",
-        default="" if args.seed is None else str(args.seed),
-        input_fn=input_fn,
-        translate_fn=translate_fn,
-    )
-    seed = int(seed_text) if seed_text else None
-    workers = int(
-        _prompt_line(
-            "请输入 workers 数量，0 表示使用 CPU 核心数",
-            default=str(args.workers),
-            input_fn=input_fn,
-            translate_fn=translate_fn,
-        )
-    )
-    json_output = _prompt_yes_no(
+    json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no(
         "是否输出 JSON 结果",
-        default=bool(args.json),
         input_fn=input_fn,
         translate_fn=translate_fn,
     )
@@ -1119,7 +1091,6 @@ def run_interactive_command(
                     ("1", "第1季"),
                     ("2", "第2季"),
                 ),
-                default_key="2",
                 input_fn=input_fn,
                 prompt_output_fn=prompt_output_fn,
                 translate_fn=translate_fn,
@@ -1159,7 +1130,6 @@ def run_interactive_command(
             ("champion", "赛事冠军预测"),
             ("simulation", "单场胜率分析"),
         ),
-        default_key="champion",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
@@ -1180,7 +1150,6 @@ def run_interactive_command(
             ("random", "单届演示（跑 1 届完整赛事）"),
             ("monte-carlo", "Monte Carlo 分析（重复统计夺冠率）"),
         ),
-        default_key="random",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
@@ -1258,7 +1227,6 @@ def run_interactive_champion_prediction_command(
             ("random", "单届演示（跑 1 届完整赛事）"),
             ("monte-carlo", "Monte Carlo 分析（重复统计夺冠率）"),
         ),
-        default_key="random",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
@@ -1272,7 +1240,6 @@ def run_interactive_champion_prediction_command(
         entry_point = _prompt_choice(
             "请选择从哪个阶段开始",
             entry_options,
-            default_key="group-a-round-1",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
             translate_fn=translate_fn,
@@ -1325,16 +1292,17 @@ def run_interactive_champion_prediction_command(
         helpers.save_tournament_entry_request(request, args.tournament_context_out)
         prompt_output_fn(f"赛事上下文已写入：{args.tournament_context_out}")
 
-    seed_text = _prompt_line(
-        "请输入随机种子（留空表示不固定）",
-        default="" if args.seed is None else str(args.seed),
-        input_fn=input_fn,
-        translate_fn=translate_fn,
-    )
-    seed = int(seed_text) if seed_text else None
-    json_output = _prompt_yes_no(
+    seed = args.seed
+    if not getattr(args, "_seed_explicit", False):
+        seed_text = _prompt_line(
+            "请输入随机种子（留空表示不固定）",
+            input_fn=input_fn,
+            translate_fn=translate_fn,
+            allow_empty=True,
+        )
+        seed = int(seed_text) if seed_text else None
+    json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no(
         "是否输出 JSON 结果",
-        default=bool(args.json),
         input_fn=input_fn,
         translate_fn=translate_fn,
     )
@@ -1351,22 +1319,24 @@ def run_interactive_champion_prediction_command(
             result_output_fn(helpers.format_tournament_result(tournament))
         return 0
 
-    iterations = int(
-        _prompt_line(
-            "请输入 Monte Carlo 模拟次数",
-            default=str(args.iterations),
-            input_fn=input_fn,
-            translate_fn=translate_fn,
+    iterations = args.iterations
+    if not getattr(args, "_iterations_explicit", False):
+        iterations = int(
+            _prompt_line(
+                "请输入 Monte Carlo 模拟次数",
+                input_fn=input_fn,
+                translate_fn=translate_fn,
+            )
         )
-    )
-    workers = int(
-        _prompt_line(
-            "请输入 workers 数量（0 表示 CPU 核心数）",
-            default=str(args.workers),
-            input_fn=input_fn,
-            translate_fn=translate_fn,
+    workers = args.workers
+    if not getattr(args, "_workers_explicit", False):
+        workers = int(
+            _prompt_line(
+                "请输入 workers 数量（0 表示 CPU 核心数）",
+                input_fn=input_fn,
+                translate_fn=translate_fn,
+            )
         )
-    )
     summary = helpers.run_champion_prediction_from_entry_request_monte_carlo(
         request,
         iterations,

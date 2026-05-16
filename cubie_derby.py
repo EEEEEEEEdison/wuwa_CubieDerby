@@ -2791,7 +2791,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     normalized_argv = normalize_cli_args(raw_argv)
     args = parser.parse_args(normalized_argv)
+    def has_option(*names: str) -> bool:
+        return any(
+            arg == name or arg.startswith(f"{name}=")
+            for arg in normalized_argv
+            for name in names
+        )
     season_explicit = any(arg == "--season" or arg.startswith("--season=") for arg in normalized_argv)
+    iterations_explicit = has_option("-n", "--iterations")
+    workers_explicit = has_option("--workers", "--worker")
+    seed_explicit = has_option("--seed")
+    json_explicit = has_option("--json")
+    start_explicit = has_option("--start")
     auto_interactive = not args.interactive and not any(
         (
             args.champion_prediction,
@@ -2811,6 +2822,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.interactive = True
     setattr(args, "_interactive_auto_entry", auto_interactive)
     setattr(args, "_season_explicit", season_explicit)
+    setattr(args, "_iterations_explicit", iterations_explicit)
+    setattr(args, "_workers_explicit", workers_explicit)
+    setattr(args, "_seed_explicit", seed_explicit)
+    setattr(args, "_json_explicit", json_explicit)
+    setattr(args, "_start_explicit", start_explicit)
     show_progress = sys.stderr.isatty() and not args.json
     try:
         if args.tournament_context_out and not args.interactive:
