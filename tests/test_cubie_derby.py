@@ -366,6 +366,25 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["config"]["start_layout"], "第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]")
         self.assertEqual(data["config"]["start_grid"], {"1": [10], "2": [4, 3], "3": [8]})
 
+    def test_format_summary_includes_map_label_when_available(self):
+        config = RaceConfig(
+            runners=(11, 12, 13, 14, 15, 16),
+            track_length=32,
+            start_grid={},
+            season=2,
+            map_label="淘汰赛阶段地图",
+            random_start_stack=True,
+            random_start_position=1,
+            name="淘汰赛",
+        )
+        summary = run_monte_carlo(config, 10, seed=1)
+
+        text = format_summary(summary)
+        data = summary_to_dict(summary)
+
+        self.assertIn("赛道类型：淘汰赛阶段地图", text)
+        self.assertEqual(data["config"]["map_label"], "淘汰赛阶段地图")
+
     def test_format_summary_includes_random_stack_start_and_entrants(self):
         config = RaceConfig(
             runners=(11, 12, 13, 14, 15, 16),
@@ -408,8 +427,6 @@ class CubieDerbyTests(unittest.TestCase):
                 "模拟次数：1,000,000",
                 "赛道长度：24格",
                 "晋级统计：前4名",
-                "用时：进行中",
-                "速度：计算中",
                 "自定义站位：第1格：[赞妮]；第2格：[守岸人, 卡卡罗]；第3格：[布兰特]",
             ],
         )
@@ -633,6 +650,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(config.random_start_position, 1)
         self.assertEqual(config.qualify_cutoff, 6)
         self.assertFalse(config.show_qualify_stats)
+        self.assertEqual(config.map_label, "小组赛阶段地图")
         self.assertEqual(config.name, "小组赛第一轮")
 
     def test_match_type_group_round_two_builds_seeded_start_from_runner_order(self):
@@ -1590,6 +1608,7 @@ class CubieDerbyTests(unittest.TestCase):
         config = build_config_from_args(args)
 
         self.assertEqual(config.match_type, "group-round-1")
+        self.assertEqual(config.map_label, "小组赛阶段地图")
         self.assertEqual(config.forward_cells, frozenset({3, 11, 16, 23}))
         self.assertEqual(config.backward_cells, frozenset({10, 28}))
         self.assertEqual(config.shuffle_cells, frozenset({6, 20}))
@@ -1607,6 +1626,7 @@ class CubieDerbyTests(unittest.TestCase):
         config = build_config_from_args(args)
 
         self.assertEqual(config.match_type, "elimination")
+        self.assertEqual(config.map_label, "淘汰赛阶段地图")
         self.assertEqual(config.forward_cells, frozenset({4, 10, 20}))
         self.assertEqual(config.backward_cells, frozenset({16, 26, 30}))
         self.assertEqual(config.shuffle_cells, frozenset({6, 14, 23}))

@@ -300,6 +300,7 @@ class RaceConfig:
     disabled_skills: frozenset[int] = field(default_factory=frozenset)
     match_type: str | None = None
     show_qualify_stats: bool = True
+    map_label: str | None = None
     name: str = "自定义"
 
 
@@ -563,6 +564,7 @@ def season_rules(season: int, match_rule: MatchTypeRule | None = None) -> dict[s
             "backward_cells": frozenset(),
             "shuffle_cells": frozenset(),
             "npc_enabled": False,
+            "map_label": None,
         }
     if season == 2:
         map_variant = match_rule.map_variant if match_rule is not None else "group-stage"
@@ -570,10 +572,12 @@ def season_rules(season: int, match_rule: MatchTypeRule | None = None) -> dict[s
             forward_cells = SEASON2_KNOCKOUT_FORWARD_CELLS
             backward_cells = SEASON2_KNOCKOUT_BACKWARD_CELLS
             shuffle_cells = SEASON2_KNOCKOUT_SHUFFLE_CELLS
+            map_label = "淘汰赛阶段地图"
         elif map_variant == "group-stage":
             forward_cells = SEASON2_GROUP_FORWARD_CELLS
             backward_cells = SEASON2_GROUP_BACKWARD_CELLS
             shuffle_cells = SEASON2_GROUP_SHUFFLE_CELLS
+            map_label = "小组赛阶段地图"
         else:
             raise ValueError(f"unknown season 2 map variant: {map_variant}")
         return {
@@ -582,6 +586,7 @@ def season_rules(season: int, match_rule: MatchTypeRule | None = None) -> dict[s
             "backward_cells": backward_cells,
             "shuffle_cells": shuffle_cells,
             "npc_enabled": True,
+            "map_label": map_label,
         }
     raise ValueError(f"unknown season: {season}")
 
@@ -1976,8 +1981,14 @@ def format_simulation_overview_lines(
         format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
         format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
     ]
+    if pending:
+        lines = lines[:-2]
+    insertion_index = 5
+    if config.map_label is not None:
+        lines.insert(insertion_index, format_runtime_status_line("赛道类型", config.map_label))
+        insertion_index += 1
     if config.show_qualify_stats:
-        lines.insert(5, format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)))
+        lines.insert(insertion_index, format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)))
     if config.random_start_stack:
         lines.append(format_runtime_status_line("起跑配置", format_random_start_layout(config.random_start_position)))
     elif config.start_grid:
@@ -2006,8 +2017,14 @@ def format_skill_ablation_overview_lines(
         format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
         format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
     ]
+    if pending:
+        lines = lines[:-2]
+    insertion_index = 7
+    if config.map_label is not None:
+        lines.insert(insertion_index, format_runtime_status_line("赛道类型", config.map_label))
+        insertion_index += 1
     if config.show_qualify_stats:
-        lines.insert(7, format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)))
+        lines.insert(insertion_index, format_runtime_status_line("晋级统计", format_qualify_label(config.qualify_cutoff)))
     if config.random_start_stack:
         lines.append(format_runtime_status_line("起跑配置", format_random_start_layout(config.random_start_position)))
     elif config.start_grid:
@@ -2031,7 +2048,7 @@ def format_season_roster_scan_overview_lines(
     rate: float | None = None,
     pending: bool = False,
 ) -> list[str]:
-    return [
+    lines = [
         "赛季角色池遍历统计：",
         format_runtime_status_line("赛季", f"第{season}季"),
         format_runtime_status_line("角色池", f"{len(roster)}人（{format_runner_list(roster)}）"),
@@ -2046,6 +2063,9 @@ def format_season_roster_scan_overview_lines(
         format_runtime_status_line("用时", "进行中" if pending else format_elapsed(elapsed_seconds)),
         format_runtime_status_line("速度", "计算中" if pending else format_rate(rate)),
     ]
+    if pending:
+        return lines[:-2]
+    return lines
 
 
 def emit_progress_overview(lines: Sequence[str], *, stream: TextIO | None = None) -> None:

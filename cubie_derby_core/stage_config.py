@@ -139,6 +139,7 @@ def build_race_config(
         fixed_initial_order=fixed_order,
         match_type=match_rule.key if match_rule is not None else None,
         show_qualify_stats=match_rule.show_qualify_stats if match_rule is not None else True,
+        map_label=rules["map_label"],
         name=name or (match_rule.label if match_rule is not None else "自定义"),
     )
 

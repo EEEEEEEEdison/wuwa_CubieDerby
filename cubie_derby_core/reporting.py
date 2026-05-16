@@ -34,6 +34,8 @@ def summary_to_dict(
         "disabled_skills": sorted(summary.config.disabled_skills),
         "show_qualify_stats": summary.config.show_qualify_stats,
     }
+    if summary.config.map_label is not None:
+        config_data["map_label"] = summary.config.map_label
     if summary.config.match_type is not None:
         config_data["match_type"] = summary.config.match_type
     if summary.config.show_qualify_stats:
