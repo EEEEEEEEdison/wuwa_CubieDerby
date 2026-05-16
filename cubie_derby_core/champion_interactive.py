@@ -15,6 +15,13 @@ from typing import Any, Callable, Sequence
 from cubie_derby_core.interactive_i18n import translate_interactive_text
 from cubie_derby_core.runners import RUNNER_ALIASES, RUNNER_NAMES
 from cubie_derby_core.trace_logs import default_trace_log_path, format_trace_metadata_lines
+from cubie_derby_core.tournament import (
+    format_elapsed,
+    format_ranked_runner_list,
+    format_runner,
+    format_runner_list,
+    format_start_rule,
+)
 
 
 PRIMARY_RUNNER_ALIASES: dict[int, str] = {}
@@ -175,10 +182,17 @@ class InteractiveWizardUI:
                 plain_lines = [value for key, value in parsed_lines if key is None]
                 if keyed_lines:
                     key_width = max(_display_width(key) for key, _ in keyed_lines)
+                    value_width = max(24, _terminal_width() - (2 + key_width + 3))
                     for key, value in keyed_lines:
-                        self.prompt_output_fn(f"  {_pad_display(key, key_width)} = {value}")
+                        wrapped_lines = _wrap_display_text(value, value_width)
+                        self.prompt_output_fn(f"  {_pad_display(key, key_width)} = {wrapped_lines[0]}")
+                        continuation_prefix = f"  {' ' * key_width}   "
+                        for line in wrapped_lines[1:]:
+                            self.prompt_output_fn(f"{continuation_prefix}{line}")
                 for value in plain_lines:
-                    self.prompt_output_fn(f"  {value}")
+                    wrapped_lines = _wrap_display_text(value, _terminal_width() - 2)
+                    for line in wrapped_lines:
+                        self.prompt_output_fn(f"  {line}")
                 self.prompt_output_fn("")
         else:
             self.prompt_output_fn("")
@@ -526,9 +540,7 @@ def _remaining_stage_summary(
         return "-" if lang == "zh" else "-"
     if len(labels) == 1:
         return labels[0]
-    if lang == "zh":
-        return f"{labels[0]} 至 {labels[-1]}（共 {len(labels)} 阶段）"
-    return f"{labels[0]} -> {labels[-1]} ({len(labels)} stages)"
+    return " -> ".join(labels)
 
 
 def _request_runner_summary(
@@ -541,21 +553,29 @@ def _request_runner_summary(
 ) -> str:
     if request.entry_point == "group-a-round-1":
         if "group-stage-groups" in request.inputs:
-            return "18名（已指定A/B/C分组）" if lang == "zh" else "18 runners (A/B/C grouped)"
+            season_roster = tuple(request.inputs.get("season-roster", ()))
+            return format_runner_list(season_roster)
         if "season-roster" in request.inputs:
-            return "18名（默认全赛季）" if lang == "zh" else "18 runners (full season default)"
+            return format_runner_list(tuple(request.inputs["season-roster"]))
     for requirement in helpers.tournament_entry_requirements(season, request.entry_point):
         value = request.inputs.get(requirement.key)
         if value is None:
             continue
         if requirement.kind == "grouped-entrants":
-            return (
-                f"{translate_fn(requirement.label)}（已指定）"
+            return " | ".join(
+                f"{chr(ord('A') + index)}组：{format_runner_list(group)}"
                 if lang == "zh"
-                else f"{translate_fn(requirement.label)} (provided)"
+                else f"Group {chr(ord('A') + index)}: {format_runner_list(group)}"
+                for index, group in enumerate(value)  # type: ignore[arg-type]
             )
-        return translate_fn(requirement.label)
+        return format_runner_list(tuple(value))  # type: ignore[arg-type]
     return "已补齐" if lang == "zh" else "ready"
+
+
+def _entrant_summary_label(request: Any, *, lang: str) -> str:
+    if request.entry_point == "group-a-round-1":
+        return "本届参赛角色（18名）" if lang == "zh" else "Tournament roster (18)"
+    return "参赛角色" if lang == "zh" else "Entrants"
 
 
 def _strip_interactive_tournament_context_lines(text: str) -> str:
@@ -570,6 +590,44 @@ def _strip_interactive_tournament_context_lines(text: str) -> str:
         for line in text.splitlines()
         if not any(line.startswith(prefix) for prefix in hidden_prefixes)
     )
+
+
+def _json_output_summary(json_output: bool, *, lang: str) -> str:
+    if lang == "zh":
+        return f"JSON结果 = {'是' if json_output else '否'}"
+    return f"JSON Output = {'Yes' if json_output else 'No'}"
+
+
+def _format_interactive_tournament_result(result: Any, *, lang: str) -> str:
+    lines: list[str] = []
+    if result.stages:
+        first_label = result.stages[0].match_label if lang == "zh" else result.stages[0].match_label
+        lines.append(f"{first_label}开始了。" if lang == "zh" else f"{first_label} has started.")
+    for stage in result.stages:
+        lines.extend(
+            [
+                "",
+                stage.title,
+                f"{'参赛' if lang == 'zh' else 'Entrants'}：{format_runner_list(stage.entrants)}",
+                f"{'起跑规则' if lang == 'zh' else 'Start Rule'}：{format_start_rule(stage.start_spec)}",
+                f"{'排名' if lang == 'zh' else 'Ranking'}：{format_ranked_runner_list(stage.ranking)}",
+            ]
+        )
+        if stage.show_qualify_stats:
+            lines.append(f"{'晋级' if lang == 'zh' else 'Qualified'}：{format_runner_list(stage.qualified_runners)}")
+            lines.append(f"{'淘汰' if lang == 'zh' else 'Eliminated'}：{format_runner_list(stage.eliminated_runners)}")
+        if stage.next_stage_start_spec is not None:
+            lines.append(
+                f"{'下一轮起跑规则' if lang == 'zh' else 'Next Start Rule'}：{format_start_rule(stage.next_stage_start_spec)}"
+            )
+    lines.extend(
+        [
+            "",
+            f"{'冠军' if lang == 'zh' else 'Champion'}：{format_runner(result.champion)}",
+            f"{'用时' if lang == 'zh' else 'Elapsed'}：{format_elapsed(result.elapsed_seconds)}",
+        ]
+    )
+    return "\n".join(lines).lstrip("\n")
 
 
 def _prompt_group_round_one_setup(
@@ -601,9 +659,8 @@ def _prompt_group_round_one_setup(
         values["season-roster"] = season_roster
         _set_wizard_summary(
             "runners",
-            "参赛角色 = 18名（默认全赛季）"
-            if lang == "zh"
-            else "Entrants = 18 runners (full season default)",
+            f"{'本届参赛角色（18名）' if lang == 'zh' else 'Tournament roster (18)'} = "
+            f"{format_runner_list(season_roster)}",
         )
     else:
         roster = _prompt_runner_list(
@@ -621,9 +678,8 @@ def _prompt_group_round_one_setup(
         values["season-roster"] = roster
         _set_wizard_summary(
             "runners",
-            "参赛角色 = 18名（手动指定）"
-            if lang == "zh"
-            else "Entrants = 18 runners (manual roster)",
+            f"{'本届参赛角色（18名）' if lang == 'zh' else 'Tournament roster (18)'} = "
+            f"{format_runner_list(roster)}",
         )
 
     group_mode = _prompt_choice(
@@ -639,7 +695,7 @@ def _prompt_group_round_one_setup(
     if group_mode == "random":
         _set_wizard_summary(
             "groups",
-            "分组 = 随机A/B/C" if lang == "zh" else "Groups = Random A/B/C",
+            "分组 = 随机 A/B/C（按 seed）" if lang == "zh" else "Groups = Random A/B/C (from seed)",
         )
         return values
 
@@ -673,7 +729,15 @@ def _prompt_group_round_one_setup(
         values["group-stage-groups"] = groups
         _set_wizard_summary(
             "groups",
-            "分组 = 手动A/B/C" if lang == "zh" else "Groups = Manual A/B/C",
+            (
+                "分组 = "
+                + " | ".join(f"{chr(ord('A') + index)}组：{format_runner_list(group)}" for index, group in enumerate(groups))
+            )
+            if lang == "zh"
+            else (
+                "Groups = "
+                + " | ".join(f"Group {chr(ord('A') + index)}: {format_runner_list(group)}" for index, group in enumerate(groups))
+            ),
         )
         return values
 
@@ -1701,7 +1765,7 @@ def run_interactive_simulation_command(
         prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
     )
-    _set_wizard_summary("output", "输出 = JSON" if (lang == "zh" and json_output) else ("输出 = 文本" if lang == "zh" else ("Output = JSON" if json_output else "Output = Text")))
+    _set_wizard_summary("output", _json_output_summary(json_output, lang=lang))
     iterations = args.iterations
     workers = args.workers
     trace_mode = "none"
@@ -2056,7 +2120,7 @@ def run_interactive_champion_prediction_command(
         )
         _set_wizard_summary(
             "runners",
-            f"{'参赛角色' if lang == 'zh' else 'Entrants'} = "
+            f"{_entrant_summary_label(request, lang=lang)} = "
             f"{_request_runner_summary(request, season=season, helpers=helpers, lang=lang, translate_fn=translate_fn)}",
         )
         _set_wizard_summary(
@@ -2245,7 +2309,7 @@ def run_interactive_champion_prediction_command(
     )
     _set_wizard_summary(
         "output",
-        "输出 = JSON" if (lang == "zh" and json_output) else ("输出 = 文本" if lang == "zh" else ("Output = JSON" if json_output else "Output = Text")),
+        _json_output_summary(json_output, lang=lang),
     )
 
     if prediction_mode == "random":
@@ -2257,7 +2321,7 @@ def run_interactive_champion_prediction_command(
         if json_output:
             result_output_fn(json.dumps(helpers.tournament_result_to_dict(tournament), ensure_ascii=False, indent=2))
         else:
-            result_output_fn(_strip_interactive_tournament_context_lines(helpers.format_tournament_result(tournament)))
+            result_output_fn(_format_interactive_tournament_result(tournament, lang=lang))
         return 0
 
     iterations = args.iterations
