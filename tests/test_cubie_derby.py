@@ -3064,9 +3064,9 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "2",
                 "3",
+                "1",
                 "11 12 13 14 15 16",
                 "n",
-                "1",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3126,12 +3126,12 @@ class CubieDerbyTests(unittest.TestCase):
             "builtins.input",
             side_effect=[
                 "1",
+                "1",
                 "1 2 3 4 5 6",
                 "1:*",
-                "4",
                 "7",
-                "1",
                 "y",
+                "4",
                 "1",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -3154,9 +3154,9 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "2",
                 "3",
+                "1",
                 "11 12 13 14 15 16",
                 "n",
-                "1",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3540,9 +3540,9 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "2",
                 "3",
+                "1",
                 "11 12 13 14 15 16",
                 "n",
-                "1",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(
@@ -3571,7 +3571,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("|", prompt_text)
         self.assertIn("请输入 6 名登场角色", prompt_text)
         self.assertIn("默认起跑配置会根据当前阶段自动适配", prompt_text)
-        self.assertIn("过程日志", prompt_text)
+        self.assertIn("请选择单场分析方式", prompt_text)
 
     def test_main_interactive_simulation_accepts_incremental_runner_entry(self):
         stdout = io.StringIO()
@@ -3583,13 +3583,13 @@ class CubieDerbyTests(unittest.TestCase):
                 "2",
                 "3",
                 "1",
+                "1",
                 "3",
                 "11",
                 "21",
                 "16",
                 "22",
                 "n",
-                "1",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(
@@ -3626,9 +3626,9 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "2",
                 "3",
+                "1",
                 "11 12 13 14 15 16",
                 "n",
-                "1",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(
@@ -3657,7 +3657,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("1 = jinhsi", prompt_text)
         self.assertIn("|", prompt_text)
         self.assertIn("Enter 6 runners", prompt_text)
-        self.assertIn("Trace Log", prompt_text)
+        self.assertIn("Choose single-stage analysis mode", prompt_text)
 
     def test_main_interactive_simulation_can_write_trace_log_file(self):
         stdout = io.StringIO()
@@ -3670,9 +3670,10 @@ class CubieDerbyTests(unittest.TestCase):
                 side_effect=[
                     "2",
                     "3",
+                    "2",
                     "11 12 13 14 15 16",
                     "n",
-                    "3",
+                    "y",
                     str(trace_path),
                 ],
             ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -3695,7 +3696,7 @@ class CubieDerbyTests(unittest.TestCase):
             trace_text = trace_path.read_text(encoding="utf-8")
             prompt_text = stderr.getvalue()
             self.assertEqual(exit_code, 0)
-            self.assertEqual(data["iterations"], 4)
+            self.assertEqual(data["iterations"], 1)
             self.assertTrue(trace_path.exists())
             self.assertIn("=== 结果 ===", trace_text)
             self.assertIn('"ranking"', trace_text)

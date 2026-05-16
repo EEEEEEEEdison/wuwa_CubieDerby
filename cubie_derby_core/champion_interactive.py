@@ -236,6 +236,18 @@ def _trace_mode_summary(mode: str, *, lang: str) -> str:
     }[mode]
 
 
+def _simulation_mode_summary(mode: str, *, lang: str) -> str:
+    if lang == "en":
+        return {
+            "normal": "Run Mode = Monte Carlo",
+            "debug": "Run Mode = Debug Trace",
+        }[mode]
+    return {
+        "normal": "运行模式 = Monte Carlo",
+        "debug": "运行模式 = 调试 Trace",
+    }[mode]
+
+
 def _emit_interactive_trace_log(
     *,
     config: Any,
@@ -1220,12 +1232,25 @@ def run_interactive_simulation_command(
         )
         _set_wizard_summary("stage", f"{'阶段' if lang == 'zh' else 'Stage'} = {helpers.get_match_type_rule(season, match_type).label}")
         prompt_output_fn(f"当前模拟阶段：{helpers.get_match_type_rule(season, match_type).label}")
-        prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
+        prompt_output_fn("下面会先选择普通分析还是调试模式，再继续询问登场角色和其他参数。")
     else:
         match_type = None
         _set_wizard_summary("stage", "阶段 = 基础单场分析" if lang == "zh" else "Stage = Basic single-stage analysis")
         prompt_output_fn("当前赛季暂不使用阶段化规则；下面会进行基础单场胜率分析。")
-        prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
+        prompt_output_fn("下面会先选择普通分析还是调试模式，再继续询问登场角色和其他参数。")
+    if args.trace or args.trace_log:
+        simulation_mode = "debug"
+    else:
+        simulation_mode = _prompt_choice(
+            "请选择单场分析方式" if lang == "zh" else "Choose single-stage analysis mode",
+            (
+                ("normal", "普通分析（Monte Carlo 胜率）" if lang == "zh" else "Normal analysis (Monte Carlo win rates)"),
+                ("debug", "调试模式（单局 Trace）" if lang == "zh" else "Debug mode (single traced race)"),
+            ),
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+    _set_wizard_summary("simulation_mode", _simulation_mode_summary(simulation_mode, lang=lang))
     runner_tokens = args.runners or _prompt_simulation_runner_tokens(
         season=season,
         match_type=match_type,
@@ -1273,18 +1298,6 @@ def run_interactive_simulation_command(
                 translate_fn=translate_fn,
             )
             _set_wizard_summary("start", "起跑 = 自定义" if lang == "zh" else "Start = Custom")
-    iterations = args.iterations
-    if not getattr(args, "_iterations_explicit", False):
-        iterations = int(
-            _prompt_line_block(
-                title="模拟次数" if lang == "zh" else "Iterations",
-                prompt="请输入 Monte Carlo 模拟次数",
-                input_fn=input_fn,
-                prompt_output_fn=prompt_output_fn,
-                translate_fn=translate_fn,
-            )
-        )
-    _set_wizard_summary("iterations", f"{'次数' if lang == 'zh' else 'Iterations'} = {iterations}")
     seed = args.seed
     if not getattr(args, "_seed_explicit", False):
         seed_text = _prompt_line_block(
@@ -1297,18 +1310,6 @@ def run_interactive_simulation_command(
         )
         seed = int(seed_text) if seed_text else None
     _set_wizard_summary("seed", f"{'种子' if lang == 'zh' else 'Seed'} = {seed if seed is not None else ('未固定' if lang == 'zh' else 'unfixed')}")
-    workers = args.workers
-    if not getattr(args, "_workers_explicit", False):
-        workers = int(
-            _prompt_line_block(
-                title="并行设置" if lang == "zh" else "Worker Count",
-                prompt="请输入 workers 数量，0 表示使用 CPU 核心数",
-                input_fn=input_fn,
-                prompt_output_fn=prompt_output_fn,
-                translate_fn=translate_fn,
-            )
-        )
-    _set_wizard_summary("workers", f"{'并行' if lang == 'zh' else 'Workers'} = {workers}")
     json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no_block(
         title="输出格式" if lang == "zh" else "Output Format",
         prompt="是否输出 JSON 结果",
@@ -1317,41 +1318,69 @@ def run_interactive_simulation_command(
         translate_fn=translate_fn,
     )
     _set_wizard_summary("output", "输出 = JSON" if (lang == "zh" and json_output) else ("输出 = 文本" if lang == "zh" else ("Output = JSON" if json_output else "Output = Text")))
-    if args.trace and args.trace_log:
-        trace_mode = "both"
-        trace_log_path = args.trace_log
-    elif args.trace:
-        trace_mode = "screen"
-        trace_log_path = None
-    elif args.trace_log:
-        trace_mode = "file"
-        trace_log_path = args.trace_log
+    iterations = args.iterations
+    workers = args.workers
+    trace_mode = "none"
+    trace_log_path = None
+    if simulation_mode == "normal":
+        if not getattr(args, "_iterations_explicit", False):
+            iterations = int(
+                _prompt_line_block(
+                    title="模拟次数" if lang == "zh" else "Iterations",
+                    prompt="请输入 Monte Carlo 模拟次数",
+                    input_fn=input_fn,
+                    prompt_output_fn=prompt_output_fn,
+                    translate_fn=translate_fn,
+                )
+            )
+        _set_wizard_summary("iterations", f"{'次数' if lang == 'zh' else 'Iterations'} = {iterations}")
+        if not getattr(args, "_workers_explicit", False):
+            workers = int(
+                _prompt_line_block(
+                    title="并行设置" if lang == "zh" else "Worker Count",
+                    prompt="请输入 workers 数量，0 表示使用 CPU 核心数",
+                    input_fn=input_fn,
+                    prompt_output_fn=prompt_output_fn,
+                    translate_fn=translate_fn,
+                )
+            )
+        _set_wizard_summary("workers", f"{'并行' if lang == 'zh' else 'Workers'} = {workers}")
     else:
-        trace_mode = _prompt_choice(
-            "过程日志" if lang == "zh" else "Trace Log",
-            (
-                ("none", "不输出过程日志" if lang == "zh" else "No trace log"),
-                ("screen", "在屏幕显示 Trace 日志" if lang == "zh" else "Show trace on screen"),
-                ("file", "写入 Trace 日志文件" if lang == "zh" else "Write trace to file"),
-                ("both", "在屏幕显示并写入 Trace 日志文件" if lang == "zh" else "Show trace on screen and write file"),
-            ),
-            input_fn=input_fn,
-            prompt_output_fn=prompt_output_fn,
-        )
-        trace_log_path = None
-        if trace_mode in {"file", "both"}:
-            trace_log_path = _prompt_line_block(
+        iterations = 1
+        workers = 1
+        _set_wizard_summary("iterations", f"{'次数' if lang == 'zh' else 'Iterations'} = 1")
+        _set_wizard_summary("workers", f"{'并行' if lang == 'zh' else 'Workers'} = 1")
+        if args.trace and args.trace_log:
+            trace_mode = "both"
+            trace_log_path = args.trace_log
+        elif args.trace:
+            trace_mode = "screen"
+            trace_log_path = None
+        elif args.trace_log:
+            trace_mode = "file"
+            trace_log_path = args.trace_log
+        else:
+            trace_mode = "screen"
+            if _prompt_yes_no_block(
                 title="Trace 日志文件" if lang == "zh" else "Trace Log File",
-                prompt="请输入 Trace 日志文件路径" if lang == "zh" else "Enter trace log file path",
+                prompt="是否同时写入 Trace 日志文件" if lang == "zh" else "Also write the trace log to a file",
                 input_fn=input_fn,
                 prompt_output_fn=prompt_output_fn,
+                translate_fn=translate_fn,
+            ):
+                trace_mode = "both"
+                trace_log_path = _prompt_line_block(
+                    title="Trace 日志文件" if lang == "zh" else "Trace Log File",
+                    prompt="请输入 Trace 日志文件路径" if lang == "zh" else "Enter trace log file path",
+                    input_fn=input_fn,
+                    prompt_output_fn=prompt_output_fn,
+                )
+        _set_wizard_summary("trace", _trace_mode_summary(trace_mode, lang=lang))
+        if trace_log_path:
+            _set_wizard_summary(
+                "trace_path",
+                f"{'日志文件' if lang == 'zh' else 'Trace File'} = {trace_log_path}",
             )
-    _set_wizard_summary("trace", _trace_mode_summary(trace_mode, lang=lang))
-    if trace_log_path:
-        _set_wizard_summary(
-            "trace_path",
-            f"{'日志文件' if lang == 'zh' else 'Trace File'} = {trace_log_path}",
-        )
     interactive_args = _with_args(
         args,
         season=season,
@@ -1372,7 +1401,7 @@ def run_interactive_simulation_command(
         season_roster_scan=False,
     )
     config = helpers.build_config_from_args(interactive_args)
-    if trace_mode != "none":
+    if simulation_mode == "debug":
         _emit_interactive_trace_log(
             config=config,
             seed=seed,
