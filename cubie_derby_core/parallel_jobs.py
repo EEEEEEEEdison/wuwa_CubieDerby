@@ -12,9 +12,9 @@ SeasonRunnerPoolFn = Callable[[int], tuple[int, ...]]
 SplitIterationsFn = Callable[[int, int], list[int]]
 SummaryFactory = Callable[..., Any]
 TournamentChunkFn = Callable[..., Any]
-TournamentChunkFromTupleFn = Callable[[tuple[int, int, int | None, int]], Any]
+TournamentChunkFromTupleFn = Callable[[tuple[int, int, int | None, int, str]], Any]
 TournamentEntryChunkFn = Callable[..., Any]
-TournamentEntryChunkFromTupleFn = Callable[[tuple[Any, int, int | None, int]], Any]
+TournamentEntryChunkFromTupleFn = Callable[[tuple[Any, int, int | None, int, str]], Any]
 PerfCounterFn = Callable[[], float]
 
 
@@ -85,6 +85,7 @@ def run_champion_prediction_monte_carlo(
     seed: int | None = None,
     workers: int = 1,
     show_progress: bool = False,
+    analysis_depth: str = "fast",
     cpu_count_fn: CPUCounFn,
     progress_factory: ProgressFactory,
     parallel_task_count_fn: ParallelTaskCountFn,
@@ -108,16 +109,22 @@ def run_champion_prediction_monte_carlo(
 
     try:
         if workers == 1:
-            acc = simulate_tournament_chunk_fn(season, iterations, seed, progress=progress)
+            acc = simulate_tournament_chunk_fn(
+                season,
+                iterations,
+                seed,
+                progress=progress,
+                analysis_depth=analysis_depth,
+            )
         else:
             chunk_sizes = split_iterations_fn(iterations, parallel_task_count_fn(iterations, workers))
-            chunk_args: list[tuple[int, int, int | None, int]] = []
+            chunk_args: list[tuple[int, int, int | None, int, str]] = []
             start_index = 0
             for chunk_size in chunk_sizes:
                 if chunk_size > 0:
-                    chunk_args.append((season, chunk_size, seed, start_index))
+                    chunk_args.append((season, chunk_size, seed, start_index, analysis_depth))
                 start_index += chunk_size
-            acc = accumulator_factory(season_runner_pool_fn(season))
+            acc = accumulator_factory(season_runner_pool_fn(season), analysis_depth)
             with pool_factory(processes=workers) as pool:
                 if progress is None:
                     parts = pool.map(simulate_tournament_chunk_from_tuple_fn, chunk_args)
@@ -140,6 +147,7 @@ def run_champion_prediction_from_entry_request_monte_carlo(
     seed: int | None = None,
     workers: int = 1,
     show_progress: bool = False,
+    analysis_depth: str = "fast",
     cpu_count_fn: CPUCounFn,
     progress_factory: ProgressFactory,
     parallel_task_count_fn: ParallelTaskCountFn,
@@ -168,16 +176,17 @@ def run_champion_prediction_from_entry_request_monte_carlo(
                 iterations,
                 seed,
                 progress=progress,
+                analysis_depth=analysis_depth,
             )
         else:
             chunk_sizes = split_iterations_fn(iterations, parallel_task_count_fn(iterations, workers))
-            chunk_args: list[tuple[Any, int, int | None, int]] = []
+            chunk_args: list[tuple[Any, int, int | None, int, str]] = []
             start_index = 0
             for chunk_size in chunk_sizes:
                 if chunk_size > 0:
-                    chunk_args.append((request, chunk_size, seed, start_index))
+                    chunk_args.append((request, chunk_size, seed, start_index, analysis_depth))
                 start_index += chunk_size
-            acc = accumulator_factory(tournament_entry_request_roster_fn(request))
+            acc = accumulator_factory(tournament_entry_request_roster_fn(request), analysis_depth)
             with pool_factory(processes=workers) as pool:
                 if progress is None:
                     parts = pool.map(simulate_tournament_from_entry_request_chunk_from_tuple_fn, chunk_args)

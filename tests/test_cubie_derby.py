@@ -102,6 +102,7 @@ def argparse_namespace(**kwargs):
         "season": 1,
         "match_type": None,
         "champion_prediction": None,
+        "champion_analysis": "fast",
         "runners": None,
         "track_length": None,
         "start": None,
@@ -1216,11 +1217,55 @@ class CubieDerbyTests(unittest.TestCase):
         text = format_champion_prediction_summary(summary)
 
         self.assertEqual(summary.iterations, 8)
+        self.assertEqual(summary.analysis_depth, "fast")
+        self.assertIsNone(summary.advanced)
         self.assertEqual(len(summary.rows), len(season_runner_pool(2)))
         self.assertAlmostEqual(sum(row.championships for row in summary.rows), 8)
         self.assertEqual(data["iterations"], 8)
+        self.assertEqual(data["analysis_depth"], "fast")
+        self.assertNotIn("advanced", data)
         self.assertIn("冠军次数", text)
         self.assertIn("夺冠率", text)
+        self.assertNotIn("高阶分析", text)
+
+    def test_champion_prediction_advanced_analysis_tracks_routes_stages_and_maps(self):
+        summary = run_champion_prediction_monte_carlo(2, 8, seed=3, workers=1, analysis_depth="advanced")
+        data = champion_prediction_to_dict(summary)
+        text = format_champion_prediction_summary(summary)
+
+        self.assertEqual(summary.analysis_depth, "advanced")
+        self.assertIsNotNone(summary.advanced)
+        self.assertEqual(data["analysis_depth"], "advanced")
+        advanced = data["advanced"]
+        self.assertEqual(sum(advanced["route_totals"].values()), 8)
+        self.assertEqual(
+            sum(row["appearances"] for row in advanced["grand_final_rows"]),
+            8 * 6,
+        )
+        group_round_one = [
+            row for row in advanced["stage_rows"]
+            if row["stage_key"] == "group-round-1" and row["runner"] == 1
+        ][0]
+        self.assertEqual(group_round_one["appearances"], 8)
+        self.assertEqual(group_round_one["appearance_rate"], 1.0)
+        map_rows = advanced["map_rows"]
+        self.assertEqual({row["map_key"] for row in map_rows}, {"group-stage", "knockout-stage"})
+        self.assertIn("appearances_per_tournament", map_rows[0])
+        self.assertIn("高阶分析", text)
+        self.assertIn("总决赛转化率", text)
+        self.assertIn("阶段进入率", text)
+        self.assertIn("地图表现", text)
+
+    def test_champion_prediction_advanced_parallel_matches_single_worker(self):
+        single = champion_prediction_to_dict(
+            run_champion_prediction_monte_carlo(2, 8, seed=3, workers=1, analysis_depth="advanced")
+        )
+        parallel = champion_prediction_to_dict(
+            run_champion_prediction_monte_carlo(2, 8, seed=3, workers=2, analysis_depth="advanced")
+        )
+
+        self.assertEqual(single["rows"], parallel["rows"])
+        self.assertEqual(single["advanced"], parallel["advanced"])
 
     def test_same_position_ranking_uses_cell_order(self):
         grid = {3: (4, 3, 8)}
@@ -3028,6 +3073,38 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["start_entry_point"], "grand-final")
         self.assertEqual({row["runner"] for row in data["rows"]}, {11, 12, 13, 14, 15, 16})
 
+    def test_main_champion_prediction_monte_carlo_advanced_json(self):
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "monte-carlo",
+                    "--champion-analysis",
+                    "advanced",
+                    "--iterations",
+                    "4",
+                    "--workers",
+                    "1",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["analysis_depth"], "advanced")
+        self.assertIn("advanced", data)
+        self.assertEqual(sum(data["advanced"]["route_totals"].values()), 4)
+        self.assertEqual(
+            {row["map_key"] for row in data["advanced"]["map_rows"]},
+            {"group-stage", "knockout-stage"},
+        )
+
     def test_main_interactive_champion_prediction_prompts_for_mode(self):
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -3101,6 +3178,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "1",
                 "2",
                 "12",
                 "1",
@@ -3144,6 +3222,7 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "1",
                 "1",
+                "1",
                 "n",
                 "4",
                 "1",
@@ -3174,6 +3253,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "1",
                 "1",
                 "2",
                 "1 2 3 4 6 11 12 13 14 15 16 17 18 19 20 21 22 23",
@@ -4016,6 +4096,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "1",
                 "1",
                 "1",
                 "n",

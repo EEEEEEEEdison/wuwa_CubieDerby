@@ -1787,6 +1787,7 @@ def simulate_tournament_from_entry_request_chunk(
     iterations: int,
     seed: int | None,
     *,
+    analysis_depth: str = "fast",
     start_index: int = 0,
     progress: ProgressBar | None = None,
 ) -> ChampionPredictionAccumulator:
@@ -1797,19 +1798,21 @@ def simulate_tournament_from_entry_request_chunk(
         simulate_tournament_from_entry_request_fn=simulate_tournament_from_entry_request,
         derive_seed_fn=derive_race_seed,
         progress_batch_size_fn=champion_progress_batch_size,
+        analysis_depth=analysis_depth,
         start_index=start_index,
         progress=progress,
     )
 
 
 def simulate_tournament_from_entry_request_chunk_from_tuple(
-    args: tuple[TournamentEntryRequest, int, int | None, int],
+    args: tuple[TournamentEntryRequest, int, int | None, int, str],
 ) -> ChampionPredictionAccumulator:
-    request, iterations, seed, start_index = args
+    request, iterations, seed, start_index, analysis_depth = args
     return simulate_tournament_from_entry_request_chunk(
         request,
         iterations,
         seed,
+        analysis_depth=analysis_depth,
         start_index=start_index,
     )
 
@@ -1819,6 +1822,7 @@ def simulate_tournament_chunk(
     iterations: int,
     seed: int | None,
     *,
+    analysis_depth: str = "fast",
     start_index: int = 0,
     progress: ProgressBar | None = None,
 ) -> ChampionPredictionAccumulator:
@@ -1830,16 +1834,17 @@ def simulate_tournament_chunk(
         simulate_tournament_fn=simulate_tournament,
         derive_seed_fn=derive_race_seed,
         progress_batch_size_fn=champion_progress_batch_size,
+        analysis_depth=analysis_depth,
         start_index=start_index,
         progress=progress,
     )
 
 
 def simulate_tournament_chunk_from_tuple(
-    args: tuple[int, int, int | None, int],
+    args: tuple[int, int, int | None, int, str],
 ) -> ChampionPredictionAccumulator:
-    season, iterations, seed, start_index = args
-    return simulate_tournament_chunk(season, iterations, seed, start_index=start_index)
+    season, iterations, seed, start_index, analysis_depth = args
+    return simulate_tournament_chunk(season, iterations, seed, analysis_depth=analysis_depth, start_index=start_index)
 
 
 def run_monte_carlo(
@@ -1876,6 +1881,7 @@ def run_champion_prediction_monte_carlo(
     seed: int | None = None,
     workers: int = 1,
     show_progress: bool = False,
+    analysis_depth: str = "fast",
 ) -> ChampionPredictionSummary:
     validate_champion_prediction_season(season)
     return core_run_champion_prediction_monte_carlo(
@@ -1884,6 +1890,7 @@ def run_champion_prediction_monte_carlo(
         seed=seed,
         workers=workers,
         show_progress=show_progress,
+        analysis_depth=analysis_depth,
         cpu_count_fn=mp.cpu_count,
         progress_factory=ProgressBar,
         parallel_task_count_fn=champion_parallel_task_count,
@@ -1908,6 +1915,7 @@ def run_champion_prediction_from_entry_request_monte_carlo(
     seed: int | None = None,
     workers: int = 1,
     show_progress: bool = False,
+    analysis_depth: str = "fast",
 ) -> ChampionPredictionSummary:
     validate_champion_prediction_season(request.season)
     return core_run_champion_prediction_from_entry_request_monte_carlo(
@@ -1916,6 +1924,7 @@ def run_champion_prediction_from_entry_request_monte_carlo(
         seed=seed,
         workers=workers,
         show_progress=show_progress,
+        analysis_depth=analysis_depth,
         cpu_count_fn=mp.cpu_count,
         progress_factory=ProgressBar,
         parallel_task_count_fn=champion_parallel_task_count,
@@ -2817,6 +2826,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     json_explicit = has_option("--json")
     start_explicit = has_option("--start")
     interactive_language_explicit = has_option("--interactive-language")
+    champion_analysis_explicit = has_option("--champion-analysis")
     auto_interactive = not args.interactive and not any(
         (
             args.champion_prediction,
@@ -2842,6 +2852,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     setattr(args, "_json_explicit", json_explicit)
     setattr(args, "_start_explicit", start_explicit)
     setattr(args, "_interactive_language_explicit", interactive_language_explicit)
+    setattr(args, "_champion_analysis_explicit", champion_analysis_explicit)
     show_progress = sys.stderr.isatty() and not args.json
     try:
         if args.tournament_context_out and not args.interactive:

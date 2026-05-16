@@ -564,11 +564,84 @@ class ChampionPredictionRow:
 
 
 @dataclass(frozen=True)
+class ChampionRouteTotals:
+    winners_direct: int
+    losers_comeback: int
+    unknown: int
+
+
+@dataclass(frozen=True)
+class ChampionRouteAnalysisRow:
+    runner: int
+    name: str
+    championships: int
+    winners_direct: int
+    losers_comeback: int
+    unknown: int
+    winners_direct_rate: float
+    losers_comeback_rate: float
+    unknown_rate: float
+
+
+@dataclass(frozen=True)
+class ChampionGrandFinalAnalysisRow:
+    runner: int
+    name: str
+    appearances: int
+    appearance_rate: float
+    championships: int
+    conversion_rate: float | None
+
+
+@dataclass(frozen=True)
+class ChampionStageAnalysisRow:
+    stage_key: str
+    stage_label: str
+    runner: int
+    name: str
+    appearances: int
+    appearance_rate: float
+    stage_wins: int
+    stage_win_rate: float | None
+    qualified: int
+    qualify_rate: float | None
+    eliminated: int
+    elimination_rate: float | None
+    average_rank: float | None
+
+
+@dataclass(frozen=True)
+class ChampionMapAnalysisRow:
+    map_key: str
+    map_label: str
+    runner: int
+    name: str
+    appearances: int
+    appearances_per_tournament: float
+    stage_wins: int
+    stage_win_rate: float | None
+    qualified: int
+    qualify_rate: float | None
+    average_rank: float | None
+
+
+@dataclass(frozen=True)
+class ChampionAdvancedAnalysis:
+    route_totals: ChampionRouteTotals
+    route_rows: tuple[ChampionRouteAnalysisRow, ...]
+    grand_final_rows: tuple[ChampionGrandFinalAnalysisRow, ...]
+    stage_rows: tuple[ChampionStageAnalysisRow, ...]
+    map_rows: tuple[ChampionMapAnalysisRow, ...]
+
+
+@dataclass(frozen=True)
 class ChampionPredictionSummary:
     season: int
     iterations: int
     rows: tuple[ChampionPredictionRow, ...]
     elapsed_seconds: float | None = None
+    analysis_depth: str = "fast"
+    advanced: ChampionAdvancedAnalysis | None = None
     start_entry_point: str | None = None
     start_entry_label: str | None = None
     remaining_stage_labels: tuple[str, ...] = ()
@@ -580,22 +653,112 @@ class ChampionPredictionSummary:
 
 
 class ChampionPredictionAccumulator:
-    def __init__(self, roster: Sequence[int]) -> None:
+    def __init__(self, roster: Sequence[int], analysis_depth: str = "fast") -> None:
+        if analysis_depth not in {"fast", "advanced"}:
+            raise ValueError(f"unknown champion analysis depth: {analysis_depth}")
         self.roster = tuple(roster)
         self.index = {runner: i for i, runner in enumerate(self.roster)}
         self.iterations = 0
         self.championships = [0] * len(self.roster)
+        self.analysis_depth = analysis_depth
+        self._advanced_enabled = analysis_depth == "advanced"
+        if self._advanced_enabled:
+            size = len(self.roster)
+            stage_count = len(CHAMPION_ANALYSIS_STAGE_DEFINITIONS)
+            map_count = len(CHAMPION_ANALYSIS_MAP_DEFINITIONS)
+            self.route_winners_direct = [0] * size
+            self.route_losers_comeback = [0] * size
+            self.route_unknown = [0] * size
+            self.grand_final_appearances = [0] * size
+            self.stage_appearances = [[0] * size for _ in range(stage_count)]
+            self.stage_wins = [[0] * size for _ in range(stage_count)]
+            self.stage_qualified = [[0] * size for _ in range(stage_count)]
+            self.stage_eliminated = [[0] * size for _ in range(stage_count)]
+            self.stage_qualify_opportunities = [[0] * size for _ in range(stage_count)]
+            self.stage_rank_sum = [[0] * size for _ in range(stage_count)]
+            self.map_appearances = [[0] * size for _ in range(map_count)]
+            self.map_wins = [[0] * size for _ in range(map_count)]
+            self.map_qualified = [[0] * size for _ in range(map_count)]
+            self.map_qualify_opportunities = [[0] * size for _ in range(map_count)]
+            self.map_rank_sum = [[0] * size for _ in range(map_count)]
 
     def add(self, champion: int) -> None:
         self.iterations += 1
         self.championships[self.index[champion]] += 1
 
+    def add_tournament(self, result: TournamentResult) -> None:
+        self.add(result.champion)
+        if self._advanced_enabled:
+            self._add_advanced_result(result)
+
+    def _add_advanced_result(self, result: TournamentResult) -> None:
+        champion_idx = self.index[result.champion]
+        route = champion_route_key(result)
+        if route == "winners-direct":
+            self.route_winners_direct[champion_idx] += 1
+        elif route == "losers-comeback":
+            self.route_losers_comeback[champion_idx] += 1
+        else:
+            self.route_unknown[champion_idx] += 1
+
+        for stage in result.stages:
+            stage_key = champion_stage_analysis_key(stage)
+            stage_idx = CHAMPION_ANALYSIS_STAGE_INDEX[stage_key]
+            map_key = champion_stage_map_key(stage)
+            map_idx = CHAMPION_ANALYSIS_MAP_INDEX[map_key]
+
+            if stage.ranking:
+                winner_idx = self.index[stage.ranking[0]]
+                self.stage_wins[stage_idx][winner_idx] += 1
+                self.map_wins[map_idx][winner_idx] += 1
+
+            for rank, runner in enumerate(stage.ranking, start=1):
+                runner_idx = self.index[runner]
+                self.stage_appearances[stage_idx][runner_idx] += 1
+                self.stage_rank_sum[stage_idx][runner_idx] += rank
+                self.map_appearances[map_idx][runner_idx] += 1
+                self.map_rank_sum[map_idx][runner_idx] += rank
+
+            if stage.show_qualify_stats:
+                for runner in stage.entrants:
+                    runner_idx = self.index[runner]
+                    self.stage_qualify_opportunities[stage_idx][runner_idx] += 1
+                    self.map_qualify_opportunities[map_idx][runner_idx] += 1
+                for runner in stage.qualified_runners:
+                    runner_idx = self.index[runner]
+                    self.stage_qualified[stage_idx][runner_idx] += 1
+                    self.map_qualified[map_idx][runner_idx] += 1
+                for runner in stage.eliminated_runners:
+                    self.stage_eliminated[stage_idx][self.index[runner]] += 1
+
+            if stage_key == "grand-final":
+                for runner in stage.entrants:
+                    self.grand_final_appearances[self.index[runner]] += 1
+
     def merge(self, other: "ChampionPredictionAccumulator") -> None:
         if self.roster != other.roster:
             raise ValueError("cannot merge champion accumulators for different rosters")
+        if self.analysis_depth != other.analysis_depth:
+            raise ValueError("cannot merge champion accumulators with different analysis depths")
         self.iterations += other.iterations
         for index in range(len(self.roster)):
             self.championships[index] += other.championships[index]
+        if self._advanced_enabled:
+            _merge_counter_lists(self.route_winners_direct, other.route_winners_direct)
+            _merge_counter_lists(self.route_losers_comeback, other.route_losers_comeback)
+            _merge_counter_lists(self.route_unknown, other.route_unknown)
+            _merge_counter_lists(self.grand_final_appearances, other.grand_final_appearances)
+            _merge_counter_matrices(self.stage_appearances, other.stage_appearances)
+            _merge_counter_matrices(self.stage_wins, other.stage_wins)
+            _merge_counter_matrices(self.stage_qualified, other.stage_qualified)
+            _merge_counter_matrices(self.stage_eliminated, other.stage_eliminated)
+            _merge_counter_matrices(self.stage_qualify_opportunities, other.stage_qualify_opportunities)
+            _merge_counter_matrices(self.stage_rank_sum, other.stage_rank_sum)
+            _merge_counter_matrices(self.map_appearances, other.map_appearances)
+            _merge_counter_matrices(self.map_wins, other.map_wins)
+            _merge_counter_matrices(self.map_qualified, other.map_qualified)
+            _merge_counter_matrices(self.map_qualify_opportunities, other.map_qualify_opportunities)
+            _merge_counter_matrices(self.map_rank_sum, other.map_rank_sum)
 
     def to_summary(
         self,
@@ -624,11 +787,186 @@ class ChampionPredictionAccumulator:
             iterations=total,
             rows=tuple(rows),
             elapsed_seconds=elapsed_seconds,
+            analysis_depth=self.analysis_depth,
+            advanced=self._build_advanced_analysis() if self._advanced_enabled else None,
             start_entry_point=start_entry_point,
             start_entry_label=start_entry_label,
             remaining_stage_labels=remaining_stage_labels,
             input_context=input_context,
         )
+
+    def _build_advanced_analysis(self) -> ChampionAdvancedAnalysis:
+        total = self.iterations
+        route_rows: list[ChampionRouteAnalysisRow] = []
+        grand_final_rows: list[ChampionGrandFinalAnalysisRow] = []
+        stage_rows: list[ChampionStageAnalysisRow] = []
+        map_rows: list[ChampionMapAnalysisRow] = []
+
+        for runner in self.roster:
+            idx = self.index[runner]
+            championships = self.championships[idx]
+            winners_direct = self.route_winners_direct[idx]
+            losers_comeback = self.route_losers_comeback[idx]
+            unknown = self.route_unknown[idx]
+            route_rows.append(
+                ChampionRouteAnalysisRow(
+                    runner=runner,
+                    name=RUNNER_NAMES.get(runner, str(runner)),
+                    championships=championships,
+                    winners_direct=winners_direct,
+                    losers_comeback=losers_comeback,
+                    unknown=unknown,
+                    winners_direct_rate=winners_direct / championships if championships else 0.0,
+                    losers_comeback_rate=losers_comeback / championships if championships else 0.0,
+                    unknown_rate=unknown / championships if championships else 0.0,
+                )
+            )
+
+            final_appearances = self.grand_final_appearances[idx]
+            grand_final_rows.append(
+                ChampionGrandFinalAnalysisRow(
+                    runner=runner,
+                    name=RUNNER_NAMES.get(runner, str(runner)),
+                    appearances=final_appearances,
+                    appearance_rate=final_appearances / total if total else math.nan,
+                    championships=championships,
+                    conversion_rate=championships / final_appearances if final_appearances else None,
+                )
+            )
+
+        for stage_idx, (stage_key, stage_label) in enumerate(CHAMPION_ANALYSIS_STAGE_DEFINITIONS):
+            for runner in self.roster:
+                idx = self.index[runner]
+                appearances = self.stage_appearances[stage_idx][idx]
+                qualify_opportunities = self.stage_qualify_opportunities[stage_idx][idx]
+                stage_rows.append(
+                    ChampionStageAnalysisRow(
+                        stage_key=stage_key,
+                        stage_label=stage_label,
+                        runner=runner,
+                        name=RUNNER_NAMES.get(runner, str(runner)),
+                        appearances=appearances,
+                        appearance_rate=appearances / total if total else math.nan,
+                        stage_wins=self.stage_wins[stage_idx][idx],
+                        stage_win_rate=self.stage_wins[stage_idx][idx] / appearances if appearances else None,
+                        qualified=self.stage_qualified[stage_idx][idx],
+                        qualify_rate=(
+                            self.stage_qualified[stage_idx][idx] / qualify_opportunities
+                            if qualify_opportunities
+                            else None
+                        ),
+                        eliminated=self.stage_eliminated[stage_idx][idx],
+                        elimination_rate=(
+                            self.stage_eliminated[stage_idx][idx] / qualify_opportunities
+                            if qualify_opportunities
+                            else None
+                        ),
+                        average_rank=self.stage_rank_sum[stage_idx][idx] / appearances if appearances else None,
+                    )
+                )
+
+        for map_idx, (map_key, map_label) in enumerate(CHAMPION_ANALYSIS_MAP_DEFINITIONS):
+            for runner in self.roster:
+                idx = self.index[runner]
+                appearances = self.map_appearances[map_idx][idx]
+                qualify_opportunities = self.map_qualify_opportunities[map_idx][idx]
+                map_rows.append(
+                    ChampionMapAnalysisRow(
+                        map_key=map_key,
+                        map_label=map_label,
+                        runner=runner,
+                        name=RUNNER_NAMES.get(runner, str(runner)),
+                        appearances=appearances,
+                        appearances_per_tournament=appearances / total if total else math.nan,
+                        stage_wins=self.map_wins[map_idx][idx],
+                        stage_win_rate=self.map_wins[map_idx][idx] / appearances if appearances else None,
+                        qualified=self.map_qualified[map_idx][idx],
+                        qualify_rate=(
+                            self.map_qualified[map_idx][idx] / qualify_opportunities
+                            if qualify_opportunities
+                            else None
+                        ),
+                        average_rank=self.map_rank_sum[map_idx][idx] / appearances if appearances else None,
+                    )
+                )
+
+        return ChampionAdvancedAnalysis(
+            route_totals=ChampionRouteTotals(
+                winners_direct=sum(self.route_winners_direct),
+                losers_comeback=sum(self.route_losers_comeback),
+                unknown=sum(self.route_unknown),
+            ),
+            route_rows=tuple(route_rows),
+            grand_final_rows=tuple(grand_final_rows),
+            stage_rows=tuple(stage_rows),
+            map_rows=tuple(map_rows),
+        )
+
+
+CHAMPION_ANALYSIS_STAGE_DEFINITIONS: tuple[tuple[str, str], ...] = (
+    ("group-round-1", "小组赛第一轮"),
+    ("group-round-2", "小组赛第二轮"),
+    ("elimination", "淘汰赛"),
+    ("losers-round-1", "败者组第一轮"),
+    ("winners-round-2", "胜者组"),
+    ("losers-round-2", "败者组第二轮"),
+    ("grand-final", "总决赛"),
+)
+CHAMPION_ANALYSIS_STAGE_INDEX = {
+    key: index for index, (key, _label) in enumerate(CHAMPION_ANALYSIS_STAGE_DEFINITIONS)
+}
+
+CHAMPION_ANALYSIS_MAP_DEFINITIONS: tuple[tuple[str, str], ...] = (
+    ("group-stage", "小组赛阶段地图"),
+    ("knockout-stage", "淘汰赛阶段地图"),
+)
+CHAMPION_ANALYSIS_MAP_INDEX = {
+    key: index for index, (key, _label) in enumerate(CHAMPION_ANALYSIS_MAP_DEFINITIONS)
+}
+
+
+def _merge_counter_lists(target: list[int], source: list[int]) -> None:
+    for index in range(len(target)):
+        target[index] += source[index]
+
+
+def _merge_counter_matrices(target: list[list[int]], source: list[list[int]]) -> None:
+    for row_index in range(len(target)):
+        _merge_counter_lists(target[row_index], source[row_index])
+
+
+def champion_stage_analysis_key(stage: StageResult) -> str:
+    if stage.match_type in {"group-round-1", "group-round-2", "elimination", "grand-final"}:
+        return stage.match_type
+    if stage.match_type == "winners-bracket":
+        return "winners-round-2"
+    if stage.match_type == "losers-bracket":
+        return "losers-round-1" if "第一轮" in stage.title else "losers-round-2"
+    raise ValueError(f"unsupported tournament stage for advanced analysis: {stage.match_type}")
+
+
+def champion_stage_map_key(stage: StageResult) -> str:
+    return "group-stage" if stage.match_type in {"group-round-1", "group-round-2"} else "knockout-stage"
+
+
+def champion_route_key(result: TournamentResult) -> str:
+    champion = result.champion
+    winners_direct: set[int] = set()
+    losers_comeback: set[int] = set()
+    for snapshot in result.input_context:
+        if snapshot.key == "winners-round-2-qualified":
+            winners_direct.update(snapshot.runners)
+    for stage in result.stages:
+        stage_key = champion_stage_analysis_key(stage)
+        if stage_key == "winners-round-2":
+            winners_direct.update(stage.qualified_runners)
+        elif stage_key == "losers-round-2":
+            losers_comeback.update(stage.qualified_runners)
+    if champion in winners_direct:
+        return "winners-direct"
+    if champion in losers_comeback:
+        return "losers-comeback"
+    return "unknown"
 
 
 def tournament_phase_choices(season: int) -> tuple[str, ...]:
@@ -1575,10 +1913,11 @@ def simulate_tournament_chunk(
     simulate_tournament_fn: Callable[[int, random.Random], TournamentResult],
     derive_seed_fn: DeriveSeedFn,
     progress_batch_size_fn: ProgressBatchSizeFn,
+    analysis_depth: str = "fast",
     start_index: int = 0,
     progress: Any | None = None,
 ) -> ChampionPredictionAccumulator:
-    acc = ChampionPredictionAccumulator(season_runner_pool_fn(season))
+    acc = ChampionPredictionAccumulator(season_runner_pool_fn(season), analysis_depth=analysis_depth)
     chunk_rng = random.Random(seed)
     progress_batch = progress_batch_size_fn(iterations)
     pending_progress = 0
@@ -1587,7 +1926,11 @@ def simulate_tournament_chunk(
             tournament_rng = chunk_rng
         else:
             tournament_rng = random.Random(derive_seed_fn(seed, start_index + index))
-        acc.add(simulate_tournament_fn(season, tournament_rng).champion)
+        tournament = simulate_tournament_fn(season, tournament_rng)
+        if analysis_depth == "advanced":
+            acc.add_tournament(tournament)
+        else:
+            acc.add(tournament.champion)
         pending_progress += 1
         if progress is not None and (pending_progress >= progress_batch or index == iterations - 1):
             progress.advance(pending_progress)
@@ -1622,10 +1965,11 @@ def simulate_tournament_from_entry_request_chunk(
     simulate_tournament_from_entry_request_fn: Callable[[TournamentEntryRequest, random.Random], TournamentResult],
     derive_seed_fn: DeriveSeedFn,
     progress_batch_size_fn: ProgressBatchSizeFn,
+    analysis_depth: str = "fast",
     start_index: int = 0,
     progress: Any | None = None,
 ) -> ChampionPredictionAccumulator:
-    acc = ChampionPredictionAccumulator(tournament_entry_request_roster(request))
+    acc = ChampionPredictionAccumulator(tournament_entry_request_roster(request), analysis_depth=analysis_depth)
     chunk_rng = random.Random(seed)
     progress_batch = progress_batch_size_fn(iterations)
     pending_progress = 0
@@ -1634,7 +1978,11 @@ def simulate_tournament_from_entry_request_chunk(
             tournament_rng = chunk_rng
         else:
             tournament_rng = random.Random(derive_seed_fn(seed, start_index + index))
-        acc.add(simulate_tournament_from_entry_request_fn(request, tournament_rng).champion)
+        tournament = simulate_tournament_from_entry_request_fn(request, tournament_rng)
+        if analysis_depth == "advanced":
+            acc.add_tournament(tournament)
+        else:
+            acc.add(tournament.champion)
         pending_progress += 1
         if progress is not None and (pending_progress >= progress_batch or index == iterations - 1):
             progress.advance(pending_progress)
@@ -1702,6 +2050,7 @@ def champion_prediction_to_dict(summary: ChampionPredictionSummary) -> dict[str,
         "iterations": summary.iterations,
         "elapsed_seconds": summary.elapsed_seconds,
         "tournaments_per_second": champion_prediction_races_per_second(summary),
+        "analysis_depth": summary.analysis_depth,
         "best": {
             "runner": summary.best.runner,
             "name": summary.best.name,
@@ -1718,12 +2067,87 @@ def champion_prediction_to_dict(summary: ChampionPredictionSummary) -> dict[str,
             for row in rows
         ],
     }
+    if summary.advanced is not None:
+        data["advanced"] = champion_advanced_analysis_to_dict(summary.advanced)
     if summary.start_entry_point is not None:
         data["start_entry_point"] = summary.start_entry_point
         data["start_entry_label"] = summary.start_entry_label
         data["remaining_stage_labels"] = list(summary.remaining_stage_labels)
         data["input_context"] = [tournament_input_snapshot_to_dict(item) for item in summary.input_context]
     return data
+
+
+def champion_advanced_analysis_to_dict(advanced: ChampionAdvancedAnalysis) -> dict[str, object]:
+    return {
+        "route_totals": {
+            "winners_direct": advanced.route_totals.winners_direct,
+            "losers_comeback": advanced.route_totals.losers_comeback,
+            "unknown": advanced.route_totals.unknown,
+        },
+        "route_rows": [
+            {
+                "runner": row.runner,
+                "name": row.name,
+                "championships": row.championships,
+                "winners_direct": row.winners_direct,
+                "losers_comeback": row.losers_comeback,
+                "unknown": row.unknown,
+                "winners_direct_rate": row.winners_direct_rate,
+                "losers_comeback_rate": row.losers_comeback_rate,
+                "unknown_rate": row.unknown_rate,
+            }
+            for row in sorted(advanced.route_rows, key=lambda item: item.championships, reverse=True)
+        ],
+        "grand_final_rows": [
+            {
+                "runner": row.runner,
+                "name": row.name,
+                "appearances": row.appearances,
+                "appearance_rate": row.appearance_rate,
+                "championships": row.championships,
+                "conversion_rate": row.conversion_rate,
+            }
+            for row in sorted(
+                advanced.grand_final_rows,
+                key=lambda item: (item.appearances, item.championships),
+                reverse=True,
+            )
+        ],
+        "stage_rows": [
+            {
+                "stage_key": row.stage_key,
+                "stage_label": row.stage_label,
+                "runner": row.runner,
+                "name": row.name,
+                "appearances": row.appearances,
+                "appearance_rate": row.appearance_rate,
+                "stage_wins": row.stage_wins,
+                "stage_win_rate": row.stage_win_rate,
+                "qualified": row.qualified,
+                "qualify_rate": row.qualify_rate,
+                "eliminated": row.eliminated,
+                "elimination_rate": row.elimination_rate,
+                "average_rank": row.average_rank,
+            }
+            for row in advanced.stage_rows
+        ],
+        "map_rows": [
+            {
+                "map_key": row.map_key,
+                "map_label": row.map_label,
+                "runner": row.runner,
+                "name": row.name,
+                "appearances": row.appearances,
+                "appearances_per_tournament": row.appearances_per_tournament,
+                "stage_wins": row.stage_wins,
+                "stage_win_rate": row.stage_win_rate,
+                "qualified": row.qualified,
+                "qualify_rate": row.qualify_rate,
+                "average_rank": row.average_rank,
+            }
+            for row in advanced.map_rows
+        ],
+    }
 
 
 def format_tournament_input_snapshot(snapshot: TournamentInputSnapshot) -> str:
@@ -1762,6 +2186,138 @@ def format_tournament_result(result: TournamentResult) -> str:
         if stage.next_stage_start_spec is not None:
             lines.append(f"下一轮起跑规则：{format_start_rule(stage.next_stage_start_spec)}")
     return "\n".join(lines)
+
+
+def _format_optional_percent(value: float | None) -> str:
+    return "未进入" if value is None else f"{value:.2%}"
+
+
+def _format_optional_rank(value: float | None) -> str:
+    return "未进入" if value is None else f"{value:.2f}"
+
+
+def _format_analysis_table(
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    aligns: Sequence[str],
+) -> list[str]:
+    columns = [headers, *rows]
+    widths = [max(display_width(row[idx]) for row in columns) for idx in range(len(headers))]
+    return [
+        format_table_row(headers, widths, aligns),
+        format_table_separator(widths),
+        *[format_table_row(row, widths, aligns) for row in rows],
+    ]
+
+
+def _stage_row_lookup(advanced: ChampionAdvancedAnalysis) -> dict[tuple[int, str], ChampionStageAnalysisRow]:
+    return {(row.runner, row.stage_key): row for row in advanced.stage_rows}
+
+
+def _map_row_lookup(advanced: ChampionAdvancedAnalysis) -> dict[tuple[int, str], ChampionMapAnalysisRow]:
+    return {(row.runner, row.map_key): row for row in advanced.map_rows}
+
+
+def _format_champion_advanced_analysis(advanced: ChampionAdvancedAnalysis, iterations: int) -> list[str]:
+    route_total = (
+        advanced.route_totals.winners_direct
+        + advanced.route_totals.losers_comeback
+        + advanced.route_totals.unknown
+    )
+    route_lines = [
+        "高阶分析",
+        format_runtime_status_line(
+            "冠军路线",
+            (
+                f"胜者组直通 {advanced.route_totals.winners_direct:,} "
+                f"({advanced.route_totals.winners_direct / route_total:.2%})；"
+                f"败者组复活 {advanced.route_totals.losers_comeback:,} "
+                f"({advanced.route_totals.losers_comeback / route_total:.2%})；"
+                f"未知 {advanced.route_totals.unknown:,} "
+                f"({advanced.route_totals.unknown / route_total:.2%})"
+            )
+            if route_total
+            else "暂无数据",
+        ),
+    ]
+
+    final_rows = [
+        (
+            row.name,
+            f"{row.appearance_rate:.2%}",
+            _format_optional_percent(row.conversion_rate),
+            f"{row.championships:,}",
+        )
+        for row in sorted(
+            advanced.grand_final_rows,
+            key=lambda item: (item.conversion_rate or -1.0, item.appearances),
+            reverse=True,
+        )
+    ]
+
+    stage_lookup = _stage_row_lookup(advanced)
+    stage_columns = (
+        ("group-round-1", "小组1"),
+        ("group-round-2", "小组2"),
+        ("elimination", "淘汰"),
+        ("losers-round-1", "败者1"),
+        ("winners-round-2", "胜者"),
+        ("losers-round-2", "败者2"),
+        ("grand-final", "决赛"),
+    )
+    runner_order = [row.runner for row in sorted(advanced.grand_final_rows, key=lambda item: item.appearances, reverse=True)]
+    funnel_rows = []
+    for runner in runner_order:
+        name = RUNNER_NAMES.get(runner, str(runner))
+        funnel_rows.append(
+            (
+                name,
+                *[
+                    f"{stage_lookup[(runner, stage_key)].appearance_rate:.0%}"
+                    for stage_key, _label in stage_columns
+                ],
+            )
+        )
+
+    map_lookup = _map_row_lookup(advanced)
+    map_rows = []
+    for runner in runner_order:
+        group_row = map_lookup[(runner, "group-stage")]
+        knockout_row = map_lookup[(runner, "knockout-stage")]
+        map_rows.append(
+            (
+                RUNNER_NAMES.get(runner, str(runner)),
+                _format_optional_rank(group_row.average_rank),
+                _format_optional_percent(group_row.stage_win_rate),
+                _format_optional_rank(knockout_row.average_rank),
+                _format_optional_percent(knockout_row.stage_win_rate),
+            )
+        )
+
+    return [
+        *route_lines,
+        "",
+        "总决赛转化率",
+        *_format_analysis_table(
+            ("角色", "进决赛率", "决赛夺冠率", "冠军次数"),
+            final_rows,
+            ("left", "right", "right", "right"),
+        ),
+        "",
+        "阶段进入率",
+        *_format_analysis_table(
+            ("角色", *[label for _key, label in stage_columns]),
+            funnel_rows,
+            ("left", "right", "right", "right", "right", "right", "right", "right"),
+        ),
+        "",
+        "地图表现",
+        *_format_analysis_table(
+            ("角色", "小组均名", "小组胜率", "淘汰均名", "淘汰胜率"),
+            map_rows,
+            ("left", "right", "right", "right", "right"),
+        ),
+    ]
 
 
 def format_champion_prediction_summary(summary: ChampionPredictionSummary) -> str:
@@ -1804,4 +2360,6 @@ def format_champion_prediction_summary(summary: ChampionPredictionSummary) -> st
             f"推荐选择：{summary.best.name}，夺冠概率 {summary.best.champion_rate:.2%}。",
         ]
     )
+    if summary.advanced is not None:
+        lines.extend(["", *_format_champion_advanced_analysis(summary.advanced, summary.iterations)])
     return "\n".join(lines)

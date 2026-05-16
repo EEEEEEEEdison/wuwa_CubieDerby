@@ -27,6 +27,12 @@ def make_parser(*, match_type_choices_fn: MatchTypeChoicesFn) -> argparse.Argume
         help="run a full season tournament instead of a single-stage simulation",
     )
     parser.add_argument(
+        "--champion-analysis",
+        choices=("fast", "advanced"),
+        default="fast",
+        help="data depth for --champion-prediction monte-carlo; fast keeps only champion rates, advanced adds stage, route, and map statistics",
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="force the interactive wizard for single-stage simulation or champion prediction",

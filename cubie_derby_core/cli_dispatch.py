@@ -74,6 +74,8 @@ def run_champion_prediction_command(
         raise ValueError("--champion-prediction already controls the full tournament; do not combine it with --match-type")
     if args.tournament_context_out:
         raise ValueError("--tournament-context-out is only supported with --interactive")
+    if args.champion_prediction == "random" and args.champion_analysis != "fast":
+        raise ValueError("--champion-analysis is only supported with --champion-prediction monte-carlo")
     request = None
     season = args.season
     if args.tournament_context_in:
@@ -103,6 +105,7 @@ def run_champion_prediction_command(
             seed=args.seed,
             workers=args.workers,
             show_progress=show_progress,
+            analysis_depth=args.champion_analysis,
         )
         if request is not None
         else helpers.run_champion_prediction_monte_carlo(
@@ -111,6 +114,7 @@ def run_champion_prediction_command(
             seed=args.seed,
             workers=args.workers,
             show_progress=show_progress,
+            analysis_depth=args.champion_analysis,
         )
     )
     if args.json:

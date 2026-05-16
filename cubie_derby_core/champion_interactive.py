@@ -2257,6 +2257,38 @@ def run_interactive_champion_prediction_command(
             )
         ),
     )
+    analysis_depth = args.champion_analysis
+    if prediction_mode == "random":
+        if analysis_depth != "fast":
+            raise ValueError("--champion-analysis is only supported with --champion-prediction monte-carlo")
+    else:
+        if not getattr(args, "_champion_analysis_explicit", False):
+            analysis_depth = _prompt_choice(
+                "请选择数据分析深度",
+                (
+                    ("fast", "快速分析（只统计冠军率，速度最快）"),
+                    ("advanced", "高阶分析（统计阶段、路线、总决赛转化率和地图表现）"),
+                ),
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+                translate_fn=translate_fn,
+            )
+        _set_wizard_summary(
+            "analysis_depth",
+            (
+                "数据 = 快速分析"
+                if lang == "zh" and analysis_depth == "fast"
+                else (
+                    "数据 = 高阶分析"
+                    if lang == "zh"
+                    else (
+                        "Data = Fast analysis"
+                        if analysis_depth == "fast"
+                        else "Data = Advanced analysis"
+                    )
+                )
+            ),
+        )
 
     auto_full_tournament_monte_carlo = False
     if request is None:
@@ -2454,6 +2486,7 @@ def run_interactive_champion_prediction_command(
         seed=seed,
         workers=workers,
         show_progress=show_progress,
+        analysis_depth=analysis_depth,
     )
     if json_output:
         result_output_fn(json.dumps(helpers.champion_prediction_to_dict(summary), ensure_ascii=False, indent=2))

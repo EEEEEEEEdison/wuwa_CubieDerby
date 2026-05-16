@@ -11,6 +11,7 @@ Core things this project can simulate:
 
 - Season 1 and Season 2 race rules.
 - Full Season 2 tournament champion prediction, either from the beginning or from a mid-tournament entry point.
+- Fast and advanced champion-prediction analysis; advanced mode tracks stage funnel, champion route, grand-final conversion, and map performance.
 - Custom runner lineups and runner counts.
 - Full season-roster combination scans for a fixed field size.
 - Custom start layouts, including pre-start cells and random same-cell stacks.
@@ -139,13 +140,29 @@ Examples:
 ```powershell
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --seed 42 --workers 0
+python cubie_derby.py --season 2 --champion-prediction monte-carlo --champion-analysis advanced -n 10000 --seed 42 --workers 0
+```
+
+### `--champion-analysis`
+
+Control the data depth for tournament champion-prediction Monte Carlo runs. This only applies to `--champion-prediction monte-carlo`.
+
+- `fast`: default mode. Tracks champion rates only and keeps the run as fast as possible.
+- `advanced`: additionally tracks stage entry rates, stage qualification/elimination, whether champions came from the winners-bracket direct route or losers-bracket comeback route, grand-final conversion, and performance split by group-stage map vs knockout-stage map.
+
+Text output appends an advanced-analysis section after the champion-rate table. JSON output adds an `advanced` object with `route_totals`, `grand_final_rows`, `stage_rows`, and `map_rows`.
+
+Example:
+
+```powershell
+python cubie_derby.py --season 2 --champion-prediction monte-carlo --champion-analysis advanced -n 100000 --workers 0 --json
 ```
 
 ### `--interactive`
 
 Launch the interactive wizard. It now asks in a clearer hierarchy of "analysis branch -> submode":
 
-- Tournament champion prediction: first choose either a single-run demo or Monte Carlo statistics, then choose which tournament stage to start from and provide the minimum inputs needed to continue to the grand final.
+- Tournament champion prediction: first choose either a single-run demo or Monte Carlo statistics. For Monte Carlo, choose fast or advanced analysis next; then choose which tournament stage to start from and provide the minimum inputs needed to continue to the grand final.
 - Single-stage win-rate analysis: first enter the single-stage branch, then choose the stage, runners, start layout, iteration count, and output format.
 
 Notes:

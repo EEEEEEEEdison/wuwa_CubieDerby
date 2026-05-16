@@ -23,9 +23,14 @@ TRANSLATIONS_EN: dict[str, str] = {
         "Season 1 currently offers the single-stage analysis wizard first. Tournament champion prediction will open in a later version."
     ),
     "请选择冠军预测方式": "Choose champion prediction mode",
+    "请选择数据分析深度": "Choose data analysis depth",
     "请选择冠军预测入口": "Choose champion prediction entry",
     "单届演示（跑 1 届完整赛事）": "Single-run demo (simulate 1 full tournament)",
     "Monte Carlo 分析（重复统计夺冠率）": "Monte Carlo analysis (repeat tournaments and estimate champion rates)",
+    "快速分析（只统计冠军率，速度最快）": "Fast analysis (champion rates only, fastest)",
+    "高阶分析（统计阶段、路线、总决赛转化率和地图表现）": (
+        "Advanced analysis (stage funnel, routes, grand-final conversion, and map performance)"
+    ),
     "从头开始（完整赛事）": "From the beginning (full tournament)",
     "从指定阶段开始": "From a specific stage",
     "请选择从哪个阶段开始": "Choose the stage to start from",

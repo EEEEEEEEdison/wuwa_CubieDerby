@@ -11,6 +11,7 @@
 
 - 第 1 季和第 2 季的赛道规则。
 - 第 2 季完整赛事冠军预测，支持从头开始或从中途阶段继续推演。
+- 冠军预测的快速分析与高阶分析；高阶分析会统计阶段漏斗、冠军路线、总决赛转化率和地图表现。
 - 自定义参赛角色组合和参赛人数。
 - 固定人数下，对整季角色池做全组合遍历统计。
 - 自定义起始站位，包括负格预起跑区和同格随机堆叠。
@@ -139,13 +140,29 @@ python cubie_derby.py --season 2 --match-type grand-final -n 100000 --runners 11
 ```powershell
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --seed 42 --workers 0
+python cubie_derby.py --season 2 --champion-prediction monte-carlo --champion-analysis advanced -n 10000 --seed 42 --workers 0
+```
+
+### `--champion-analysis`
+
+控制赛事冠军预测 Monte Carlo 的数据分析深度，只对 `--champion-prediction monte-carlo` 生效。
+
+- `fast`：默认模式，只统计冠军率，速度最快，适合百万级重复模拟。
+- `advanced`：高阶模式，额外统计阶段进入率、阶段晋级/淘汰、冠军来自胜者组直通还是败者组复活、总决赛转化率，以及小组赛阶段地图和淘汰赛阶段地图下的表现拆分。
+
+普通文本输出会在冠军率表后追加“高阶分析”；JSON 输出会多出 `advanced` 字段，包含 `route_totals`、`grand_final_rows`、`stage_rows` 和 `map_rows`。
+
+示例：
+
+```powershell
+python cubie_derby.py --season 2 --champion-prediction monte-carlo --champion-analysis advanced -n 100000 --workers 0 --json
 ```
 
 ### `--interactive`
 
 进入交互式向导。现在会先按“分析大类 -> 子模式”递进提问：
 
-- 赛事冠军预测：先选是“单届演示”还是 “Monte Carlo 统计”，再选择从哪个赛事阶段开始，并补齐继续推演到总决赛所需的最少信息。
+- 赛事冠军预测：先选是“单届演示”还是 “Monte Carlo 统计”；若选择 Monte Carlo，会继续询问快速分析或高阶分析；然后选择从哪个赛事阶段开始，并补齐继续推演到总决赛所需的最少信息。
 - 单场胜率分析：先进入单场分析分支，再选择当前比赛阶段、登场角色、起跑配置、模拟次数等参数。
 
 说明：
