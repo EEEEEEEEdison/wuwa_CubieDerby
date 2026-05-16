@@ -2861,6 +2861,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     parse_runner_tokens=parse_runner_tokens,
                     run_simulation_command=core_run_simulation_command,
                     season_runner_pool=season_runner_pool,
+                    simulate_race=simulate_race,
                     simulation_cli_helpers=SimulationCLIHelpers(
                         emit_progress_overview=emit_progress_overview,
                         format_simulation_overview_lines=format_simulation_overview_lines,
@@ -2873,6 +2874,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         summary_to_dict=summary_to_dict,
                         with_elapsed=with_elapsed,
                     ),
+                    trace_result_to_dict=trace_result_to_dict,
                 ),
                 prompt_output_fn=lambda text: print(text, file=sys.stderr),
             )

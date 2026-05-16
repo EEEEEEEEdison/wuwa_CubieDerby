@@ -59,6 +59,20 @@ def _set_wizard_summary(key: str, value: str) -> None:
         _ACTIVE_WIZARD_UI.set_summary(key, value)
 
 
+class InteractiveTraceLogger:
+    def __init__(self, echo_output_fn: Callable[[str], None] | None = None) -> None:
+        self.echo_output_fn = echo_output_fn
+        self.lines: list[str] = []
+
+    def write_line(self, message: str) -> None:
+        self.lines.append(message)
+        if self.echo_output_fn is not None:
+            self.echo_output_fn(message)
+
+    def text(self) -> str:
+        return "\n".join(self.lines) + ("\n" if self.lines else "")
+
+
 @dataclass(frozen=True)
 class ChampionInteractiveHelpers:
     build_tournament_entry_request: Callable[..., Any]
@@ -86,7 +100,9 @@ class SimulationInteractiveHelpers:
     parse_runner_tokens: Callable[[Sequence[str] | None, random.Random | None, Sequence[int] | None], tuple[int, ...] | None]
     run_simulation_command: Callable[..., int]
     season_runner_pool: Callable[[int], Sequence[int]]
+    simulate_race: Callable[..., Any]
     simulation_cli_helpers: Any
+    trace_result_to_dict: Callable[[Any], dict[str, object]]
 
 
 def _with_args(args: Any, **updates: Any) -> Any:
@@ -202,6 +218,50 @@ def _prompt_yes_no_block(
         input_fn=input_fn,
         translate_fn=translate_fn,
     )
+
+
+def _trace_mode_summary(mode: str, *, lang: str) -> str:
+    if lang == "en":
+        return {
+            "none": "Trace = Off",
+            "screen": "Trace = Screen",
+            "file": "Trace = File",
+            "both": "Trace = Screen + File",
+        }[mode]
+    return {
+        "none": "过程日志 = 不输出",
+        "screen": "过程日志 = 屏幕",
+        "file": "过程日志 = 文件",
+        "both": "过程日志 = 屏幕 + 文件",
+    }[mode]
+
+
+def _emit_interactive_trace_log(
+    *,
+    config: Any,
+    seed: int | None,
+    helpers: SimulationInteractiveHelpers,
+    trace_mode: str,
+    trace_log_path: str | None,
+    prompt_output_fn: Callable[[str], None],
+    lang: str,
+) -> None:
+    screen_output_fn = prompt_output_fn if trace_mode in {"screen", "both"} else None
+    trace = InteractiveTraceLogger(echo_output_fn=screen_output_fn)
+    result = helpers.simulate_race(config, random.Random(seed), trace=trace)
+    result_text = json.dumps(helpers.trace_result_to_dict(result), ensure_ascii=False, indent=2)
+    trace.write_line("")
+    trace.write_line("=== 结果 ===" if lang == "zh" else "=== Result ===")
+    trace.write_line(result_text)
+    if trace_mode in {"file", "both"} and trace_log_path:
+        path = Path(trace_log_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(trace.text(), encoding="utf-8")
+        prompt_output_fn(
+            f"过程日志已写入：{path}"
+            if lang == "zh"
+            else f"Trace log written to: {path}"
+        )
 
 
 def _runner_catalog_lines(
@@ -1137,8 +1197,6 @@ def run_interactive_simulation_command(
         raise ValueError("--interactive cannot be combined with --season-roster-scan")
     if args.skill_ablation:
         raise ValueError("--interactive single-stage simulation does not support --skill-ablation yet")
-    if args.trace or args.trace_log:
-        raise ValueError("--interactive single-stage simulation does not support trace output yet")
     if args.tournament_context_in or args.tournament_context_out:
         raise ValueError("--tournament-context-in/out are only supported for interactive champion prediction")
     season = args.season
@@ -1259,6 +1317,41 @@ def run_interactive_simulation_command(
         translate_fn=translate_fn,
     )
     _set_wizard_summary("output", "输出 = JSON" if (lang == "zh" and json_output) else ("输出 = 文本" if lang == "zh" else ("Output = JSON" if json_output else "Output = Text")))
+    if args.trace and args.trace_log:
+        trace_mode = "both"
+        trace_log_path = args.trace_log
+    elif args.trace:
+        trace_mode = "screen"
+        trace_log_path = None
+    elif args.trace_log:
+        trace_mode = "file"
+        trace_log_path = args.trace_log
+    else:
+        trace_mode = _prompt_choice(
+            "过程日志" if lang == "zh" else "Trace Log",
+            (
+                ("none", "不输出过程日志" if lang == "zh" else "No trace log"),
+                ("screen", "在屏幕显示 Trace 日志" if lang == "zh" else "Show trace on screen"),
+                ("file", "写入 Trace 日志文件" if lang == "zh" else "Write trace to file"),
+                ("both", "在屏幕显示并写入 Trace 日志文件" if lang == "zh" else "Show trace on screen and write file"),
+            ),
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        trace_log_path = None
+        if trace_mode in {"file", "both"}:
+            trace_log_path = _prompt_line_block(
+                title="Trace 日志文件" if lang == "zh" else "Trace Log File",
+                prompt="请输入 Trace 日志文件路径" if lang == "zh" else "Enter trace log file path",
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+    _set_wizard_summary("trace", _trace_mode_summary(trace_mode, lang=lang))
+    if trace_log_path:
+        _set_wizard_summary(
+            "trace_path",
+            f"{'日志文件' if lang == 'zh' else 'Trace File'} = {trace_log_path}",
+        )
     interactive_args = _with_args(
         args,
         season=season,
@@ -1271,14 +1364,24 @@ def run_interactive_simulation_command(
         workers=workers,
         json=json_output,
         champion_prediction=None,
-        trace=False,
-        trace_log=None,
+        trace=trace_mode in {"screen", "both"},
+        trace_log=trace_log_path,
         skill_ablation=False,
         skill_ablation_runners=None,
         skill_ablation_detail=False,
         season_roster_scan=False,
     )
     config = helpers.build_config_from_args(interactive_args)
+    if trace_mode != "none":
+        _emit_interactive_trace_log(
+            config=config,
+            seed=seed,
+            helpers=helpers,
+            trace_mode=trace_mode,
+            trace_log_path=trace_log_path,
+            prompt_output_fn=prompt_output_fn,
+            lang=lang,
+        )
     return helpers.run_simulation_command(
         interactive_args,
         config,
