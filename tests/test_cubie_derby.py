@@ -2868,6 +2868,9 @@ class CubieDerbyTests(unittest.TestCase):
 
             text = log_path.read_text(encoding="utf-8")
             self.assertEqual(exit_code, 0)
+            self.assertIn("=== 日志元信息 ===", text)
+            self.assertIn("生成时间：", text)
+            self.assertIn("赛道长度：32格", text)
             self.assertIn("NPC行动：", text)
             self.assertIn("后退步数：", text)
             self.assertIn("=== 结果 ===", text)
@@ -3674,8 +3677,10 @@ class CubieDerbyTests(unittest.TestCase):
                     "11 12 13 14 15 16",
                     "n",
                     "y",
-                    str(trace_path),
                 ],
+            ), patch(
+                "cubie_derby_core.champion_interactive.default_trace_log_path",
+                return_value=trace_path,
             ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 exit_code = main(
                     [
@@ -3698,6 +3703,8 @@ class CubieDerbyTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(data["iterations"], 1)
             self.assertTrue(trace_path.exists())
+            self.assertIn("=== 日志元信息 ===", trace_text)
+            self.assertIn("赛道类型：淘汰赛阶段地图", trace_text)
             self.assertIn("=== 结果 ===", trace_text)
             self.assertIn('"ranking"', trace_text)
             self.assertIn("过程日志已写入", prompt_text)

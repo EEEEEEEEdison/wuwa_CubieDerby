@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import random
 import time
+from datetime import datetime
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Sequence
+
+from cubie_derby_core.trace_logs import format_trace_metadata_lines
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,7 @@ class SeasonScanCLIHelpers:
 
 @dataclass(frozen=True)
 class TraceCLIHelpers:
+    format_simulation_overview_lines: Callable[..., list[str]]
     simulate_race: Callable[..., Any]
     trace_logger_factory: Callable[..., Any]
     trace_result_to_dict: Callable[[Any], dict[str, object]]
@@ -138,7 +142,15 @@ def run_trace_command(
     *,
     helpers: TraceCLIHelpers,
 ) -> int:
+    generated_at = datetime.now()
     trace = helpers.trace_logger_factory(echo=args.trace)
+    for line in format_trace_metadata_lines(
+        config,
+        seed=args.seed,
+        generated_at=generated_at,
+        format_simulation_overview_lines_fn=helpers.format_simulation_overview_lines,
+    ):
+        trace.write_line(line)
     result = helpers.simulate_race(config, random.Random(args.seed), trace=trace)
     result_text = json.dumps(helpers.trace_result_to_dict(result), ensure_ascii=False, indent=2)
     trace.write_line("")

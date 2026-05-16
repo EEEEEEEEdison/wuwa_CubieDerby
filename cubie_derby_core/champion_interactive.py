@@ -5,6 +5,7 @@ import random
 import sys
 import time
 import unicodedata
+from datetime import datetime
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from typing import Any, Callable, Sequence
 
 from cubie_derby_core.interactive_i18n import translate_interactive_text
 from cubie_derby_core.runners import RUNNER_ALIASES, RUNNER_NAMES
+from cubie_derby_core.trace_logs import default_trace_log_path, format_trace_metadata_lines
 
 
 PRIMARY_RUNNER_ALIASES: dict[int, str] = {}
@@ -258,8 +260,16 @@ def _emit_interactive_trace_log(
     prompt_output_fn: Callable[[str], None],
     lang: str,
 ) -> None:
+    generated_at = datetime.now()
     screen_output_fn = prompt_output_fn if trace_mode in {"screen", "both"} else None
     trace = InteractiveTraceLogger(echo_output_fn=screen_output_fn)
+    for line in format_trace_metadata_lines(
+        config,
+        seed=seed,
+        generated_at=generated_at,
+        format_simulation_overview_lines_fn=helpers.simulation_cli_helpers.format_simulation_overview_lines,
+    ):
+        trace.write_line(line)
     result = helpers.simulate_race(config, random.Random(seed), trace=trace)
     result_text = json.dumps(helpers.trace_result_to_dict(result), ensure_ascii=False, indent=2)
     trace.write_line("")
@@ -1369,12 +1379,25 @@ def run_interactive_simulation_command(
                 translate_fn=translate_fn,
             ):
                 trace_mode = "both"
-                trace_log_path = _prompt_line_block(
-                    title="Trace 日志文件" if lang == "zh" else "Trace Log File",
-                    prompt="请输入 Trace 日志文件路径" if lang == "zh" else "Enter trace log file path",
-                    input_fn=input_fn,
-                    prompt_output_fn=prompt_output_fn,
-                )
+                trace_log_path = str(default_trace_log_path(config=helpers.build_config_from_args(_with_args(
+                    args,
+                    season=season,
+                    match_type=match_type,
+                    runners=runner_tokens,
+                    start=start_spec,
+                    initial_order=None,
+                    iterations=1,
+                    seed=seed,
+                    workers=1,
+                    json=json_output,
+                    champion_prediction=None,
+                    trace=True,
+                    trace_log=None,
+                    skill_ablation=False,
+                    skill_ablation_runners=None,
+                    skill_ablation_detail=False,
+                    season_roster_scan=False,
+                )), seed=seed))
         _set_wizard_summary("trace", _trace_mode_summary(trace_mode, lang=lang))
         if trace_log_path:
             _set_wizard_summary(

@@ -2911,6 +2911,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args,
                 config,
                 helpers=TraceCLIHelpers(
+                    format_simulation_overview_lines=format_simulation_overview_lines,
                     simulate_race=simulate_race,
                     trace_logger_factory=TraceLogger,
                     trace_result_to_dict=trace_result_to_dict,
