@@ -3408,6 +3408,84 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("请输入 6 名登场角色", prompt_text)
         self.assertIn("默认起跑配置会根据当前阶段自动适配", prompt_text)
 
+    def test_main_interactive_simulation_prompts_support_english(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "2",
+                "3",
+                "3",
+                "11 12 13 14 15 16",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--interactive-language",
+                    "en",
+                    "--season",
+                    "2",
+                    "--iterations",
+                    "4",
+                    "--workers",
+                    "1",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        prompt_text = stderr.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Choose analysis branch", prompt_text)
+        self.assertIn("Choose single-stage simulation stage", prompt_text)
+        self.assertIn("Current simulation stage: Elimination", prompt_text)
+        self.assertIn("Enter 6 runners", prompt_text)
+
+    def test_main_interactive_champion_prompts_support_english(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "1",
+                "1",
+                "12",
+                "1",
+                "11 12 13 14 15 16",
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--interactive-language",
+                    "en",
+                    "--season",
+                    "2",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        prompt_text = stderr.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Choose analysis branch", prompt_text)
+        self.assertIn("Choose champion prediction mode", prompt_text)
+        self.assertIn("Current starting stage: Grand Final", prompt_text)
+        self.assertIn("How to provide the Grand Final roster", prompt_text)
+
 
 if __name__ == "__main__":
     unittest.main()

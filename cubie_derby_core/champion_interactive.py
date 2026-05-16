@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
+from cubie_derby_core.interactive_i18n import translate_interactive_text
+
 
 @dataclass(frozen=True)
 class ChampionInteractiveHelpers:
@@ -50,11 +52,15 @@ def _prompt_line(
     *,
     default: str | None = None,
     input_fn: Callable[[str], str],
+    translate_fn: Callable[[str], str] | None = None,
 ) -> str:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     prompt_text = f"{prompt}"
     if default is not None:
         prompt_text += f" [{default}]"
-    prompt_text += "："
+    prompt_text = translate_fn(prompt_text)
+    prompt_text += ": "
     while True:
         value = input_fn(prompt_text).strip()
         if value:
@@ -68,10 +74,14 @@ def _prompt_yes_no(
     *,
     default: bool,
     input_fn: Callable[[str], str],
+    translate_fn: Callable[[str], str] | None = None,
 ) -> bool:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     default_text = "Y/n" if default else "y/N"
     while True:
-        value = input_fn(f"{prompt} [{default_text}]：").strip().lower()
+        prompt_text = translate_fn(f"{prompt} [{default_text}]") + ": "
+        value = input_fn(prompt_text).strip().lower()
         if not value:
             return default
         if value in {"y", "yes", "是"}:
@@ -87,10 +97,13 @@ def _prompt_choice(
     default_key: str | None = None,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
+    translate_fn: Callable[[str], str] | None = None,
 ) -> str:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     prompt_output_fn(title)
     for index, (_, label) in enumerate(options, start=1):
-        prompt_output_fn(f"{index}. {label}")
+        prompt_output_fn(f"{index}. {translate_fn(label)}")
     default_display = None
     if default_key is not None:
         for index, (key, _) in enumerate(options, start=1):
@@ -98,12 +111,17 @@ def _prompt_choice(
                 default_display = str(index)
                 break
     while True:
-        raw = _prompt_line("请输入序号", default=default_display, input_fn=input_fn)
+        raw = _prompt_line(
+            "请输入序号",
+            default=default_display,
+            input_fn=input_fn,
+            translate_fn=translate_fn,
+        )
         if raw.isdigit():
             choice_index = int(raw) - 1
             if 0 <= choice_index < len(options):
                 return options[choice_index][0]
-        prompt_output_fn("输入无效，请重新输入上面的序号。")
+        prompt_output_fn(translate_fn("输入无效，请重新输入上面的序号。"))
 
 
 def _remaining_entry_labels(
@@ -126,22 +144,51 @@ def _emit_champion_entry_guidance(
     entry_point: str,
     helpers: ChampionInteractiveHelpers,
     prompt_output_fn: Callable[[str], None],
+    translate_fn: Callable[[str], str] | None = None,
     loaded_from_context: bool = False,
 ) -> None:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     definition = helpers.get_tournament_entry_point_definition(season, entry_point)
     remaining_labels = _remaining_entry_labels(season=season, entry_point=entry_point, helpers=helpers)
-    prompt_output_fn(f"当前起始阶段：{definition.label}")
+    localized_definition_label = translate_fn(definition.label)
+    localized_remaining_labels = tuple(translate_fn(label) for label in remaining_labels)
+    prompt_output_fn(f"当前起始阶段：{localized_definition_label}")
     if len(remaining_labels) == 1:
-        prompt_output_fn(f"后续将模拟：{remaining_labels[0]}")
+        prompt_output_fn(f"后续将模拟：{localized_remaining_labels[0]}")
     else:
-        prompt_output_fn(f"后续将依次模拟：{' -> '.join(remaining_labels)}")
+        prompt_output_fn(f"后续将依次模拟：{' -> '.join(localized_remaining_labels)}")
     if loaded_from_context:
         prompt_output_fn("本次会直接使用已保存的上下文继续预测。")
     else:
         prompt_output_fn("下面会只询问继续推演到总决赛所必需的信息。")
 
 
-def _requirement_summary_line(requirement: Any) -> str:
+def _requirement_summary_line(
+    requirement: Any,
+    *,
+    lang: str = "zh",
+    translate_fn: Callable[[str], str] | None = None,
+) -> str:
+    if translate_fn is None:
+        translate_fn = lambda text: text
+    label = translate_fn(requirement.label)
+    if lang == "en":
+        if requirement.kind == "qualified":
+            return (
+                f"- {label}: enter {requirement.runner_count} qualifiers directly, "
+                "or enter the full previous-stage ranking and let the wizard take the top finishers automatically."
+            )
+        if requirement.kind == "ranking":
+            return f"- {label}: enter the previous-stage ranking from 1st through {requirement.runner_count}th."
+        if requirement.kind == "grouped-entrants":
+            if requirement.optional:
+                return (
+                    f"- {label}: optional. If the groups are already fixed, enter {requirement.group_count} groups "
+                    f"with {requirement.group_size} runners each; otherwise the wizard will randomize them from the seed."
+                )
+            return f"- {label}: enter {requirement.group_count} groups with {requirement.group_size} runners each."
+        return f"- {label}: enter {requirement.runner_count} runners."
     if requirement.kind == "qualified":
         return (
             f"- {requirement.label}：可直接输入 {requirement.runner_count} 名晋级角色，"
@@ -168,13 +215,17 @@ def _emit_requirement_overview(
     entry_point: str,
     helpers: ChampionInteractiveHelpers,
     prompt_output_fn: Callable[[str], None],
+    lang: str = "zh",
+    translate_fn: Callable[[str], str] | None = None,
 ) -> None:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     requirements = tuple(helpers.tournament_entry_requirements(season, entry_point))
     if not requirements:
         return
     prompt_output_fn("接下来会需要这些信息：")
     for requirement in requirements:
-        prompt_output_fn(_requirement_summary_line(requirement))
+        prompt_output_fn(_requirement_summary_line(requirement, lang=lang, translate_fn=translate_fn))
 
 
 def _parse_runner_input(
@@ -182,6 +233,7 @@ def _parse_runner_input(
     *,
     helpers: ChampionInteractiveHelpers,
     season: int,
+    lang: str = "zh",
 ) -> tuple[int, ...]:
     tokens = [part for part in text.replace(",", " ").split() if part]
     runners = helpers.parse_runner_tokens(
@@ -190,7 +242,7 @@ def _parse_runner_input(
         tuple(helpers.season_runner_pool(season)),
     )
     if runners is None:
-        raise ValueError("未输入任何角色")
+        raise ValueError("No runners were entered." if lang == "en" else "未输入任何角色")
     return runners
 
 
@@ -199,6 +251,7 @@ def _parse_simulation_runner_input(
     *,
     helpers: SimulationInteractiveHelpers,
     season: int,
+    lang: str = "zh",
 ) -> tuple[list[str], tuple[int, ...]]:
     tokens = [part for part in text.replace(",", " ").split() if part]
     runners = helpers.parse_runner_tokens(
@@ -207,7 +260,7 @@ def _parse_simulation_runner_input(
         tuple(helpers.season_runner_pool(season)),
     )
     if runners is None:
-        raise ValueError("未输入任何角色")
+        raise ValueError("No runners were entered." if lang == "en" else "未输入任何角色")
     return tokens, runners
 
 
@@ -220,13 +273,19 @@ def _prompt_runner_list(
     expected_count: int,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
+    lang: str = "zh",
+    translate_fn: Callable[[str], str] | None = None,
 ) -> tuple[int, ...]:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     prompt_output_fn(description)
     while True:
-        raw = input_fn(f"{prompt}：").strip()
+        raw = input_fn(f"{translate_fn(prompt)}: ").strip()
         try:
-            runners = _parse_runner_input(raw, helpers=helpers, season=season)
+            runners = _parse_runner_input(raw, helpers=helpers, season=season, lang=lang)
             if len(runners) != expected_count:
+                if lang == "en":
+                    raise ValueError(f"Expected {expected_count} runners, but got {len(runners)}.")
                 raise ValueError(f"需要输入 {expected_count} 名角色，当前是 {len(runners)} 名")
             return runners
         except ValueError as exc:
@@ -240,7 +299,11 @@ def _prompt_qualified_runner_list(
     season: int,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
+    lang: str = "zh",
+    translate_fn: Callable[[str], str] | None = None,
 ) -> tuple[int, ...]:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     mode = _prompt_choice(
         f"{requirement.label}的提供方式",
         (
@@ -250,16 +313,29 @@ def _prompt_qualified_runner_list(
         default_key="direct",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
+        translate_fn=translate_fn,
     )
     if mode == "ranking":
+        if lang == "en":
+            description = (
+                f"{translate_fn(requirement.description)} If you already have the full previous-stage ranking, "
+                f"enter all 6 runners and the wizard will keep the top {requirement.runner_count} automatically."
+            )
+        else:
+            description = (
+                f"{requirement.description}；如果你手头有上一阶段完整排名，可以直接输入 6 名角色，"
+                f"系统会自动取前 {requirement.runner_count} 名。"
+            )
         ranking = _prompt_runner_list(
             f"请输入用于推导{requirement.label}的完整排名",
-            description=f"{requirement.description}；如果你手头有上一阶段完整排名，可以直接输入 6 名角色，系统会自动取前 {requirement.runner_count} 名。",
+            description=description,
             helpers=helpers,
             season=season,
             expected_count=6,
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
         )
         return ranking[: requirement.runner_count]
     return _prompt_runner_list(
@@ -270,6 +346,8 @@ def _prompt_qualified_runner_list(
         expected_count=requirement.runner_count,
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
+        lang=lang,
+        translate_fn=translate_fn,
     )
 
 
@@ -280,12 +358,17 @@ def _prompt_grouped_runner_list(
     season: int,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
+    lang: str = "zh",
+    translate_fn: Callable[[str], str] | None = None,
 ) -> tuple[tuple[int, ...], ...] | None:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     if requirement.optional:
         wants_manual = _prompt_yes_no(
             f"{requirement.label}是否手动输入",
             default=False,
             input_fn=input_fn,
+            translate_fn=translate_fn,
         )
         if not wants_manual:
             return None
@@ -302,6 +385,8 @@ def _prompt_grouped_runner_list(
                 expected_count=requirement.group_size,
                 input_fn=input_fn,
                 prompt_output_fn=prompt_output_fn,
+                lang=lang,
+                translate_fn=translate_fn,
             )
         )
     return tuple(groups)
@@ -314,7 +399,11 @@ def _prompt_requirement_value(
     season: int,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
+    lang: str = "zh",
+    translate_fn: Callable[[str], str] | None = None,
 ) -> tuple[int, ...] | tuple[tuple[int, ...], ...] | None:
+    if translate_fn is None:
+        translate_fn = lambda text: text
     if requirement.kind == "grouped-entrants":
         return _prompt_grouped_runner_list(
             requirement,
@@ -322,6 +411,8 @@ def _prompt_requirement_value(
             season=season,
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
         )
     if requirement.kind == "qualified":
         return _prompt_qualified_runner_list(
@@ -330,6 +421,8 @@ def _prompt_requirement_value(
             season=season,
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
         )
     return _prompt_runner_list(
         requirement.label,
@@ -339,6 +432,8 @@ def _prompt_requirement_value(
         expected_count=requirement.runner_count,
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
+        lang=lang,
+        translate_fn=translate_fn,
     )
 
 
@@ -349,7 +444,11 @@ def _collect_derived_entry_inputs(
     helpers: ChampionInteractiveHelpers,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
+    lang: str = "zh",
+    translate_fn: Callable[[str], str] | None = None,
 ) -> dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]]:
+    del lang
+    del translate_fn
     if entry_point == "group-a-round-2":
         mode = _prompt_choice(
             "小组A第二轮的补录方式",
@@ -774,6 +873,7 @@ def _prompt_simulation_runner_tokens(
     helpers: SimulationInteractiveHelpers,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
+    lang: str = "zh",
 ) -> list[str]:
     rule = helpers.get_match_type_rule(season, match_type)
     description = "请输入 6 名登场角色，使用空格或逗号分隔。"
@@ -781,14 +881,17 @@ def _prompt_simulation_runner_tokens(
         description = "请按上一轮第 1 名到第 6 名的顺序输入 6 名角色，系统会按这个顺序自动生成起跑站位。"
     prompt_output_fn(description)
     while True:
-        raw = input_fn("请输入角色：").strip()
+        raw = input_fn("请输入角色: ").strip()
         try:
             tokens, runners = _parse_simulation_runner_input(
                 raw,
                 helpers=helpers,
                 season=season,
+                lang=lang,
             )
             if len(runners) != 6:
+                if lang == "en":
+                    raise ValueError(f"Expected 6 runners, but got {len(runners)}.")
                 raise ValueError(f"需要输入 6 名角色，当前是 {len(runners)} 名")
             return tokens
         except ValueError as exc:
@@ -807,6 +910,12 @@ def run_interactive_simulation_command(
         input_fn = input
     if prompt_output_fn is None:
         prompt_output_fn = print
+    lang = getattr(args, "interactive_language", "zh")
+    translate_fn = lambda text: translate_interactive_text(text, lang)
+    raw_input_fn = input_fn
+    raw_prompt_output_fn = prompt_output_fn
+    input_fn = lambda prompt: raw_input_fn(translate_fn(prompt))
+    prompt_output_fn = lambda text: raw_prompt_output_fn(translate_fn(text))
     if args.season_roster_scan:
         raise ValueError("--interactive cannot be combined with --season-roster-scan")
     if args.skill_ablation:
@@ -828,6 +937,7 @@ def run_interactive_simulation_command(
         default_key="elimination",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
+        translate_fn=translate_fn,
     )
     prompt_output_fn(f"当前模拟阶段：{helpers.get_match_type_rule(season, match_type).label}")
     prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
@@ -837,30 +947,35 @@ def run_interactive_simulation_command(
         helpers=helpers,
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
+        lang=lang,
     )
     prompt_output_fn("默认起跑配置会根据当前阶段自动适配；如果你想覆盖，下一步可以手动输入自定义起跑。")
     use_custom_start = _prompt_yes_no(
         "是否覆盖默认起跑配置",
         default=bool(args.start),
         input_fn=input_fn,
+        translate_fn=translate_fn,
     )
     start_spec = args.start if use_custom_start and args.start else None
     if use_custom_start and start_spec is None:
         start_spec = _prompt_line(
             "请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8",
             input_fn=input_fn,
+            translate_fn=translate_fn,
         )
     iterations = int(
         _prompt_line(
             "请输入 Monte Carlo 模拟次数",
             default=str(args.iterations),
             input_fn=input_fn,
+            translate_fn=translate_fn,
         )
     )
     seed_text = _prompt_line(
         "请输入随机种子，留空表示不固定",
         default="" if args.seed is None else str(args.seed),
         input_fn=input_fn,
+        translate_fn=translate_fn,
     )
     seed = int(seed_text) if seed_text else None
     workers = int(
@@ -868,12 +983,14 @@ def run_interactive_simulation_command(
             "请输入 workers 数量，0 表示使用 CPU 核心数",
             default=str(args.workers),
             input_fn=input_fn,
+            translate_fn=translate_fn,
         )
     )
     json_output = _prompt_yes_no(
         "是否输出 JSON 结果",
         default=bool(args.json),
         input_fn=input_fn,
+        translate_fn=translate_fn,
     )
     interactive_args = _with_args(
         args,
@@ -917,6 +1034,12 @@ def run_interactive_command(
         input_fn = input
     if prompt_output_fn is None:
         prompt_output_fn = print
+    lang = getattr(args, "interactive_language", "zh")
+    translate_fn = lambda text: translate_interactive_text(text, lang)
+    raw_input_fn = input_fn
+    raw_prompt_output_fn = prompt_output_fn
+    input_fn = lambda prompt: raw_input_fn(translate_fn(prompt))
+    prompt_output_fn = lambda text: raw_prompt_output_fn(translate_fn(text))
     if args.champion_prediction or args.tournament_context_in or args.tournament_context_out:
         return run_interactive_champion_prediction_command(
             args,
@@ -943,6 +1066,7 @@ def run_interactive_command(
         default_key="champion",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
+        translate_fn=translate_fn,
     )
     if analysis_branch == "simulation":
         prompt_output_fn("你正在进入“单场胜率分析”；下一步会先选择具体比赛阶段。")
@@ -963,6 +1087,7 @@ def run_interactive_command(
         default_key="random",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
+        translate_fn=translate_fn,
     )
     return run_interactive_champion_prediction_command(
         _with_args(args, champion_prediction=prediction_mode),
@@ -989,6 +1114,15 @@ def run_interactive_champion_prediction_command(
         prompt_output_fn = print
     if result_output_fn is None:
         result_output_fn = print
+    lang = getattr(args, "interactive_language", "zh")
+    translate_fn = lambda text: translate_interactive_text(text, lang)
+    raw_input_fn = input_fn
+    raw_prompt_output_fn = prompt_output_fn
+    input_fn = lambda prompt: raw_input_fn(translate_fn(prompt))
+    prompt_output_fn = lambda text: raw_prompt_output_fn(translate_fn(text))
+    if not args.json:
+        raw_result_output_fn = result_output_fn
+        result_output_fn = lambda text: raw_result_output_fn(translate_fn(text))
     if args.season_roster_scan:
         raise ValueError("--interactive cannot be combined with --season-roster-scan")
     if args.skill_ablation:
@@ -1016,6 +1150,7 @@ def run_interactive_champion_prediction_command(
             entry_point=request.entry_point,
             helpers=helpers,
             prompt_output_fn=prompt_output_fn,
+            translate_fn=translate_fn,
             loaded_from_context=True,
         )
     else:
@@ -1030,6 +1165,7 @@ def run_interactive_champion_prediction_command(
         default_key="random",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
+        translate_fn=translate_fn,
     )
 
     if request is None:
@@ -1043,18 +1179,22 @@ def run_interactive_champion_prediction_command(
             default_key="group-a-round-1",
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
+            translate_fn=translate_fn,
         )
         _emit_champion_entry_guidance(
             season=season,
             entry_point=entry_point,
             helpers=helpers,
             prompt_output_fn=prompt_output_fn,
+            translate_fn=translate_fn,
         )
         _emit_requirement_overview(
             season=season,
             entry_point=entry_point,
             helpers=helpers,
             prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
         )
         requirement_values = _collect_derived_entry_inputs(
             helpers=helpers,
@@ -1062,6 +1202,8 @@ def run_interactive_champion_prediction_command(
             entry_point=entry_point,
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
         )
         for requirement in helpers.tournament_entry_requirements(season, entry_point):
             if requirement.key in requirement_values:
@@ -1072,6 +1214,8 @@ def run_interactive_champion_prediction_command(
                 season=season,
                 input_fn=input_fn,
                 prompt_output_fn=prompt_output_fn,
+                lang=lang,
+                translate_fn=translate_fn,
             )
             if value is not None:
                 requirement_values[requirement.key] = value
@@ -1089,12 +1233,14 @@ def run_interactive_champion_prediction_command(
         "请输入随机种子（留空表示不固定）",
         default="" if args.seed is None else str(args.seed),
         input_fn=input_fn,
+        translate_fn=translate_fn,
     )
     seed = int(seed_text) if seed_text else None
     json_output = _prompt_yes_no(
         "是否输出 JSON 结果",
         default=bool(args.json),
         input_fn=input_fn,
+        translate_fn=translate_fn,
     )
 
     if prediction_mode == "random":
@@ -1114,6 +1260,7 @@ def run_interactive_champion_prediction_command(
             "请输入 Monte Carlo 模拟次数",
             default=str(args.iterations),
             input_fn=input_fn,
+            translate_fn=translate_fn,
         )
     )
     workers = int(
@@ -1121,6 +1268,7 @@ def run_interactive_champion_prediction_command(
             "请输入 workers 数量（0 表示 CPU 核心数）",
             default=str(args.workers),
             input_fn=input_fn,
+            translate_fn=translate_fn,
         )
     )
     summary = helpers.run_champion_prediction_from_entry_request_monte_carlo(

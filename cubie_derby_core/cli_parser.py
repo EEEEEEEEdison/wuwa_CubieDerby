@@ -32,6 +32,12 @@ def make_parser(*, match_type_choices_fn: MatchTypeChoicesFn) -> argparse.Argume
         help="launch interactive prompts for single-stage simulation or champion prediction",
     )
     parser.add_argument(
+        "--interactive-language",
+        choices=("zh", "en"),
+        default="zh",
+        help="interactive prompt language",
+    )
+    parser.add_argument(
         "--tournament-context-in",
         help="load tournament entry context JSON for champion prediction; supports --interactive or direct --champion-prediction runs",
     )

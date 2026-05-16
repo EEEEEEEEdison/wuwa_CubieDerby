@@ -42,10 +42,11 @@ Run one full Season 2 tournament and print the champion plus every stage result:
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 ```
 
-If you want the program to guide you step by step through stage selection, runner input, or tournament context entry, use `--interactive`:
+If you want the program to guide you step by step through stage selection, runner input, or tournament context entry, use `--interactive`. If you want English wizard prompts explicitly, add `--interactive-language en`:
 
 ```powershell
 python cubie_derby.py --interactive --season 2
+python cubie_derby.py --interactive --interactive-language en --season 2 --json
 ```
 
 `--runners` selects the participants. You can freely change both the runner combination and the number of participants; see [Runner IDs and Skills](#runner-ids-and-skills) for the available ids, names, and skill notes.
@@ -142,6 +143,7 @@ Notes:
 - Interactive champion prediction currently supports starting from any Season 2 tournament entry point, such as `group-a-round-2`, `elimination-a`, `winners-round-2`, or `grand-final`.
 - For many mid-tournament entry points, the wizard can derive later rosters automatically from full rankings so you do not have to split lists manually.
 - The prompts first explain the current entry stage and which later stages will still be simulated, then ask for the required inputs.
+- `--interactive-language en` switches the wizard prompts to English for demos and English-speaking users. The JSON structure itself is unchanged.
 
 Examples:
 
