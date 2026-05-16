@@ -42,6 +42,8 @@ from cubie_derby import (
     format_tournament_result,
     format_simulation_overview_lines,
     champion_prediction_to_dict,
+    champion_parallel_task_count,
+    champion_progress_batch_size,
     format_champion_prediction_summary,
     summary_to_dict,
     main,
@@ -58,6 +60,7 @@ from cubie_derby import (
     move_single_runner,
     normalize_cli_args,
     parallel_task_count,
+    progress_batch_size,
     parse_runner,
     parse_runner_tokens,
     parse_start_layout,
@@ -605,6 +608,16 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(parallel_task_count(1_000_000, 8), 64)
         self.assertEqual(parallel_task_count(10, 8), 10)
         self.assertEqual(parallel_task_count(100, 1), 8)
+
+    def test_champion_parallel_task_count_uses_finer_chunks_for_progress(self):
+        self.assertEqual(champion_parallel_task_count(1_000_000, 8), 128)
+        self.assertEqual(champion_parallel_task_count(10, 8), 10)
+        self.assertEqual(champion_parallel_task_count(100, 1), 8)
+
+    def test_champion_progress_batch_size_reports_more_frequently(self):
+        self.assertEqual(champion_progress_batch_size(500), 1)
+        self.assertEqual(champion_progress_batch_size(1_000_000), 1_000)
+        self.assertLess(champion_progress_batch_size(1_000_000), progress_batch_size(1_000_000))
 
     def test_split_iterations_evenly_distributes_chunk_sizes(self):
         chunk_sizes = split_iterations(100, 12)

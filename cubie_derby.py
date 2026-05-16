@@ -1796,7 +1796,7 @@ def simulate_tournament_from_entry_request_chunk(
         seed,
         simulate_tournament_from_entry_request_fn=simulate_tournament_from_entry_request,
         derive_seed_fn=derive_race_seed,
-        progress_batch_size_fn=progress_batch_size,
+        progress_batch_size_fn=champion_progress_batch_size,
         start_index=start_index,
         progress=progress,
     )
@@ -1829,7 +1829,7 @@ def simulate_tournament_chunk(
         season_runner_pool_fn=season_runner_pool,
         simulate_tournament_fn=simulate_tournament,
         derive_seed_fn=derive_race_seed,
-        progress_batch_size_fn=progress_batch_size,
+        progress_batch_size_fn=champion_progress_batch_size,
         start_index=start_index,
         progress=progress,
     )
@@ -1886,7 +1886,7 @@ def run_champion_prediction_monte_carlo(
         show_progress=show_progress,
         cpu_count_fn=mp.cpu_count,
         progress_factory=ProgressBar,
-        parallel_task_count_fn=parallel_task_count,
+        parallel_task_count_fn=champion_parallel_task_count,
         split_iterations_fn=split_iterations,
         simulate_tournament_chunk_fn=simulate_tournament_chunk,
         simulate_tournament_chunk_from_tuple_fn=simulate_tournament_chunk_from_tuple,
@@ -1918,7 +1918,7 @@ def run_champion_prediction_from_entry_request_monte_carlo(
         show_progress=show_progress,
         cpu_count_fn=mp.cpu_count,
         progress_factory=ProgressBar,
-        parallel_task_count_fn=parallel_task_count,
+        parallel_task_count_fn=champion_parallel_task_count,
         split_iterations_fn=split_iterations,
         simulate_tournament_from_entry_request_chunk_fn=simulate_tournament_from_entry_request_chunk,
         simulate_tournament_from_entry_request_chunk_from_tuple_fn=simulate_tournament_from_entry_request_chunk_from_tuple,
@@ -2106,6 +2106,19 @@ def progress_batch_size(iterations: int) -> int:
     if iterations <= 200:
         return 1
     return max(1, min(5_000, iterations // 200))
+
+
+def champion_progress_batch_size(iterations: int) -> int:
+    if iterations <= 500:
+        return 1
+    return max(1, min(1_000, iterations // 500))
+
+
+def champion_parallel_task_count(iterations: int, workers: int) -> int:
+    base = parallel_task_count(iterations, workers)
+    if workers <= 1:
+        return base
+    return max(base, min(iterations, workers * 16))
 
 
 def parse_runner(token: str) -> int:
