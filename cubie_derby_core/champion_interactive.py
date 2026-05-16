@@ -106,6 +106,41 @@ def _prompt_choice(
         prompt_output_fn("输入无效，请重新输入上面的序号。")
 
 
+def _remaining_entry_labels(
+    *,
+    season: int,
+    entry_point: str,
+    helpers: ChampionInteractiveHelpers,
+) -> tuple[str, ...]:
+    keys = tuple(helpers.tournament_entry_point_choices(season))
+    start_index = keys.index(entry_point)
+    return tuple(
+        helpers.get_tournament_entry_point_definition(season, key).label
+        for key in keys[start_index:]
+    )
+
+
+def _emit_champion_entry_guidance(
+    *,
+    season: int,
+    entry_point: str,
+    helpers: ChampionInteractiveHelpers,
+    prompt_output_fn: Callable[[str], None],
+    loaded_from_context: bool = False,
+) -> None:
+    definition = helpers.get_tournament_entry_point_definition(season, entry_point)
+    remaining_labels = _remaining_entry_labels(season=season, entry_point=entry_point, helpers=helpers)
+    prompt_output_fn(f"当前起始阶段：{definition.label}")
+    if len(remaining_labels) == 1:
+        prompt_output_fn(f"后续将模拟：{remaining_labels[0]}")
+    else:
+        prompt_output_fn(f"后续将依次模拟：{' -> '.join(remaining_labels)}")
+    if loaded_from_context:
+        prompt_output_fn("本次会直接使用已保存的上下文继续预测。")
+    else:
+        prompt_output_fn("下面会只询问继续推演到总决赛所必需的信息。")
+
+
 def _parse_runner_input(
     text: str,
     *,
@@ -136,7 +171,7 @@ def _parse_simulation_runner_input(
         tuple(helpers.season_runner_pool(season)),
     )
     if runners is None:
-        raise ValueError("δ�����κν�ɫ")
+        raise ValueError("未输入任何角色")
     return tokens, runners
 
 
@@ -503,12 +538,12 @@ def _prompt_simulation_runner_tokens(
     prompt_output_fn: Callable[[str], None],
 ) -> list[str]:
     rule = helpers.get_match_type_rule(season, match_type)
-    description = "������ 6 ����ɫ�����ո���ն��ŷָ���"
+    description = "请输入 6 名登场角色，使用空格或逗号分隔。"
     if getattr(rule, "seeded_from_runner_order", False):
-        description = "��С��ǰһ�ֵ������� 1 ���� 6 ��˳������ 6 ����ɫ��"
+        description = "请按上一轮第 1 名到第 6 名的顺序输入 6 名角色，系统会按这个顺序自动生成起跑站位。"
     prompt_output_fn(description)
     while True:
-        raw = input_fn("��������ɫ��").strip()
+        raw = input_fn("请输入角色：").strip()
         try:
             tokens, runners = _parse_simulation_runner_input(
                 raw,
@@ -516,7 +551,7 @@ def _prompt_simulation_runner_tokens(
                 season=season,
             )
             if len(runners) != 6:
-                raise ValueError(f"��Ҫ���� 6 ����ɫ����ǰ�� {len(runners)} ��")
+                raise ValueError(f"需要输入 6 名角色，当前是 {len(runners)} 名")
             return tokens
         except ValueError as exc:
             prompt_output_fn(str(exc))
@@ -550,12 +585,14 @@ def run_interactive_simulation_command(
         for key in helpers.match_type_choices()
     ]
     match_type = args.match_type or _prompt_choice(
-        "��ѡ�񵥳�ģ������",
+        "请选择单场模拟阶段",
         match_options,
         default_key="elimination",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
     )
+    prompt_output_fn(f"当前模拟阶段：{helpers.get_match_type_rule(season, match_type).label}")
+    prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
     runner_tokens = args.runners or _prompt_simulation_runner_tokens(
         season=season,
         match_type=match_type,
@@ -563,39 +600,40 @@ def run_interactive_simulation_command(
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
     )
+    prompt_output_fn("默认起跑配置会根据当前阶段自动适配；如果你想覆盖，下一步可以手动输入自定义起跑。")
     use_custom_start = _prompt_yes_no(
-        "�Ƿ񸲸�Ĭ���𷽲���",
+        "是否覆盖默认起跑配置",
         default=bool(args.start),
         input_fn=input_fn,
     )
     start_spec = args.start if use_custom_start and args.start else None
     if use_custom_start and start_spec is None:
         start_spec = _prompt_line(
-            "�������Զ����𷽣����� 1:* �� -3:10;-2:4,3;-1:8��",
+            "请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8",
             input_fn=input_fn,
         )
     iterations = int(
         _prompt_line(
-            "������ Monte Carlo ģ�����",
+            "请输入 Monte Carlo 模拟次数",
             default=str(args.iterations),
             input_fn=input_fn,
         )
     )
     seed_text = _prompt_line(
-        "������������ӣ����ձ�ʾ���̶���",
+        "请输入随机种子，留空表示不固定",
         default="" if args.seed is None else str(args.seed),
         input_fn=input_fn,
     )
     seed = int(seed_text) if seed_text else None
     workers = int(
         _prompt_line(
-            "������ workers ������0 ��ʾ CPU ��������",
+            "请输入 workers 数量，0 表示使用 CPU 核心数",
             default=str(args.workers),
             input_fn=input_fn,
         )
     )
     json_output = _prompt_yes_no(
-        "�Ƿ���� JSON ���",
+        "是否输出 JSON 结果",
         default=bool(args.json),
         input_fn=input_fn,
     )
@@ -659,11 +697,11 @@ def run_interactive_command(
             prompt_output_fn=prompt_output_fn,
         )
     mode = _prompt_choice(
-        "��ѡ�񽻻���ģʽ",
+        "请选择交互式模式",
         (
-            ("champion-random", "��������Ԥ��"),
-            ("champion-monte-carlo", "Monte Carlo �ھ�Ԥ��"),
-            ("simulation", "����ģ��"),
+            ("champion-random", "单届赛事冠军预测"),
+            ("champion-monte-carlo", "Monte Carlo 冠军预测"),
+            ("simulation", "单场模拟"),
         ),
         default_key="champion-random",
         input_fn=input_fn,
@@ -724,6 +762,13 @@ def run_interactive_champion_prediction_command(
             f"已从 {args.tournament_context_in} 载入赛事上下文："
             f"{helpers.get_tournament_entry_point_definition(season, request.entry_point).label}"
         )
+        _emit_champion_entry_guidance(
+            season=season,
+            entry_point=request.entry_point,
+            helpers=helpers,
+            prompt_output_fn=prompt_output_fn,
+            loaded_from_context=True,
+        )
     else:
         season = args.season
         helpers.validate_champion_prediction_season(season)
@@ -745,6 +790,12 @@ def run_interactive_champion_prediction_command(
             entry_options,
             default_key="group-a-round-1",
             input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        _emit_champion_entry_guidance(
+            season=season,
+            entry_point=entry_point,
+            helpers=helpers,
             prompt_output_fn=prompt_output_fn,
         )
         requirement_values = _collect_derived_entry_inputs(
