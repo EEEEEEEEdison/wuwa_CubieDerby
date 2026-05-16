@@ -132,10 +132,10 @@ python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --se
 
 ### `--interactive`
 
-Launch the interactive wizard. It currently focuses on two flows:
+Launch the interactive wizard. It now asks in a clearer hierarchy of "analysis branch -> submode":
 
-- Single-stage simulation: choose a stage, enter the runners, start layout, iteration count, and output format.
-- Champion prediction: choose which tournament stage to start from, then provide the minimum information needed to continue all the way to the grand final.
+- Tournament champion prediction: first choose either a single-run demo or Monte Carlo statistics, then choose which tournament stage to start from and provide the minimum inputs needed to continue to the grand final.
+- Single-stage win-rate analysis: first enter the single-stage branch, then choose the stage, runners, start layout, iteration count, and output format.
 
 Notes:
 

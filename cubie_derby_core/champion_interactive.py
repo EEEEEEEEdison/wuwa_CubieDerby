@@ -934,18 +934,18 @@ def run_interactive_command(
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
-    mode = _prompt_choice(
-        "请选择交互式模式",
+    analysis_branch = _prompt_choice(
+        "请选择分析大类",
         (
-            ("champion-random", "单届赛事冠军预测"),
-            ("champion-monte-carlo", "Monte Carlo 冠军预测"),
-            ("simulation", "单场模拟"),
+            ("champion", "赛事冠军预测"),
+            ("simulation", "单场胜率分析"),
         ),
-        default_key="champion-random",
+        default_key="champion",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
     )
-    if mode == "simulation":
+    if analysis_branch == "simulation":
+        prompt_output_fn("你正在进入“单场胜率分析”；下一步会先选择具体比赛阶段。")
         return run_interactive_simulation_command(
             args,
             show_progress=show_progress,
@@ -953,8 +953,19 @@ def run_interactive_command(
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
         )
+    prompt_output_fn("你正在进入“赛事冠军预测”；下一步会选择单届演示或 Monte Carlo 统计。")
+    prediction_mode = _prompt_choice(
+        "请选择冠军预测方式",
+        (
+            ("random", "单届演示（跑 1 届完整赛事）"),
+            ("monte-carlo", "Monte Carlo 分析（重复统计夺冠率）"),
+        ),
+        default_key="random",
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+    )
     return run_interactive_champion_prediction_command(
-        _with_args(args, champion_prediction="random" if mode == "champion-random" else "monte-carlo"),
+        _with_args(args, champion_prediction=prediction_mode),
         show_progress=show_progress,
         helpers=champion_helpers,
         input_fn=input_fn,
@@ -1011,8 +1022,11 @@ def run_interactive_champion_prediction_command(
         season = args.season
         helpers.validate_champion_prediction_season(season)
     prediction_mode = args.champion_prediction or _prompt_choice(
-        "请选择冠军预测模式",
-        (("random", "单届赛事"), ("monte-carlo", "Monte Carlo 统计")),
+        "请选择冠军预测方式",
+        (
+            ("random", "单届演示（跑 1 届完整赛事）"),
+            ("monte-carlo", "Monte Carlo 分析（重复统计夺冠率）"),
+        ),
         default_key="random",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,

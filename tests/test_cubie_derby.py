@@ -2882,10 +2882,12 @@ class CubieDerbyTests(unittest.TestCase):
 
     def test_main_interactive_champion_prediction_prompts_for_mode(self):
         stdout = io.StringIO()
+        stderr = io.StringIO()
 
         with patch(
             "builtins.input",
             side_effect=[
+                "1",
                 "1",
                 "12",
                 "",
@@ -2893,7 +2895,7 @@ class CubieDerbyTests(unittest.TestCase):
                 "",
                 "n",
             ],
-        ), contextlib.redirect_stdout(stdout):
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(
                 [
                     "--interactive",
@@ -2905,7 +2907,11 @@ class CubieDerbyTests(unittest.TestCase):
             )
 
         text = stdout.getvalue()
+        prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
+        self.assertIn("请选择分析大类", prompt_text)
+        self.assertIn("你正在进入“赛事冠军预测”", prompt_text)
+        self.assertIn("请选择冠军预测方式", prompt_text)
         self.assertIn("起始阶段：总决赛", text)
         self.assertIn("总决赛", text)
 
@@ -2954,6 +2960,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "3",
                 "3",
                 "11 12 13 14 15 16",
@@ -3366,6 +3373,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "3",
                 "3",
                 "11 12 13 14 15 16",
@@ -3393,7 +3401,8 @@ class CubieDerbyTests(unittest.TestCase):
 
         prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
-        self.assertIn("请选择交互式模式", prompt_text)
+        self.assertIn("请选择分析大类", prompt_text)
+        self.assertIn("你正在进入“单场胜率分析”", prompt_text)
         self.assertIn("请选择单场模拟阶段", prompt_text)
         self.assertIn("当前模拟阶段：淘汰赛", prompt_text)
         self.assertIn("请输入 6 名登场角色", prompt_text)
