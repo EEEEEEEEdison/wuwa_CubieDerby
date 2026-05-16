@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
 import sys
 import time
 import unicodedata
@@ -19,6 +20,134 @@ from cubie_derby_core.trace_logs import default_trace_log_path, format_trace_met
 PRIMARY_RUNNER_ALIASES: dict[int, str] = {}
 for _alias, _runner in RUNNER_ALIASES.items():
     PRIMARY_RUNNER_ALIASES.setdefault(_runner, _alias)
+
+
+def _display_width(text: str) -> int:
+    width = 0
+    for char in text:
+        width += 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+    return width
+
+
+def _pad_display(text: str, target_width: int) -> str:
+    return text + " " * max(0, target_width - _display_width(text))
+
+
+def _terminal_width(default: int = 96) -> int:
+    try:
+        return max(72, min(shutil.get_terminal_size((default, 24)).columns, 120))
+    except OSError:
+        return default
+
+
+def _rule_width(title: str, *, minimum: int = 24, maximum: int = 40) -> int:
+    return max(minimum, min(maximum, _display_width(title) + 6))
+
+
+def _emit_heading(
+    title: str,
+    *,
+    prompt_output_fn: Callable[[str], None],
+    char: str = "=",
+) -> None:
+    width = _rule_width(title)
+    prompt_output_fn(char * width)
+    prompt_output_fn(title)
+    prompt_output_fn(char * width)
+
+
+def _wrap_display_text(text: str, width: int) -> list[str]:
+    if width <= 0 or _display_width(text) <= width:
+        return [text]
+    lines: list[str] = []
+    remaining = text.strip()
+    while remaining:
+        if _display_width(remaining) <= width:
+            lines.append(remaining)
+            break
+        current_width = 0
+        last_space_index = -1
+        split_index = len(remaining)
+        for index, char in enumerate(remaining):
+            current_width += 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+            if char.isspace():
+                last_space_index = index
+            if current_width > width:
+                split_index = last_space_index if last_space_index >= 0 else index
+                break
+        head = remaining[:split_index].rstrip()
+        if not head:
+            head = remaining[: max(1, split_index + 1)].rstrip()
+            remaining = remaining[max(1, split_index + 1) :].lstrip()
+        else:
+            remaining = remaining[split_index:].lstrip()
+        lines.append(head)
+    return lines
+
+
+def _emit_wrapped_paragraph(
+    text: str,
+    *,
+    prompt_output_fn: Callable[[str], None],
+    initial_indent: str = "",
+    subsequent_indent: str | None = None,
+    width: int | None = None,
+) -> None:
+    if subsequent_indent is None:
+        subsequent_indent = initial_indent
+    content_width = max(
+        24,
+        (width or _terminal_width())
+        - max(_display_width(initial_indent), _display_width(subsequent_indent)),
+    )
+    for paragraph in text.splitlines() or [""]:
+        wrapped_lines = _wrap_display_text(paragraph, content_width)
+        for index, line in enumerate(wrapped_lines):
+            indent = initial_indent if index == 0 else subsequent_indent
+            prompt_output_fn(f"{indent}{line}")
+
+
+def _emit_section_heading(
+    title: str,
+    *,
+    prompt_output_fn: Callable[[str], None],
+) -> None:
+    prompt_output_fn("")
+    _emit_heading(title, prompt_output_fn=prompt_output_fn, char="-")
+
+
+def _emit_numbered_list(
+    items: Sequence[str],
+    *,
+    prompt_output_fn: Callable[[str], None],
+    columns: int = 2,
+) -> None:
+    if not items:
+        return
+    entries = [f"{index:>2}. {item}" for index, item in enumerate(items, start=1)]
+    if columns <= 1 or len(entries) < 4:
+        for entry in entries:
+            prompt_output_fn(f"  {entry}")
+        return
+    max_width = max(_display_width(entry) for entry in entries)
+    available_width = _terminal_width() - 4
+    if columns == 2 and (max_width * 2 + 3) <= available_width:
+        for index in range(0, len(entries), 2):
+            chunk = entries[index : index + 2]
+            if len(chunk) == 2:
+                prompt_output_fn(f"  {_pad_display(chunk[0], max_width)} | {chunk[1]}")
+            else:
+                prompt_output_fn(f"  {chunk[0]}")
+        return
+    for entry in entries:
+        prompt_output_fn(f"  {entry}")
+
+
+def _split_summary_line(line: str) -> tuple[str | None, str]:
+    if " = " not in line:
+        return None, line
+    key, value = line.split(" = ", 1)
+    return key.strip(), value.strip()
 
 
 @dataclass
@@ -40,17 +169,20 @@ class InteractiveWizardUI:
             self.prompt_output_fn("\x1b[2J\x1b[H")
             if self.summaries:
                 heading = "当前摘要" if self.lang == "zh" else "Current Summary"
-                self.prompt_output_fn("-" * 24)
-                self.prompt_output_fn(heading)
-                self.prompt_output_fn("-" * 24)
-                for _, line in self.summaries:
-                    self.prompt_output_fn(f"  {line}")
+                _emit_heading(heading, prompt_output_fn=self.prompt_output_fn, char="-")
+                parsed_lines = [_split_summary_line(line) for _, line in self.summaries]
+                keyed_lines = [(key, value) for key, value in parsed_lines if key is not None]
+                plain_lines = [value for key, value in parsed_lines if key is None]
+                if keyed_lines:
+                    key_width = max(_display_width(key) for key, _ in keyed_lines)
+                    for key, value in keyed_lines:
+                        self.prompt_output_fn(f"  {_pad_display(key, key_width)} = {value}")
+                for value in plain_lines:
+                    self.prompt_output_fn(f"  {value}")
                 self.prompt_output_fn("")
         else:
             self.prompt_output_fn("")
-        self.prompt_output_fn("=" * 24)
-        self.prompt_output_fn(title)
-        self.prompt_output_fn("=" * 24)
+        _emit_heading(title, prompt_output_fn=self.prompt_output_fn)
 
 
 _ACTIVE_WIZARD_UI: InteractiveWizardUI | None = None
@@ -180,9 +312,7 @@ def _prompt_interactive_language(
     prompt_output_fn: Callable[[str], None],
 ) -> str:
     prompt_output_fn("")
-    prompt_output_fn("=" * 24)
-    prompt_output_fn("Choose language / 请选择语言")
-    prompt_output_fn("=" * 24)
+    _emit_heading("Choose language / 请选择语言", prompt_output_fn=prompt_output_fn)
     prompt_output_fn("1. 中文")
     prompt_output_fn("2. English")
     while True:
@@ -203,9 +333,7 @@ def _emit_question_block(
         _ACTIVE_WIZARD_UI.start_block(title)
         return
     prompt_output_fn("")
-    prompt_output_fn("=" * 24)
-    prompt_output_fn(title)
-    prompt_output_fn("=" * 24)
+    _emit_heading(title, prompt_output_fn=prompt_output_fn)
 
 
 def _prompt_line_block(
@@ -324,24 +452,21 @@ def _runner_catalog_lines(
     runner_pool: Sequence[int],
     lang: str,
 ) -> list[str]:
-    def display_width(text: str) -> int:
-        width = 0
-        for char in text:
-            width += 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
-        return width
-
-    def pad_display(text: str, target_width: int) -> str:
-        return text + " " * max(0, target_width - display_width(text))
-
     entries = []
     for runner in runner_pool:
         if lang == "en":
             entries.append(f"{runner:>2} = {PRIMARY_RUNNER_ALIASES.get(runner, str(runner))}")
         else:
             entries.append(f"{runner:>2} = {RUNNER_NAMES.get(runner, str(runner))}")
-    chunk_size = 3
-    chunks = [entries[index : index + chunk_size] for index in range(0, len(entries), chunk_size)]
-    column_width = max(display_width(entry) for entry in entries)
+    column_width = max(_display_width(entry) for entry in entries)
+    available_width = _terminal_width() - 2
+    column_count = 3
+    while column_count > 1 and (column_width * column_count + 3 * (column_count - 1)) > available_width:
+        column_count -= 1
+    chunks = [
+        entries[index : index + column_count]
+        for index in range(0, len(entries), column_count)
+    ]
     if lang == "en":
         lines = [
             "You may enter runner IDs, Chinese names, or English aliases.",
@@ -350,9 +475,9 @@ def _runner_catalog_lines(
     else:
         lines = [
             "支持输入角色编号、中文名或英文别名。",
-            f"本赛季可用角色：",
+            "本赛季可用角色：",
         ]
-    lines.extend("  " + " | ".join(pad_display(entry, column_width) for entry in chunk) for chunk in chunks)
+    lines.extend("  " + " | ".join(_pad_display(entry, column_width) for entry in chunk) for chunk in chunks)
     return lines
 
 
@@ -376,6 +501,7 @@ def _emit_champion_entry_guidance(
     entry_point: str,
     helpers: ChampionInteractiveHelpers,
     prompt_output_fn: Callable[[str], None],
+    lang: str = "zh",
     translate_fn: Callable[[str], str] | None = None,
     loaded_from_context: bool = False,
 ) -> None:
@@ -385,60 +511,77 @@ def _emit_champion_entry_guidance(
     remaining_labels = _remaining_entry_labels(season=season, entry_point=entry_point, helpers=helpers)
     localized_definition_label = translate_fn(definition.label)
     localized_remaining_labels = tuple(translate_fn(label) for label in remaining_labels)
+    _emit_section_heading(
+        ("当前上下文" if loaded_from_context else "阶段概览")
+        if lang == "zh"
+        else ("Current Context" if loaded_from_context else "Stage Overview"),
+        prompt_output_fn=prompt_output_fn,
+    )
     prompt_output_fn(f"当前起始阶段：{localized_definition_label}")
     if len(remaining_labels) == 1:
         prompt_output_fn(f"后续将模拟：{localized_remaining_labels[0]}")
     else:
-        prompt_output_fn(f"后续将依次模拟：{' -> '.join(localized_remaining_labels)}")
+        prompt_output_fn("后续将依次模拟：" if lang == "zh" else "Remaining stages to simulate:")
+        _emit_numbered_list(localized_remaining_labels, prompt_output_fn=prompt_output_fn)
+    prompt_output_fn("说明：" if lang == "zh" else "Note:")
     if loaded_from_context:
-        prompt_output_fn("本次会直接使用已保存的上下文继续预测。")
+        _emit_wrapped_paragraph(
+            "本次会直接使用已保存的上下文继续预测。"
+            if lang == "zh"
+            else "This run will continue directly from the saved context.",
+            prompt_output_fn=prompt_output_fn,
+            initial_indent="  ",
+        )
     else:
-        prompt_output_fn("下面会只询问继续推演到总决赛所必需的信息。")
+        _emit_wrapped_paragraph(
+            "下面会只询问继续推演到总决赛所必需的信息。"
+            if lang == "zh"
+            else "Next, the wizard will only ask for the information required to continue to the grand final.",
+            prompt_output_fn=prompt_output_fn,
+            initial_indent="  ",
+        )
 
 
-def _requirement_summary_line(
+def _requirement_summary_parts(
     requirement: Any,
     *,
     lang: str = "zh",
     translate_fn: Callable[[str], str] | None = None,
-) -> str:
+) -> tuple[str, str]:
     if translate_fn is None:
         translate_fn = lambda text: text
     label = translate_fn(requirement.label)
     if lang == "en":
         if requirement.kind == "qualified":
-            return (
-                f"- {label}: enter {requirement.runner_count} qualifiers directly, "
-                "or enter the full previous-stage ranking and let the wizard take the top finishers automatically."
+            return label, (
+                f"Enter {requirement.runner_count} qualifiers directly, or enter the full previous-stage ranking "
+                "and let the wizard take the top finishers automatically."
             )
         if requirement.kind == "ranking":
-            return f"- {label}: enter the previous-stage ranking from 1st through {requirement.runner_count}th."
+            return label, f"Enter the previous-stage ranking from 1st through {requirement.runner_count}th."
         if requirement.kind == "grouped-entrants":
             if requirement.optional:
-                return (
-                    f"- {label}: optional. If the groups are already fixed, enter {requirement.group_count} groups "
+                return label, (
+                    f"Optional. If the groups are already fixed, enter {requirement.group_count} groups "
                     f"with {requirement.group_size} runners each; otherwise the wizard will randomize them from the seed."
                 )
-            return f"- {label}: enter {requirement.group_count} groups with {requirement.group_size} runners each."
-        return f"- {label}: enter {requirement.runner_count} runners."
+            return label, f"Enter {requirement.group_count} groups with {requirement.group_size} runners each."
+        return label, f"Enter {requirement.runner_count} runners."
     if requirement.kind == "qualified":
-        return (
-            f"- {requirement.label}：可直接输入 {requirement.runner_count} 名晋级角色，"
+        return requirement.label, (
+            f"可直接输入 {requirement.runner_count} 名晋级角色，"
             "也可以输入上一阶段完整排名后自动截取。"
         )
     if requirement.kind == "ranking":
-        return f"- {requirement.label}：请按上一阶段第 1 名到第 {requirement.runner_count} 名的顺序输入。"
+        return requirement.label, f"请按上一阶段第 1 名到第 {requirement.runner_count} 名的顺序输入。"
     if requirement.kind == "grouped-entrants":
         if requirement.optional:
-            return (
-                f"- {requirement.label}：可选。"
-                f"如果你已经确定分组，可输入 {requirement.group_count} 组、每组 {requirement.group_size} 名；"
+            return requirement.label, (
+                f"可选。如果你已经确定分组，可输入 {requirement.group_count} 组、每组 {requirement.group_size} 名；"
                 "否则系统会按 seed 随机分组。"
             )
-        return (
-            f"- {requirement.label}：请输入 {requirement.group_count} 组、每组 {requirement.group_size} 名角色。"
-        )
-    return f"- {requirement.label}：请输入 {requirement.runner_count} 名角色。"
+        return requirement.label, f"请输入 {requirement.group_count} 组、每组 {requirement.group_size} 名角色。"
+    return requirement.label, f"请输入 {requirement.runner_count} 名角色。"
 
 
 def _emit_requirement_overview(
@@ -455,9 +598,19 @@ def _emit_requirement_overview(
     requirements = tuple(helpers.tournament_entry_requirements(season, entry_point))
     if not requirements:
         return
-    prompt_output_fn("接下来会需要这些信息：")
-    for requirement in requirements:
-        prompt_output_fn(_requirement_summary_line(requirement, lang=lang, translate_fn=translate_fn))
+    _emit_section_heading(
+        "需要准备的输入" if lang == "zh" else "Required Inputs",
+        prompt_output_fn=prompt_output_fn,
+    )
+    prompt_output_fn("接下来会需要这些信息：" if lang == "zh" else "The wizard will need the following inputs:")
+    for index, requirement in enumerate(requirements, start=1):
+        label, detail = _requirement_summary_parts(requirement, lang=lang, translate_fn=translate_fn)
+        prompt_output_fn(f"  {index}. {label}")
+        _emit_wrapped_paragraph(
+            detail,
+            prompt_output_fn=prompt_output_fn,
+            initial_indent="     ",
+        )
 
 
 def _parse_runner_input(
@@ -577,14 +730,22 @@ def _prompt_runner_list(
         translate_fn = lambda text: text
     if title is not None:
         _emit_question_block(title=title, prompt_output_fn=prompt_output_fn)
+    _emit_wrapped_paragraph(
+        description,
+        prompt_output_fn=prompt_output_fn,
+        initial_indent="",
+    )
     if show_catalog:
+        _emit_section_heading(
+            "角色目录" if lang == "zh" else "Runner Catalog",
+            prompt_output_fn=prompt_output_fn,
+        )
         for line in _runner_catalog_lines(
             season=season,
             runner_pool=tuple(helpers.season_runner_pool(season)),
             lang=lang,
         ):
             prompt_output_fn(line)
-    prompt_output_fn(description)
     current_runners: tuple[int, ...] = ()
     while True:
         raw = input_fn(f"{translate_fn(prompt)}: ").strip()
@@ -743,6 +904,7 @@ def _prompt_requirement_value(
         )
     return _prompt_runner_list(
         requirement.label,
+        title=requirement.label,
         description=requirement.description,
         helpers=helpers,
         season=season,
@@ -1721,6 +1883,7 @@ def run_interactive_champion_prediction_command(
             entry_point=request.entry_point,
             helpers=helpers,
             prompt_output_fn=prompt_output_fn,
+            lang=lang,
             translate_fn=translate_fn,
             loaded_from_context=True,
         )
@@ -1792,6 +1955,7 @@ def run_interactive_champion_prediction_command(
             entry_point=entry_point,
             helpers=helpers,
             prompt_output_fn=prompt_output_fn,
+            lang=lang,
             translate_fn=translate_fn,
         )
         _emit_requirement_overview(
