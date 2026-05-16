@@ -489,21 +489,26 @@ def _runner_catalog_lines(
     column_count = 3
     while column_count > 1 and (column_width * column_count + 3 * (column_count - 1)) > available_width:
         column_count -= 1
-    chunks = [
-        entries[index : index + column_count]
-        for index in range(0, len(entries), column_count)
-    ]
+    row_width = column_width * column_count + 3 * (column_count - 1)
+    border = "  +" + "-" * (row_width + 2) + "+"
     if lang == "en":
         lines = [
-            "You may enter runner IDs, Chinese names, or English aliases.",
-            f"Available Season {season} runners:",
+            "Input: runner ID, Chinese name, or English alias.",
+            f"Season {season} runner list",
         ]
     else:
         lines = [
-            "支持输入角色编号、中文名或英文别名。",
-            "本赛季可用角色：",
+            "输入方式：角色编号、中文名或英文别名。",
+            f"第{season}季角色目录",
         ]
-    lines.extend("  " + " | ".join(_pad_display(entry, column_width) for entry in chunk) for chunk in chunks)
+    lines.append(border)
+    for index in range(0, len(entries), column_count):
+        chunk = entries[index : index + column_count]
+        padded_chunk = [_pad_display(entry, column_width) for entry in chunk]
+        if len(padded_chunk) < column_count:
+            padded_chunk.extend(" " * column_width for _ in range(column_count - len(padded_chunk)))
+        lines.append("  | " + " | ".join(padded_chunk) + " |")
+    lines.append(border)
     return lines
 
 
@@ -1030,10 +1035,14 @@ def _prompt_runner_list(
         translate_fn = lambda text: text
     if title is not None:
         _emit_question_block(title=title, prompt_output_fn=prompt_output_fn)
+    _emit_section_heading(
+        "输入说明" if lang == "zh" else "Input",
+        prompt_output_fn=prompt_output_fn,
+    )
     _emit_wrapped_paragraph(
         description,
         prompt_output_fn=prompt_output_fn,
-        initial_indent="",
+        initial_indent="  ",
     )
     if show_catalog:
         _emit_section_heading(
@@ -1048,6 +1057,11 @@ def _prompt_runner_list(
             prompt_output_fn(line)
     current_runners: tuple[int, ...] = ()
     while True:
+        if not current_runners:
+            _emit_section_heading(
+                "开始输入" if lang == "zh" else "Enter Runners",
+                prompt_output_fn=prompt_output_fn,
+            )
         raw = input_fn(f"{translate_fn(prompt)}: ").strip()
         try:
             runners = _parse_runner_input(raw, helpers=helpers, season=season, lang=lang)
@@ -1650,9 +1664,25 @@ def _prompt_simulation_runner_tokens(
     if rule is not None and getattr(rule, "seeded_from_runner_order", False):
         description = "请按上一轮第 1 名到第 6 名的顺序输入 6 名角色，系统会按这个顺序自动生成起跑站位。"
     if lang == "en":
+        description = "Enter 6 runners, separated by spaces or commas."
+        if rule is not None and getattr(rule, "seeded_from_runner_order", False):
+            description = "Enter 6 runners in the previous round's 1st-to-6th order; the start layout will follow that ranking."
         prompt_label = "Enter runners (IDs, Chinese names, or English aliases)"
     _emit_question_block(
         title="登场角色输入" if lang == "zh" else "Runner Entry",
+        prompt_output_fn=prompt_output_fn,
+    )
+    _emit_section_heading(
+        "输入说明" if lang == "zh" else "Input",
+        prompt_output_fn=prompt_output_fn,
+    )
+    _emit_wrapped_paragraph(
+        description,
+        prompt_output_fn=prompt_output_fn,
+        initial_indent="  ",
+    )
+    _emit_section_heading(
+        "角色目录" if lang == "zh" else "Runner Catalog",
         prompt_output_fn=prompt_output_fn,
     )
     for line in _runner_catalog_lines(
@@ -1661,7 +1691,10 @@ def _prompt_simulation_runner_tokens(
         lang=lang,
     ):
         prompt_output_fn(line)
-    prompt_output_fn(description)
+    _emit_section_heading(
+        "开始输入" if lang == "zh" else "Enter Runners",
+        prompt_output_fn=prompt_output_fn,
+    )
     current_tokens: list[str] = []
     current_runners: tuple[int, ...] = ()
     while True:
