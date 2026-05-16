@@ -3630,9 +3630,8 @@ class CubieDerbyTests(unittest.TestCase):
 
         prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
-        self.assertIn("当前起始阶段：总决赛", prompt_text)
-        self.assertIn("后续将模拟：总决赛", prompt_text)
-        self.assertIn("下面会只询问继续推演到总决赛所必需的信息。", prompt_text)
+        self.assertIn("下一步", prompt_text)
+        self.assertIn("顶部摘要", prompt_text)
         self.assertIn("接下来会需要这些信息：", prompt_text)
         self.assertIn("总决赛参赛角色（6名）", prompt_text)
 
@@ -3885,7 +3884,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("Choose analysis branch", prompt_text)
         self.assertIn("Choose champion prediction mode", prompt_text)
         self.assertIn("Choose champion prediction entry", prompt_text)
-        self.assertIn("Current starting stage: Grand Final", prompt_text)
+        self.assertIn("start stage and remaining schedule stay in the summary above", prompt_text)
         self.assertIn("How to provide the Grand Final roster", prompt_text)
 
 

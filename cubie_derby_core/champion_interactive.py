@@ -513,6 +513,51 @@ def _auto_fill_entry_inputs(
     return auto_values
 
 
+def _remaining_stage_summary(
+    *,
+    season: int,
+    entry_point: str,
+    helpers: ChampionInteractiveHelpers,
+    lang: str,
+    translate_fn: Callable[[str], str],
+) -> str:
+    labels = tuple(translate_fn(label) for label in _remaining_entry_labels(season=season, entry_point=entry_point, helpers=helpers))
+    if not labels:
+        return "-" if lang == "zh" else "-"
+    if len(labels) == 1:
+        return labels[0]
+    if lang == "zh":
+        return f"{labels[0]} 至 {labels[-1]}（共 {len(labels)} 阶段）"
+    return f"{labels[0]} -> {labels[-1]} ({len(labels)} stages)"
+
+
+def _request_runner_summary(
+    request: Any,
+    *,
+    season: int,
+    helpers: ChampionInteractiveHelpers,
+    lang: str,
+    translate_fn: Callable[[str], str],
+) -> str:
+    if request.entry_point == "group-a-round-1":
+        if "group-stage-groups" in request.inputs:
+            return "18名（已指定A/B/C分组）" if lang == "zh" else "18 runners (A/B/C grouped)"
+        if "season-roster" in request.inputs:
+            return "18名（默认全赛季）" if lang == "zh" else "18 runners (full season default)"
+    for requirement in helpers.tournament_entry_requirements(season, request.entry_point):
+        value = request.inputs.get(requirement.key)
+        if value is None:
+            continue
+        if requirement.kind == "grouped-entrants":
+            return (
+                f"{translate_fn(requirement.label)}（已指定）"
+                if lang == "zh"
+                else f"{translate_fn(requirement.label)} (provided)"
+            )
+        return translate_fn(requirement.label)
+    return "已补齐" if lang == "zh" else "ready"
+
+
 def _emit_champion_entry_guidance(
     *,
     season: int,
@@ -523,45 +568,28 @@ def _emit_champion_entry_guidance(
     translate_fn: Callable[[str], str] | None = None,
     loaded_from_context: bool = False,
 ) -> None:
+    del season
+    del entry_point
+    del helpers
     if translate_fn is None:
         translate_fn = lambda text: text
-    definition = helpers.get_tournament_entry_point_definition(season, entry_point)
-    remaining_labels = _remaining_entry_labels(season=season, entry_point=entry_point, helpers=helpers)
-    localized_definition_label = translate_fn(definition.label)
-    localized_remaining_labels = tuple(translate_fn(label) for label in remaining_labels)
     _emit_section_heading(
-        ("当前上下文" if loaded_from_context else "阶段概览")
-        if lang == "zh"
-        else ("Current Context" if loaded_from_context else "Stage Overview"),
+        "下一步" if lang == "zh" else "Next",
         prompt_output_fn=prompt_output_fn,
     )
-    prompt_output_fn(f"当前起始阶段：{localized_definition_label}")
-    if len(remaining_labels) == 1:
-        prompt_output_fn(f"后续将模拟：{localized_remaining_labels[0]}")
-    elif len(remaining_labels) > 4:
-        if lang == "zh":
-            prompt_output_fn(f"后续将自动模拟剩余 {len(remaining_labels)} 个阶段，直到 {localized_remaining_labels[-1]}。")
-        else:
-            prompt_output_fn(
-                f"The wizard will simulate the remaining {len(remaining_labels)} stages automatically, through {localized_remaining_labels[-1]}."
-            )
-    else:
-        prompt_output_fn("后续将依次模拟：" if lang == "zh" else "Remaining stages to simulate:")
-        _emit_numbered_list(localized_remaining_labels, prompt_output_fn=prompt_output_fn)
-    prompt_output_fn("说明：" if lang == "zh" else "Note:")
     if loaded_from_context:
         _emit_wrapped_paragraph(
-            "本次会直接使用已保存的上下文继续预测。"
+            "本次会直接使用已保存的上下文继续预测。摘要里会保留当前入口和剩余赛程。"
             if lang == "zh"
-            else "This run will continue directly from the saved context.",
+            else "This run will continue directly from the saved context. The summary will keep the current entry and remaining stages visible.",
             prompt_output_fn=prompt_output_fn,
             initial_indent="  ",
         )
     else:
         _emit_wrapped_paragraph(
-            "下面会只询问继续推演到总决赛所必需的信息。"
+            "下面只会继续询问推进到总决赛所必需的信息；起始阶段和剩余赛程会保留在顶部摘要中。"
             if lang == "zh"
-            else "Next, the wizard will only ask for the information required to continue to the grand final.",
+            else "The wizard will now ask only for the inputs required to continue through the grand final; the start stage and remaining schedule stay in the summary above.",
             prompt_output_fn=prompt_output_fn,
             initial_indent="  ",
         )
@@ -1901,6 +1929,16 @@ def run_interactive_champion_prediction_command(
             f"{'起始阶段' if lang == 'zh' else 'Start Stage'} = {translate_fn(stage_label)}",
         )
         _set_wizard_summary(
+            "remaining",
+            f"{'剩余赛程' if lang == 'zh' else 'Remaining'} = "
+            f"{_remaining_stage_summary(season=season, entry_point=request.entry_point, helpers=helpers, lang=lang, translate_fn=translate_fn)}",
+        )
+        _set_wizard_summary(
+            "runners",
+            f"{'参赛角色' if lang == 'zh' else 'Entrants'} = "
+            f"{_request_runner_summary(request, season=season, helpers=helpers, lang=lang, translate_fn=translate_fn)}",
+        )
+        _set_wizard_summary(
             "context",
             "上下文 = 已载入" if lang == "zh" else "Context = Loaded",
         )
@@ -1980,6 +2018,11 @@ def run_interactive_champion_prediction_command(
             "stage",
             f"{'起始阶段' if lang == 'zh' else 'Start Stage'} = {translate_fn(stage_label)}",
         )
+        _set_wizard_summary(
+            "remaining",
+            f"{'剩余赛程' if lang == 'zh' else 'Remaining'} = "
+            f"{_remaining_stage_summary(season=season, entry_point=entry_point, helpers=helpers, lang=lang, translate_fn=translate_fn)}",
+        )
         _emit_champion_entry_guidance(
             season=season,
             entry_point=entry_point,
@@ -1994,6 +2037,12 @@ def run_interactive_champion_prediction_command(
             entry_point=entry_point,
         )
         if entry_point == "group-a-round-1" and "season-roster" in requirement_values:
+            _set_wizard_summary(
+                "runners",
+                "参赛角色 = 18名（默认全赛季）"
+                if lang == "zh"
+                else "Entrants = 18 runners (full season default)",
+            )
             prompt_output_fn(
                 "本次会默认使用第2季全部18名角色参赛。"
                 if lang == "zh"
@@ -2041,6 +2090,11 @@ def run_interactive_champion_prediction_command(
             season=season,
             entry_point=entry_point,
             inputs=requirement_values,
+        )
+        _set_wizard_summary(
+            "runners",
+            f"{'参赛角色' if lang == 'zh' else 'Entrants'} = "
+            f"{_request_runner_summary(request, season=season, helpers=helpers, lang=lang, translate_fn=translate_fn)}",
         )
         _set_wizard_summary(
             "context",
