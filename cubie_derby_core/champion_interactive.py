@@ -9,6 +9,12 @@ from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
 from cubie_derby_core.interactive_i18n import translate_interactive_text
+from cubie_derby_core.runners import RUNNER_ALIASES, RUNNER_NAMES
+
+
+PRIMARY_RUNNER_ALIASES: dict[int, str] = {}
+for _alias, _runner in RUNNER_ALIASES.items():
+    PRIMARY_RUNNER_ALIASES.setdefault(_runner, _alias)
 
 
 @dataclass(frozen=True)
@@ -56,10 +62,14 @@ def _prompt_line(
 ) -> str:
     if translate_fn is None:
         translate_fn = lambda text: text
-    prompt_text = f"{prompt}"
+    translated_prompt = translate_fn(prompt)
+    english_mode = translate_fn("请输入序号") != "请输入序号"
+    prompt_text = translated_prompt
     if default is not None:
-        prompt_text += f" [{default}]"
-    prompt_text = translate_fn(prompt_text)
+        if english_mode:
+            prompt_text += f" (default {default})"
+        else:
+            prompt_text += f"（默认 {default}）"
     prompt_text += ": "
     while True:
         value = input_fn(prompt_text).strip()
@@ -78,9 +88,14 @@ def _prompt_yes_no(
 ) -> bool:
     if translate_fn is None:
         translate_fn = lambda text: text
-    default_text = "Y/n" if default else "y/N"
+    english_mode = translate_fn("请输入序号") != "请输入序号"
+    if english_mode:
+        default_text = "yes" if default else "no"
+        prompt_text = f"{translate_fn(prompt)} (default {default_text}): "
+    else:
+        default_text = "是" if default else "否"
+        prompt_text = f"{translate_fn(prompt)}（默认{default_text}）: "
     while True:
-        prompt_text = translate_fn(f"{prompt} [{default_text}]") + ": "
         value = input_fn(prompt_text).strip().lower()
         if not value:
             return default
@@ -111,17 +126,44 @@ def _prompt_choice(
                 default_display = str(index)
                 break
     while True:
-        raw = _prompt_line(
-            "请输入序号",
-            default=default_display,
-            input_fn=input_fn,
-            translate_fn=translate_fn,
-        )
+        raw = _prompt_line("请输入序号", default=default_display, input_fn=input_fn, translate_fn=translate_fn)
         if raw.isdigit():
             choice_index = int(raw) - 1
             if 0 <= choice_index < len(options):
                 return options[choice_index][0]
         prompt_output_fn(translate_fn("输入无效，请重新输入上面的序号。"))
+
+
+def _runner_catalog_lines(
+    *,
+    season: int,
+    runner_pool: Sequence[int],
+    lang: str,
+) -> list[str]:
+    entries = []
+    for runner in runner_pool:
+        display_name = RUNNER_NAMES.get(runner, str(runner))
+        alias = PRIMARY_RUNNER_ALIASES.get(runner)
+        if alias:
+            entries.append(f"{runner}={display_name}/{alias}")
+        else:
+            entries.append(f"{runner}={display_name}")
+    chunk_size = 6
+    chunks = [entries[index : index + chunk_size] for index in range(0, len(entries), chunk_size)]
+    if lang == "en":
+        lines = [
+            "You may enter runner IDs, Chinese names, or English aliases.",
+            f"Available Season {season} runners:",
+        ]
+        separator = ", "
+    else:
+        lines = [
+            "支持输入角色编号、中文名或英文别名。",
+            f"本赛季可用角色：",
+        ]
+        separator = "，"
+    lines.extend("  " + separator.join(chunk) for chunk in chunks)
+    return lines
 
 
 def _remaining_entry_labels(
@@ -275,9 +317,17 @@ def _prompt_runner_list(
     prompt_output_fn: Callable[[str], None],
     lang: str = "zh",
     translate_fn: Callable[[str], str] | None = None,
+    show_catalog: bool = True,
 ) -> tuple[int, ...]:
     if translate_fn is None:
         translate_fn = lambda text: text
+    if show_catalog:
+        for line in _runner_catalog_lines(
+            season=season,
+            runner_pool=tuple(helpers.season_runner_pool(season)),
+            lang=lang,
+        ):
+            prompt_output_fn(line)
     prompt_output_fn(description)
     while True:
         raw = input_fn(f"{translate_fn(prompt)}: ").strip()
@@ -387,6 +437,7 @@ def _prompt_grouped_runner_list(
                 prompt_output_fn=prompt_output_fn,
                 lang=lang,
                 translate_fn=translate_fn,
+                show_catalog=index == 0,
             )
         )
     return tuple(groups)
@@ -874,14 +925,23 @@ def _prompt_simulation_runner_tokens(
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
     lang: str = "zh",
-) -> list[str]:
+    ) -> list[str]:
     rule = helpers.get_match_type_rule(season, match_type) if match_type is not None else None
     description = "请输入 6 名登场角色，使用空格或逗号分隔。"
+    prompt_label = "请输入角色（可填编号、中文名或英文别名）"
     if rule is not None and getattr(rule, "seeded_from_runner_order", False):
         description = "请按上一轮第 1 名到第 6 名的顺序输入 6 名角色，系统会按这个顺序自动生成起跑站位。"
+    if lang == "en":
+        prompt_label = "Enter runners (IDs, Chinese names, or English aliases)"
+    for line in _runner_catalog_lines(
+        season=season,
+        runner_pool=tuple(helpers.season_runner_pool(season)),
+        lang=lang,
+    ):
+        prompt_output_fn(line)
     prompt_output_fn(description)
     while True:
-        raw = input_fn("请输入角色: ").strip()
+        raw = input_fn(f"{prompt_label}: ").strip()
         try:
             tokens, runners = _parse_simulation_runner_input(
                 raw,
