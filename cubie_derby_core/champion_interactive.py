@@ -558,6 +558,20 @@ def _request_runner_summary(
     return "已补齐" if lang == "zh" else "ready"
 
 
+def _strip_interactive_tournament_context_lines(text: str) -> str:
+    hidden_prefixes = (
+        "起始阶段：",
+        "剩余赛程：",
+        "Start Stage:",
+        "Remaining:",
+    )
+    return "\n".join(
+        line
+        for line in text.splitlines()
+        if not any(line.startswith(prefix) for prefix in hidden_prefixes)
+    )
+
+
 def _prompt_group_round_one_setup(
     *,
     season: int,
@@ -2243,7 +2257,7 @@ def run_interactive_champion_prediction_command(
         if json_output:
             result_output_fn(json.dumps(helpers.tournament_result_to_dict(tournament), ensure_ascii=False, indent=2))
         else:
-            result_output_fn(helpers.format_tournament_result(tournament))
+            result_output_fn(_strip_interactive_tournament_context_lines(helpers.format_tournament_result(tournament)))
         return 0
 
     iterations = args.iterations
@@ -2280,5 +2294,5 @@ def run_interactive_champion_prediction_command(
     if json_output:
         result_output_fn(json.dumps(helpers.champion_prediction_to_dict(summary), ensure_ascii=False, indent=2))
     else:
-        result_output_fn(helpers.format_champion_prediction_summary(summary))
+        result_output_fn(_strip_interactive_tournament_context_lines(helpers.format_champion_prediction_summary(summary)))
     return 0

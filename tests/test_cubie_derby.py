@@ -3023,7 +3023,8 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("你正在进入“赛事冠军预测”", prompt_text)
         self.assertIn("请选择冠军预测方式", prompt_text)
         self.assertIn("请选择冠军预测入口", prompt_text)
-        self.assertIn("起始阶段：总决赛", text)
+        self.assertNotIn("起始阶段：总决赛", text)
+        self.assertNotIn("剩余赛程：", text)
         self.assertIn("总决赛", text)
 
     def test_main_interactive_champion_prediction_can_start_from_beginning(self):
@@ -3155,7 +3156,8 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("Choose language / 请选择语言", prompt_text)
         self.assertIn("请选择赛季", prompt_text)
         self.assertIn("请选择分析大类", prompt_text)
-        self.assertIn("起始阶段：总决赛", text)
+        self.assertNotIn("起始阶段：总决赛", text)
+        self.assertNotIn("剩余赛程：", text)
 
     def test_main_without_args_can_choose_season_one_simulation(self):
         stdout = io.StringIO()
