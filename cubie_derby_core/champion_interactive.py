@@ -284,6 +284,53 @@ def _parse_simulation_runner_input(
     return tokens, runners
 
 
+def _runner_display_name(runner: int, *, lang: str) -> str:
+    if lang == "en":
+        return PRIMARY_RUNNER_ALIASES.get(runner, str(runner))
+    return RUNNER_NAMES.get(runner, str(runner))
+
+
+def _merge_runner_batch(
+    current: Sequence[int],
+    incoming: Sequence[int],
+    *,
+    expected_count: int,
+    lang: str,
+) -> tuple[int, ...]:
+    merged = list(current)
+    seen = set(current)
+    for runner in incoming:
+        if runner in seen:
+            display_name = _runner_display_name(runner, lang=lang)
+            if lang == "en":
+                raise ValueError(f"{display_name} was already entered.")
+            raise ValueError(f"{display_name} 已经输入过了。")
+        merged.append(runner)
+        seen.add(runner)
+    if len(merged) > expected_count:
+        if lang == "en":
+            raise ValueError(f"Too many runners. Need {expected_count}, but now have {len(merged)}.")
+        raise ValueError(f"输入过多。需要 {expected_count} 名角色，当前累计 {len(merged)} 名")
+    return tuple(merged)
+
+
+def _emit_runner_progress(
+    runners: Sequence[int],
+    *,
+    expected_count: int,
+    prompt_output_fn: Callable[[str], None],
+    lang: str,
+) -> None:
+    separator = ", " if lang == "en" else "、"
+    names = separator.join(_runner_display_name(runner, lang=lang) for runner in runners)
+    if lang == "en":
+        prompt_output_fn(f"Recorded {len(runners)}/{expected_count} runners: {names}")
+        prompt_output_fn(f"{expected_count - len(runners)} runners remaining.")
+    else:
+        prompt_output_fn(f"当前已记录 {len(runners)}/{expected_count} 名：{names}")
+        prompt_output_fn(f"还需要输入 {expected_count - len(runners)} 名角色。")
+
+
 def _prompt_runner_list(
     prompt: str,
     *,
@@ -307,15 +354,25 @@ def _prompt_runner_list(
         ):
             prompt_output_fn(line)
     prompt_output_fn(description)
+    current_runners: tuple[int, ...] = ()
     while True:
         raw = input_fn(f"{translate_fn(prompt)}: ").strip()
         try:
             runners = _parse_runner_input(raw, helpers=helpers, season=season, lang=lang)
-            if len(runners) != expected_count:
-                if lang == "en":
-                    raise ValueError(f"Expected {expected_count} runners, but got {len(runners)}.")
-                raise ValueError(f"需要输入 {expected_count} 名角色，当前是 {len(runners)} 名")
-            return runners
+            current_runners = _merge_runner_batch(
+                current_runners,
+                runners,
+                expected_count=expected_count,
+                lang=lang,
+            )
+            if len(current_runners) == expected_count:
+                return current_runners
+            _emit_runner_progress(
+                current_runners,
+                expected_count=expected_count,
+                prompt_output_fn=prompt_output_fn,
+                lang=lang,
+            )
         except ValueError as exc:
             prompt_output_fn(str(exc))
 
@@ -905,6 +962,8 @@ def _prompt_simulation_runner_tokens(
     ):
         prompt_output_fn(line)
     prompt_output_fn(description)
+    current_tokens: list[str] = []
+    current_runners: tuple[int, ...] = ()
     while True:
         raw = input_fn(f"{prompt_label}: ").strip()
         try:
@@ -914,11 +973,21 @@ def _prompt_simulation_runner_tokens(
                 season=season,
                 lang=lang,
             )
-            if len(runners) != 6:
-                if lang == "en":
-                    raise ValueError(f"Expected 6 runners, but got {len(runners)}.")
-                raise ValueError(f"需要输入 6 名角色，当前是 {len(runners)} 名")
-            return tokens
+            current_runners = _merge_runner_batch(
+                current_runners,
+                runners,
+                expected_count=6,
+                lang=lang,
+            )
+            current_tokens.extend(tokens)
+            if len(current_runners) == 6:
+                return current_tokens
+            _emit_runner_progress(
+                current_runners,
+                expected_count=6,
+                prompt_output_fn=prompt_output_fn,
+                lang=lang,
+            )
         except ValueError as exc:
             prompt_output_fn(str(exc))
 
