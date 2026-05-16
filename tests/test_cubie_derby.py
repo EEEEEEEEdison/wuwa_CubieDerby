@@ -3127,6 +3127,40 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["start_entry_point"], "grand-final")
         self.assertEqual({row["runner"] for row in data["rows"]}, {11, 12, 13, 14, 15, 16})
 
+    def test_main_interactive_champion_monte_carlo_from_start_skips_stage_customization_prompts(self):
+        class TtyStringIO(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        stdout = io.StringIO()
+        stderr = TtyStringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "1",
+                "n",
+                "4",
+                "1",
+            ],
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "monte-carlo",
+                ]
+            )
+
+        prompt_text = stderr.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("本届参赛角色（18名）", prompt_text)
+        self.assertNotIn("随机种子", prompt_text)
+        self.assertNotIn("请选择小组赛分组方式", prompt_text)
+        self.assertNotIn("上下文 =", prompt_text)
+
     def test_main_interactive_single_stage_elimination_monte_carlo_json(self):
         stdout = io.StringIO()
 
@@ -3937,8 +3971,6 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
-                "1",
-                "1",
                 "1",
                 "n",
                 "4",

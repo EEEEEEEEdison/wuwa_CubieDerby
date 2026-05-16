@@ -697,7 +697,7 @@ def _prompt_group_round_one_setup(
     group_mode = _prompt_choice(
         "请选择小组赛分组方式" if lang == "zh" else "Choose group-stage assignment mode",
         (
-            ("random", "随机分组（按 seed）" if lang == "zh" else "Randomize groups from the seed"),
+            ("random", "随机分组" if lang == "zh" else "Randomize groups"),
             ("manual", "手动指定 A/B/C 分组" if lang == "zh" else "Enter Groups A/B/C manually"),
         ),
         input_fn=input_fn,
@@ -707,7 +707,7 @@ def _prompt_group_round_one_setup(
     if group_mode == "random":
         _set_wizard_summary(
             "groups",
-            "分组 = 随机 A/B/C（按 seed）" if lang == "zh" else "Groups = Random A/B/C (from seed)",
+            "分组 = 随机 A/B/C" if lang == "zh" else "Groups = Random A/B/C",
         )
         return values
 
@@ -812,7 +812,7 @@ def _requirement_summary_parts(
             if requirement.optional:
                 return label, (
                     f"Optional. If the groups are already fixed, enter {requirement.group_count} groups "
-                    f"with {requirement.group_size} runners each; otherwise the wizard will randomize them from the seed."
+                    f"with {requirement.group_size} runners each; otherwise the wizard will randomize them automatically."
                 )
             return label, f"Enter {requirement.group_count} groups with {requirement.group_size} runners each."
         return label, f"Enter {requirement.runner_count} runners."
@@ -827,7 +827,7 @@ def _requirement_summary_parts(
         if requirement.optional:
             return requirement.label, (
                 f"可选。如果你已经确定分组，可输入 {requirement.group_count} 组、每组 {requirement.group_size} 名；"
-                "否则系统会按 seed 随机分组。"
+                "否则系统会自动随机分组。"
             )
         return requirement.label, f"请输入 {requirement.group_count} 组、每组 {requirement.group_size} 名角色。"
     return requirement.label, f"请输入 {requirement.runner_count} 名角色。"
@@ -2136,10 +2136,6 @@ def run_interactive_champion_prediction_command(
             f"{_entrant_summary_label(request, lang=lang)} = "
             f"{_request_runner_summary(request, season=season, helpers=helpers, lang=lang, translate_fn=translate_fn)}",
         )
-        _set_wizard_summary(
-            "context",
-            "上下文 = 已载入" if lang == "zh" else "Context = Loaded",
-        )
         prompt_output_fn(
             f"已从 {args.tournament_context_in} 载入赛事上下文："
             f"{translate_fn(stage_label)}"
@@ -2183,6 +2179,7 @@ def run_interactive_champion_prediction_command(
         ),
     )
 
+    auto_full_tournament_monte_carlo = False
     if request is None:
         entry_mode = getattr(args, "_interactive_entry_mode", None)
         if entry_mode is None:
@@ -2230,14 +2227,24 @@ def run_interactive_champion_prediction_command(
             translate_fn=translate_fn,
         )
         if entry_point == "group-a-round-1":
-            requirement_values = _prompt_group_round_one_setup(
-                helpers=helpers,
-                season=season,
-                input_fn=input_fn,
-                prompt_output_fn=prompt_output_fn,
-                lang=lang,
-                translate_fn=translate_fn,
-            )
+            if prediction_mode == "monte-carlo" and entry_mode == "from-start":
+                season_roster = tuple(helpers.season_runner_pool(season))
+                requirement_values = {"season-roster": season_roster}
+                auto_full_tournament_monte_carlo = True
+                _set_wizard_summary(
+                    "runners",
+                    f"{'本届参赛角色（18名）' if lang == 'zh' else 'Tournament roster (18)'} = "
+                    f"{format_runner_list(season_roster)}",
+                )
+            else:
+                requirement_values = _prompt_group_round_one_setup(
+                    helpers=helpers,
+                    season=season,
+                    input_fn=input_fn,
+                    prompt_output_fn=prompt_output_fn,
+                    lang=lang,
+                    translate_fn=translate_fn,
+                )
             handled_requirement_keys = {"season-roster", "group-stage-groups"}
         else:
             requirement_values = _auto_fill_entry_inputs(
@@ -2286,12 +2293,8 @@ def run_interactive_champion_prediction_command(
         )
         _set_wizard_summary(
             "runners",
-            f"{'参赛角色' if lang == 'zh' else 'Entrants'} = "
+            f"{_entrant_summary_label(request, lang=lang)} = "
             f"{_request_runner_summary(request, season=season, helpers=helpers, lang=lang, translate_fn=translate_fn)}",
-        )
-        _set_wizard_summary(
-            "context",
-            "上下文 = 已补齐" if lang == "zh" else "Context = Ready",
         )
 
     if args.tournament_context_out:
@@ -2299,7 +2302,7 @@ def run_interactive_champion_prediction_command(
         prompt_output_fn(f"赛事上下文已写入：{args.tournament_context_out}")
 
     seed = args.seed
-    if not getattr(args, "_seed_explicit", False):
+    if not getattr(args, "_seed_explicit", False) and not auto_full_tournament_monte_carlo:
         seed_text = _prompt_line_block(
             title="随机种子" if lang == "zh" else "Random Seed",
             prompt="请输入随机种子（留空表示不固定）",
@@ -2309,10 +2312,11 @@ def run_interactive_champion_prediction_command(
             allow_empty=True,
         )
         seed = int(seed_text) if seed_text else None
-    _set_wizard_summary(
-        "seed",
-        f"{'种子' if lang == 'zh' else 'Seed'} = {seed if seed is not None else ('未固定' if lang == 'zh' else 'unfixed')}",
-    )
+    if getattr(args, "_seed_explicit", False) or not auto_full_tournament_monte_carlo:
+        _set_wizard_summary(
+            "seed",
+            f"{'种子' if lang == 'zh' else 'Seed'} = {seed if seed is not None else ('未固定' if lang == 'zh' else 'unfixed')}",
+        )
     json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no_block(
         title="输出格式" if lang == "zh" else "Output Format",
         prompt="是否输出 JSON 结果",
