@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import random
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -300,6 +301,22 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("  赛季 = 第2季", lines)
         self.assertIn("  分析 = 单场胜率分析", lines)
         self.assertEqual(lines[-3:], ["=" * 24, "请选择单场模拟阶段", "=" * 24])
+
+    def test_interactive_wizard_ui_can_refresh_summary_without_new_block(self):
+        lines: list[str] = []
+        ui = InteractiveWizardUI(prompt_output_fn=lines.append, lang="zh", compact_mode=True)
+        ui.set_summary("season", "赛季 = 第2季")
+        ui.start_block("并行设置")
+
+        lines.clear()
+        ui.set_summary("workers", "并行 = 0")
+        ui.refresh_summary()
+
+        self.assertEqual(lines[0], "\x1b[2J\x1b[H")
+        self.assertIn("当前摘要", lines)
+        self.assertIn("  赛季 = 第2季", lines)
+        self.assertIn("  并行 = 0", lines)
+        self.assertNotIn("并行设置", lines)
 
     def test_single_runner_always_wins(self):
         config = RaceConfig(
@@ -3895,6 +3912,44 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("Choose champion prediction entry", prompt_text)
         self.assertIn("progress stays visible in the summary above", prompt_text)
         self.assertIn("How to provide the Grand Final roster", prompt_text)
+
+    def test_main_interactive_champion_monte_carlo_refreshes_summary_before_progress(self):
+        class TtyStringIO(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        stdout = io.StringIO()
+        stderr = TtyStringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "1",
+                "1",
+                "1",
+                "n",
+                "4",
+                "0",
+            ],
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "monte-carlo",
+                    "--seed",
+                    "7",
+                ]
+            )
+
+        prompt_text = stderr.getvalue()
+        self.assertEqual(exit_code, 0)
+        workers_match = re.search(r"并行\s+= 0", prompt_text)
+        self.assertIsNotNone(workers_match)
+        self.assertIn("冠军预测进度", prompt_text)
+        self.assertLess(workers_match.start(), prompt_text.find("冠军预测进度"))
 
 
 if __name__ == "__main__":

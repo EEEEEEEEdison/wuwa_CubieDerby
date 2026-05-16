@@ -171,29 +171,36 @@ class InteractiveWizardUI:
                 return
         self.summaries.append((key, value))
 
+    def _render_summary(self) -> None:
+        self.prompt_output_fn("\x1b[2J\x1b[H")
+        if self.summaries:
+            heading = "当前摘要" if self.lang == "zh" else "Current Summary"
+            _emit_heading(heading, prompt_output_fn=self.prompt_output_fn, char="-")
+            parsed_lines = [_split_summary_line(line) for _, line in self.summaries]
+            keyed_lines = [(key, value) for key, value in parsed_lines if key is not None]
+            plain_lines = [value for key, value in parsed_lines if key is None]
+            if keyed_lines:
+                key_width = max(_display_width(key) for key, _ in keyed_lines)
+                value_width = max(24, _terminal_width() - (2 + key_width + 3))
+                for key, value in keyed_lines:
+                    wrapped_lines = _wrap_display_text(value, value_width)
+                    self.prompt_output_fn(f"  {_pad_display(key, key_width)} = {wrapped_lines[0]}")
+                    continuation_prefix = f"  {' ' * key_width}   "
+                    for line in wrapped_lines[1:]:
+                        self.prompt_output_fn(f"{continuation_prefix}{line}")
+            for value in plain_lines:
+                wrapped_lines = _wrap_display_text(value, _terminal_width() - 2)
+                for line in wrapped_lines:
+                    self.prompt_output_fn(f"  {line}")
+        self.prompt_output_fn("")
+
+    def refresh_summary(self) -> None:
+        if self.compact_mode:
+            self._render_summary()
+
     def start_block(self, title: str) -> None:
         if self.compact_mode:
-            self.prompt_output_fn("\x1b[2J\x1b[H")
-            if self.summaries:
-                heading = "当前摘要" if self.lang == "zh" else "Current Summary"
-                _emit_heading(heading, prompt_output_fn=self.prompt_output_fn, char="-")
-                parsed_lines = [_split_summary_line(line) for _, line in self.summaries]
-                keyed_lines = [(key, value) for key, value in parsed_lines if key is not None]
-                plain_lines = [value for key, value in parsed_lines if key is None]
-                if keyed_lines:
-                    key_width = max(_display_width(key) for key, _ in keyed_lines)
-                    value_width = max(24, _terminal_width() - (2 + key_width + 3))
-                    for key, value in keyed_lines:
-                        wrapped_lines = _wrap_display_text(value, value_width)
-                        self.prompt_output_fn(f"  {_pad_display(key, key_width)} = {wrapped_lines[0]}")
-                        continuation_prefix = f"  {' ' * key_width}   "
-                        for line in wrapped_lines[1:]:
-                            self.prompt_output_fn(f"{continuation_prefix}{line}")
-                for value in plain_lines:
-                    wrapped_lines = _wrap_display_text(value, _terminal_width() - 2)
-                    for line in wrapped_lines:
-                        self.prompt_output_fn(f"  {line}")
-                self.prompt_output_fn("")
+            self._render_summary()
         else:
             self.prompt_output_fn("")
         _emit_heading(title, prompt_output_fn=self.prompt_output_fn)
@@ -205,6 +212,11 @@ _ACTIVE_WIZARD_UI: InteractiveWizardUI | None = None
 def _set_wizard_summary(key: str, value: str) -> None:
     if _ACTIVE_WIZARD_UI is not None:
         _ACTIVE_WIZARD_UI.set_summary(key, value)
+
+
+def _refresh_wizard_summary() -> None:
+    if _ACTIVE_WIZARD_UI is not None:
+        _ACTIVE_WIZARD_UI.refresh_summary()
 
 
 class InteractiveTraceLogger:
@@ -1862,6 +1874,7 @@ def run_interactive_simulation_command(
         season_roster_scan=False,
     )
     config = helpers.build_config_from_args(interactive_args)
+    _refresh_wizard_summary()
     if simulation_mode == "debug":
         _emit_interactive_trace_log(
             config=config,
@@ -2313,6 +2326,7 @@ def run_interactive_champion_prediction_command(
     )
 
     if prediction_mode == "random":
+        _refresh_wizard_summary()
         start_time = time.perf_counter()
         tournament = replace(
             helpers.simulate_tournament_from_entry_request(request, random.Random(seed)),
@@ -2348,6 +2362,7 @@ def run_interactive_champion_prediction_command(
             )
         )
     _set_wizard_summary("workers", f"{'并行' if lang == 'zh' else 'Workers'} = {workers}")
+    _refresh_wizard_summary()
     summary = helpers.run_champion_prediction_from_entry_request_monte_carlo(
         request,
         iterations,
