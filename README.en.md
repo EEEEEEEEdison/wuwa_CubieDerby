@@ -82,6 +82,43 @@ python cubie_derby.py --season 2 --champion-prediction monte-carlo --champion-an
 
 `--runners` selects the participants. You can freely change both the runner combination and the number of participants; see [Runner IDs and Skills](#runner-ids-and-skills) for the available ids, names, and skill notes.
 
+## Runner IDs and Skills
+
+The notes below describe the current simulator implementation.
+
+Season grouping in this project's numbering scheme:
+
+- Season 1 roster: `1 今汐`, `2 长离`, `3 卡卡罗`, `4 守岸人`, `5 椿`, `6 小土豆`, `7 洛可可`, `8 布兰特`, `9 坎特蕾拉`, `10 赞妮`, `11 卡提希娅`, `12 菲比`
+- Season 2 roster: `1 今汐`, `2 长离`, `3 卡卡罗`, `4 守岸人`, `6 小土豆`, `11 卡提希娅`, `12 菲比`, `13 西格莉卡`, `14 陆赫斯`, `15 达尼娅`, `16 绯雪`, `17 千咲`, `18 莫宁`, `19 琳奈`, `20 爱弥斯`, `21 奥古斯塔`, `22 尤诺`, `23 弗洛洛`
+
+So in the actual Season 2 competition pool, runners `5 椿`, `7 洛可可`, `8 布兰特`, `9 坎特蕾拉`, and `10 赞妮` are not included.
+
+`--season` switches the race ruleset, not the allowed runner list, so you can still choose any custom runner mix in `--runners` when you want custom experiments.
+
+- `1` / `jinhsi`: 今汐. She only checks her skill after another non-NPC runner finishes their turn resolution, and only when that acting runner ends in the same cell and immediately to her left. On a successful `40%` check, 今汐 moves to the far left of that cell. This uses the final post-action position, so normal movement, no-move turns treated as an active `0`-step move, and shuffle-cell reordering can all qualify if the acting runner ends immediately to 今汐's left. NPC turns and Luno's later gather effect do not trigger 今汐.
+- `2` / `changli`: 长离. At round end, if she is not the rightmost runner in her current cell, she makes a `65%` check; on success, she is forced to act last next round.
+- `3` / `calcharo`: 卡卡罗. At action start, if he is currently last place, he gets `+3` steps.
+- `4` / `shorekeeper`: 守岸人. Uses a special `2..3` dice range instead of the normal `1..3`.
+- `5` / `camellya`: 椿. At action start, she makes a `50%` check to move alone; on success, she does not carry other runners this turn and gains extra steps equal to the number of other runners in her current cell.
+- `6` / `potato`: 小土豆. After rolling, makes a `28%` check to repeat the same die and add it again.
+- `7` / `roccia`: 洛可可. If she is the last actor of the round, she gets `+2` steps.
+- `8` / `brant`: 布兰特. If he is the first actor of the round, he gets `+2` steps.
+- `9` / `cantarella`: 坎特蕾拉. Starts in step-by-step movement mode. While this mode is active, she moves one cell at a time; if she reaches a cell with other runners, she merges with that cell for the remaining movement and then leaves that special mode afterward.
+- `10` / `zani`: 赞妮. Uses a special `1 or 3` dice. At action start, if she shares a cell with others, she makes a `40%` check; on success, her next action is stored with an extra `+2` steps.
+- `11` / `cartethyia`: 卡提希娅. Once per race, after her own action ends, if she is last place, she enters an empowered state. For the rest of the race, each of her later turns makes a `60%` check for `+2` steps.
+- `12` / `phoebe`: 菲比. At action start, makes a `50%` check for `+1` step.
+- `13` / `sigrika`: 西格莉卡. At round start, marks up to two immediately higher-ranked runners; marked runners move `1` fewer step that round, with a minimum movement of `1`. She can act in round `1` for fixed starts, but skips round `1` for random stack starts such as `--start "1:*"`.
+- `14` / `luuk_herssen`: 陆赫斯. Only on his own turn, forward special cells move his active group `4` cells total, and backward special cells move his active group `2` cells backward.
+- `15` / `denia`: 达尼娅. If her current dice roll matches her previous round's dice roll, she gets `+2` steps.
+- `16` / `hiyuki`: 绯雪. After round `3`, once her movement path and the active NPC path intersect, she gains a persistent `+1` step bonus for future moves. The bonus does not stack.
+- `17` / `chisa`: 千咲. Dice are rolled for all round participants at round start; if her dice value is tied for the lowest value, including NPC when active, she gets `+2` steps that turn.
+- `18` / `mornye`: 莫宁. Her dice follows a deterministic `3 -> 2 -> 1` cycle.
+- `19` / `lynae`: 琳奈. Before Sigrika's debuff is applied, she has a `60%` chance to move with double dice, a `20%` chance to be unable to move, and otherwise moves normally.
+- `20` / `aemeath`: 爱弥斯. Once per race, after she has passed cell `17`, her skill enters a pending state. Passing cell `17` while being carried by another runner also arms this pending state, but does not trigger an immediate check. At the end of each of 爱弥斯's own forward moves, if the pending state is armed, she checks whether another non-NPC runner is ahead of her current position. If so, only 爱弥斯 teleports to the nearest such runner's cell and enters from the left; any runners she carried stay on her action's normal landing cell. If no valid target exists, the pending state remains and she checks again after her next own forward move.
+- `21` / `augusta`: 奥古斯塔. At action start, if she is the leftmost non-NPC runner in a shared cell, she skips this turn. Her next turn is forced to be last in the round, and that next turn does not check her own skill again. For random stacked starts such as `--start "1:*"`, she skips the round `1` skill check; for fixed custom starts, round `1` checks still apply.
+- `22` / `luno`: 尤诺. Once per race, and only after her own active turn ends, she checks whether she has already passed cell `17`. If so, the skill only triggers when, after excluding NPC, her current rank is neither first nor last. When it triggers, every non-NPC runner is gathered into her current cell, ordered by the pre-teleport ranking from highest to lowest. Otherwise, the skill is kept and checked again after her next active turn.
+- `23` / `phrolova`: 弗洛洛. At action start, if she is the rightmost non-NPC runner in a shared cell, she gains `+3` steps for that turn. For random stacked starts such as `--start "1:*"`, she skips the round `1` skill check; for fixed custom starts, round `1` checks still apply.
+
 ## Advanced CLI Reference
 
 ### `-n` / `--iterations`
@@ -393,43 +430,6 @@ Example:
 ```powershell
 python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:2;-2:1,4;-1:3,6;1:5" --runners 1 2 3 4 5 6 --seed 42
 ```
-
-## Runner IDs and Skills
-
-The notes below describe the current simulator implementation.
-
-Season grouping in this project's numbering scheme:
-
-- Season 1 roster: `1 今汐`, `2 长离`, `3 卡卡罗`, `4 守岸人`, `5 椿`, `6 小土豆`, `7 洛可可`, `8 布兰特`, `9 坎特蕾拉`, `10 赞妮`, `11 卡提希娅`, `12 菲比`
-- Season 2 roster: `1 今汐`, `2 长离`, `3 卡卡罗`, `4 守岸人`, `6 小土豆`, `11 卡提希娅`, `12 菲比`, `13 西格莉卡`, `14 陆赫斯`, `15 达尼娅`, `16 绯雪`, `17 千咲`, `18 莫宁`, `19 琳奈`, `20 爱弥斯`, `21 奥古斯塔`, `22 尤诺`, `23 弗洛洛`
-
-So in the actual Season 2 competition pool, runners `5 椿`, `7 洛可可`, `8 布兰特`, `9 坎特蕾拉`, and `10 赞妮` are not included.
-
-`--season` switches the race ruleset, not the allowed runner list, so you can still choose any custom runner mix in `--runners` when you want custom experiments.
-
-- `1` / `jinhsi`: 今汐. She only checks her skill after another non-NPC runner finishes their turn resolution, and only when that acting runner ends in the same cell and immediately to her left. On a successful `40%` check, 今汐 moves to the far left of that cell. This uses the final post-action position, so normal movement, no-move turns treated as an active `0`-step move, and shuffle-cell reordering can all qualify if the acting runner ends immediately to 今汐's left. NPC turns and Luno's later gather effect do not trigger 今汐.
-- `2` / `changli`: 长离. At round end, if she is not the rightmost runner in her current cell, she makes a `65%` check; on success, she is forced to act last next round.
-- `3` / `calcharo`: 卡卡罗. At action start, if he is currently last place, he gets `+3` steps.
-- `4` / `shorekeeper`: 守岸人. Uses a special `2..3` dice range instead of the normal `1..3`.
-- `5` / `camellya`: 椿. At action start, she makes a `50%` check to move alone; on success, she does not carry other runners this turn and gains extra steps equal to the number of other runners in her current cell.
-- `6` / `potato`: 小土豆. After rolling, makes a `28%` check to repeat the same die and add it again.
-- `7` / `roccia`: 洛可可. If she is the last actor of the round, she gets `+2` steps.
-- `8` / `brant`: 布兰特. If he is the first actor of the round, he gets `+2` steps.
-- `9` / `cantarella`: 坎特蕾拉. Starts in step-by-step movement mode. While this mode is active, she moves one cell at a time; if she reaches a cell with other runners, she merges with that cell for the remaining movement and then leaves that special mode afterward.
-- `10` / `zani`: 赞妮. Uses a special `1 or 3` dice. At action start, if she shares a cell with others, she makes a `40%` check; on success, her next action is stored with an extra `+2` steps.
-- `11` / `cartethyia`: 卡提希娅. Once per race, after her own action ends, if she is last place, she enters an empowered state. For the rest of the race, each of her later turns makes a `60%` check for `+2` steps.
-- `12` / `phoebe`: 菲比. At action start, makes a `50%` check for `+1` step.
-- `13` / `sigrika`: 西格莉卡. At round start, marks up to two immediately higher-ranked runners; marked runners move `1` fewer step that round, with a minimum movement of `1`. She can act in round `1` for fixed starts, but skips round `1` for random stack starts such as `--start "1:*"`.
-- `14` / `luuk_herssen`: 陆赫斯. Only on his own turn, forward special cells move his active group `4` cells total, and backward special cells move his active group `2` cells backward.
-- `15` / `denia`: 达尼娅. If her current dice roll matches her previous round's dice roll, she gets `+2` steps.
-- `16` / `hiyuki`: 绯雪. After round `3`, once her movement path and the active NPC path intersect, she gains a persistent `+1` step bonus for future moves. The bonus does not stack.
-- `17` / `chisa`: 千咲. Dice are rolled for all round participants at round start; if her dice value is tied for the lowest value, including NPC when active, she gets `+2` steps that turn.
-- `18` / `mornye`: 莫宁. Her dice follows a deterministic `3 -> 2 -> 1` cycle.
-- `19` / `lynae`: 琳奈. Before Sigrika's debuff is applied, she has a `60%` chance to move with double dice, a `20%` chance to be unable to move, and otherwise moves normally.
-- `20` / `aemeath`: 爱弥斯. Once per race, after she has passed cell `17`, her skill enters a pending state. Passing cell `17` while being carried by another runner also arms this pending state, but does not trigger an immediate check. At the end of each of 爱弥斯's own forward moves, if the pending state is armed, she checks whether another non-NPC runner is ahead of her current position. If so, only 爱弥斯 teleports to the nearest such runner's cell and enters from the left; any runners she carried stay on her action's normal landing cell. If no valid target exists, the pending state remains and she checks again after her next own forward move.
-- `21` / `augusta`: 奥古斯塔. At action start, if she is the leftmost non-NPC runner in a shared cell, she skips this turn. Her next turn is forced to be last in the round, and that next turn does not check her own skill again. For random stacked starts such as `--start "1:*"`, she skips the round `1` skill check; for fixed custom starts, round `1` checks still apply.
-- `22` / `luno`: 尤诺. Once per race, and only after her own active turn ends, she checks whether she has already passed cell `17`. If so, the skill only triggers when, after excluding NPC, her current rank is neither first nor last. When it triggers, every non-NPC runner is gathered into her current cell, ordered by the pre-teleport ranking from highest to lowest. Otherwise, the skill is kept and checked again after her next active turn.
-- `23` / `phrolova`: 弗洛洛. At action start, if she is the rightmost non-NPC runner in a shared cell, she gains `+3` steps for that turn. For random stacked starts such as `--start "1:*"`, she skips the round `1` skill check; for fixed custom starts, round `1` checks still apply.
 
 ## Season 2 Rules
 
