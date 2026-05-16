@@ -20,47 +20,69 @@
 
 ## 快速开始
 
-最推荐的入口是交互向导。直接运行下面的命令后，程序会按“赛季 -> 分析大类 -> 子模式 -> 必要参数”的顺序一步步询问：
+当前版本更推荐把 `python cubie_derby.py` 当成默认入口。程序会先进入交互向导，再按层级一步步询问必要信息，而不是要求你一开始就记住全部启动参数。
 
 ```powershell
 python cubie_derby.py
 ```
 
-如果你想使用英文交互提示，可以加上：
+向导当前的主流程分成两大类：
+
+- `赛事冠军预测`：继续分为 `单届演示` 和 `Monte Carlo`；如果选择 Monte Carlo，还会继续选择 `快速分析` 或 `高阶分析`。
+- `单场胜率分析`：先选择当前比赛阶段，再补齐登场角色、起跑规则、模拟次数，以及是否进入调试 Trace。
+
+交互向导的提问顺序大致是：
+
+1. 选择语言与赛季。
+2. 选择分析大类。
+3. 选择子模式。
+4. 只补当前路径真正需要的输入。
+5. 输出文本结果，或改成 JSON / Trace / 日志。
+
+常用交互入口：
 
 ```powershell
+python cubie_derby.py
 python cubie_derby.py --interactive-language en
+python cubie_derby.py --season 2 --json
+python cubie_derby.py --season 2 --iterations 10000
 ```
 
-如果你已经知道要跑什么，也可以继续使用命令行参数跳过向导。例如运行第 2 季单场胜率分析：
+说明：
+
+- 直接运行 `python cubie_derby.py` 就会进入向导，不需要额外写 `--interactive`。
+- 你仍然可以先带一部分已知参数，让向导只补剩余问题。
+- 当前第 1 季交互式流程以基础单场分析为主；完整赛事冠军预测主流程目前以第 2 季为主。
+- 交互向导支持中文和英文提示，JSON 结构不随语言变化。
+
+## 典型交互用途
+
+### 赛事冠军预测
+
+- 从头开始跑一届完整赛季，查看最终冠军和每个阶段结果。
+- 从中途阶段继续推演，例如从 `小组A第二轮`、`淘汰赛A`、`胜者组` 或 `总决赛` 开始。
+- 对 Monte Carlo 冠军预测选择 `fast` 或 `advanced`；高阶模式会追加阶段漏斗、冠军路线、总决赛转化率和地图表现。
+
+### 单场胜率分析
+
+- 按 `match-type` 直接套用阶段规则，例如小组赛第一轮、小组赛第二轮、淘汰赛、败者组、胜者组、总决赛。
+- 普通 Monte Carlo 模式适合快速看胜率。
+- 调试模式会启用 Trace，并可把日志写到 `logs/trace/`。
+
+## 命令行直跑（进阶）
+
+如果你已经非常清楚自己要跑什么，也可以跳过向导，直接带参数启动。常见例子：
 
 ```powershell
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
-```
-
-如果你想让程序按某个比赛阶段的默认规则自动补齐参数，可以直接传 `--match-type`：
-
-```powershell
 python cubie_derby.py --season 2 --match-type group-round-1 -n 100000 --runners 11 12 13 14 15 16 --seed 42
-```
-
-如果你想直接跑完整个赛季 2 赛事流程，可以改用 `--champion-prediction`：
-
-```powershell
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
-```
-
-向导也支持带启动参数：你可以先给出 `--season`、`--iterations`、`--json` 等已知信息，再让向导只补剩下缺的输入。
-
-```powershell
-python cubie_derby.py --interactive --season 2
-python cubie_derby.py --season 2 --iterations 10000 --json
-python cubie_derby.py --interactive --interactive-language en --season 2 --json
+python cubie_derby.py --season 2 --champion-prediction monte-carlo --champion-analysis advanced -n 10000 --workers 0
 ```
 
 `--runners` 用于选择参赛角色。你可以自由更改角色组合和参赛人数；可用编号、名称和技能说明见下方的[角色编号与技能](#角色编号与技能)。
 
-## 参数说明
+## CLI 参数速查（进阶）
 
 ### `-n` / `--iterations`
 

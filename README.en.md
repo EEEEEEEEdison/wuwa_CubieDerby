@@ -20,47 +20,69 @@ Core things this project can simulate:
 
 ## Quick Start
 
-The recommended entry point is the interactive wizard. Run this command and the program will guide you through "season -> analysis branch -> submode -> required parameters":
+This version is designed around `python cubie_derby.py` as the default entry point. The program starts an interactive wizard first, then asks only for the inputs needed for your chosen path instead of expecting you to remember every startup flag up front.
 
 ```powershell
 python cubie_derby.py
 ```
 
-To force English prompts:
+The wizard currently branches into two primary paths:
+
+- `Tournament champion prediction`: choose either a `single-run demo` or `Monte Carlo`; if you choose Monte Carlo, the wizard will then ask whether you want `fast` or `advanced` analysis.
+- `Single-stage win-rate analysis`: choose the current match stage first, then provide runners, start rule, iteration count, and whether you want debug Trace mode.
+
+The prompt flow is roughly:
+
+1. Choose language and season.
+2. Choose the analysis branch.
+3. Choose the submode.
+4. Answer only the questions needed for that path.
+5. Print text results or switch to JSON / Trace / log output.
+
+Common interactive entry points:
 
 ```powershell
+python cubie_derby.py
 python cubie_derby.py --interactive-language en
+python cubie_derby.py --season 2 --json
+python cubie_derby.py --season 2 --iterations 10000
 ```
 
-If you already know the parameters you want, you can still skip the wizard. For example, run a Season 2 single-stage win-rate simulation:
+Notes:
+
+- Running `python cubie_derby.py` already enters the wizard, so `--interactive` is optional.
+- You can still prefill known flags first and let the wizard ask only for the missing pieces.
+- The current Season 1 interactive flow focuses on basic single-stage analysis first; full tournament champion prediction still primarily follows the Season 2 flow.
+- The wizard supports both Chinese and English prompts, while the JSON schema stays language-agnostic.
+
+## Typical Interactive Use Cases
+
+### Tournament champion prediction
+
+- Simulate a full season from the beginning and inspect the final champion plus every stage result.
+- Resume from a mid-tournament point such as `group-a-round-2`, `elimination-a`, `winners-bracket`, or `grand-final`.
+- Choose `fast` or `advanced` for Monte Carlo champion prediction; advanced mode adds stage funnel, champion route, grand-final conversion, and map-performance summaries.
+
+### Single-stage win-rate analysis
+
+- Apply stage defaults directly through `match-type`, such as group round 1, group round 2, elimination, losers bracket, winners bracket, or grand final.
+- Use normal Monte Carlo mode for quick win-rate estimates.
+- Use debug mode when you want Trace enabled, including optional log files under `logs/trace/`.
+
+## Direct CLI Runs (Advanced)
+
+If you already know exactly what you want to run, you can skip the wizard and launch by flags directly. Common examples:
 
 ```powershell
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
-```
-
-Run a Season 2 single-stage simulation with an explicit match type. The stage rules fill in the default qualify cutoff automatically:
-
-```powershell
 python cubie_derby.py --season 2 --match-type group-round-1 -n 100000 --runners 11 12 13 14 15 16 --seed 42
-```
-
-Run one full Season 2 tournament and print the champion plus every stage result:
-
-```powershell
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
-```
-
-You can also prefill part of the interactive flow. For example, pass `--season`, `--iterations`, or `--json` first and let the wizard ask only for missing inputs:
-
-```powershell
-python cubie_derby.py --interactive --season 2
-python cubie_derby.py --season 2 --iterations 10000 --json
-python cubie_derby.py --interactive --interactive-language en --season 2 --json
+python cubie_derby.py --season 2 --champion-prediction monte-carlo --champion-analysis advanced -n 10000 --workers 0
 ```
 
 `--runners` selects the participants. You can freely change both the runner combination and the number of participants; see [Runner IDs and Skills](#runner-ids-and-skills) for the available ids, names, and skill notes.
 
-## Parameter Guide
+## Advanced CLI Reference
 
 ### `-n` / `--iterations`
 
