@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import random
 import time
+import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -165,27 +166,35 @@ def _runner_catalog_lines(
     runner_pool: Sequence[int],
     lang: str,
 ) -> list[str]:
+    def display_width(text: str) -> int:
+        width = 0
+        for char in text:
+            width += 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+        return width
+
+    def pad_display(text: str, target_width: int) -> str:
+        return text + " " * max(0, target_width - display_width(text))
+
     entries = []
     for runner in runner_pool:
         if lang == "en":
-            entries.append(f"{runner}={PRIMARY_RUNNER_ALIASES.get(runner, str(runner))}")
+            entries.append(f"{runner:>2} = {PRIMARY_RUNNER_ALIASES.get(runner, str(runner))}")
         else:
-            entries.append(f"{runner}={RUNNER_NAMES.get(runner, str(runner))}")
-    chunk_size = 6
+            entries.append(f"{runner:>2} = {RUNNER_NAMES.get(runner, str(runner))}")
+    chunk_size = 3
     chunks = [entries[index : index + chunk_size] for index in range(0, len(entries), chunk_size)]
+    column_width = max(display_width(entry) for entry in entries)
     if lang == "en":
         lines = [
             "You may enter runner IDs, Chinese names, or English aliases.",
             f"Available Season {season} runners:",
         ]
-        separator = ", "
     else:
         lines = [
             "支持输入角色编号、中文名或英文别名。",
             f"本赛季可用角色：",
         ]
-        separator = "，"
-    lines.extend("  " + separator.join(chunk) for chunk in chunks)
+    lines.extend("  " + " | ".join(pad_display(entry, column_width) for entry in chunk) for chunk in chunks)
     return lines
 
 
@@ -369,12 +378,12 @@ def _emit_runner_progress(
     if lang == "en":
         prompt_output_fn(f"Recorded {len(runners)}/{expected_count} runners:")
         for index, runner in enumerate(runners, start=1):
-            prompt_output_fn(f"  {index}. {_runner_display_name(runner, lang=lang)}")
+            prompt_output_fn(f"  {index:>2}. {_runner_display_name(runner, lang=lang)}")
         prompt_output_fn(f"{expected_count - len(runners)} runners remaining.")
     else:
         prompt_output_fn(f"当前已记录 {len(runners)}/{expected_count} 名：")
         for index, runner in enumerate(runners, start=1):
-            prompt_output_fn(f"  {index} = {_runner_display_name(runner, lang=lang)}")
+            prompt_output_fn(f"  {index:>2} = {_runner_display_name(runner, lang=lang)}")
         prompt_output_fn(f"还需要输入 {expected_count - len(runners)} 名角色。")
 
 
