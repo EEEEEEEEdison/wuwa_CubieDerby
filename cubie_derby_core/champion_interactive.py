@@ -250,6 +250,18 @@ def _simulation_mode_summary(mode: str, *, lang: str) -> str:
     }[mode]
 
 
+def _champion_entry_mode_summary(mode: str, *, lang: str) -> str:
+    if lang == "en":
+        return {
+            "from-start": "Entry = From beginning",
+            "from-stage": "Entry = From specific stage",
+        }[mode]
+    return {
+        "from-start": "入口 = 从头开始",
+        "from-stage": "入口 = 从指定阶段开始",
+    }[mode]
+
+
 def _emit_interactive_trace_log(
     *,
     config: Any,
@@ -1240,8 +1252,9 @@ def run_interactive_simulation_command(
             prompt_output_fn=prompt_output_fn,
             translate_fn=translate_fn,
         )
-        _set_wizard_summary("stage", f"{'阶段' if lang == 'zh' else 'Stage'} = {helpers.get_match_type_rule(season, match_type).label}")
-        prompt_output_fn(f"当前模拟阶段：{helpers.get_match_type_rule(season, match_type).label}")
+        localized_match_label = translate_fn(helpers.get_match_type_rule(season, match_type).label)
+        _set_wizard_summary("stage", f"{'阶段' if lang == 'zh' else 'Stage'} = {localized_match_label}")
+        prompt_output_fn(f"当前模拟阶段：{localized_match_label}")
         prompt_output_fn("下面会先选择普通分析还是调试模式，再继续询问登场角色和其他参数。")
     else:
         match_type = None
@@ -1584,8 +1597,19 @@ def run_interactive_command(
                 )
             ),
         )
+        entry_mode = _prompt_choice(
+            "请选择冠军预测入口",
+            (
+                ("from-start", "从头开始（完整赛事）"),
+                ("from-stage", "从指定阶段开始"),
+            ),
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+            translate_fn=translate_fn,
+        )
+        _set_wizard_summary("entry_mode", _champion_entry_mode_summary(entry_mode, lang=lang))
         return run_interactive_champion_prediction_command(
-            _with_args(args, champion_prediction=prediction_mode),
+            _with_args(args, champion_prediction=prediction_mode, _interactive_entry_mode=entry_mode),
             show_progress=show_progress,
             helpers=champion_helpers,
             input_fn=input_fn,
@@ -1650,7 +1674,7 @@ def run_interactive_champion_prediction_command(
         stage_label = helpers.get_tournament_entry_point_definition(season, request.entry_point).label
         _set_wizard_summary(
             "stage",
-            f"{'起始阶段' if lang == 'zh' else 'Start Stage'} = {stage_label}",
+            f"{'起始阶段' if lang == 'zh' else 'Start Stage'} = {translate_fn(stage_label)}",
         )
         _set_wizard_summary(
             "context",
@@ -1658,7 +1682,7 @@ def run_interactive_champion_prediction_command(
         )
         prompt_output_fn(
             f"已从 {args.tournament_context_in} 载入赛事上下文："
-            f"{stage_label}"
+            f"{translate_fn(stage_label)}"
         )
         _emit_champion_entry_guidance(
             season=season,
@@ -1699,21 +1723,37 @@ def run_interactive_champion_prediction_command(
     )
 
     if request is None:
-        entry_options = [
-            (key, helpers.get_tournament_entry_point_definition(season, key).label)
-            for key in helpers.tournament_entry_point_choices(season)
-        ]
-        entry_point = _prompt_choice(
-            "请选择从哪个阶段开始",
-            entry_options,
-            input_fn=input_fn,
-            prompt_output_fn=prompt_output_fn,
-            translate_fn=translate_fn,
-        )
+        entry_mode = getattr(args, "_interactive_entry_mode", None)
+        if entry_mode is None:
+            entry_mode = _prompt_choice(
+                "请选择冠军预测入口",
+                (
+                    ("from-start", "从头开始（完整赛事）"),
+                    ("from-stage", "从指定阶段开始"),
+                ),
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+                translate_fn=translate_fn,
+            )
+        _set_wizard_summary("entry_mode", _champion_entry_mode_summary(entry_mode, lang=lang))
+        if entry_mode == "from-start":
+            entry_point = helpers.tournament_entry_point_choices(season)[0]
+        else:
+            entry_options = [
+                (key, helpers.get_tournament_entry_point_definition(season, key).label)
+                for key in helpers.tournament_entry_point_choices(season)
+            ]
+            entry_point = _prompt_choice(
+                "请选择从哪个阶段开始",
+                entry_options,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+                translate_fn=translate_fn,
+            )
         stage_label = helpers.get_tournament_entry_point_definition(season, entry_point).label
         _set_wizard_summary(
             "stage",
-            f"{'起始阶段' if lang == 'zh' else 'Start Stage'} = {stage_label}",
+            f"{'起始阶段' if lang == 'zh' else 'Start Stage'} = {translate_fn(stage_label)}",
         )
         _emit_champion_entry_guidance(
             season=season,

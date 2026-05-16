@@ -2999,6 +2999,7 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "1",
                 "1",
+                "2",
                 "12",
                 "1",
                 "11 12 13 14 15 16",
@@ -3021,8 +3022,39 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("请选择分析大类", prompt_text)
         self.assertIn("你正在进入“赛事冠军预测”", prompt_text)
         self.assertIn("请选择冠军预测方式", prompt_text)
+        self.assertIn("请选择冠军预测入口", prompt_text)
         self.assertIn("起始阶段：总决赛", text)
         self.assertIn("总决赛", text)
+
+    def test_main_interactive_champion_prediction_can_start_from_beginning(self):
+        stdout = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "1",
+                "1 2 3 4 6 11 12 13 14 15 16 17 18 19 20 21 22 23",
+                "n",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "group-a-round-1")
+        self.assertEqual(data["stages"][0]["match_type"], "group-round-1")
+        self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
 
     def test_main_interactive_champion_prediction_monte_carlo_json(self):
         stdout = io.StringIO()
@@ -3030,6 +3062,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "12",
                 "1",
                 "11 12 13 14 15 16",
@@ -3105,6 +3138,7 @@ class CubieDerbyTests(unittest.TestCase):
                 "2",
                 "1",
                 "1",
+                "2",
                 "12",
                 "1",
                 "11 12 13 14 15 16",
@@ -3190,6 +3224,7 @@ class CubieDerbyTests(unittest.TestCase):
             with patch(
                 "builtins.input",
                 side_effect=[
+                    "2",
                     "12",
                     "1",
                     "11 12 13 14 15 16",
@@ -3264,6 +3299,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "12",
                 "2",
                 " ".join(str(runner) for runner in winners),
@@ -3300,6 +3336,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "10",
                 "2",
                 " ".join(str(runner) for runner in elimination_a),
@@ -3334,6 +3371,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "7",
                 "2",
                 " ".join(str(runner) for runner in qualifiers),
@@ -3368,6 +3406,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "8",
                 "2",
                 " ".join(str(runner) for runner in qualifiers),
@@ -3402,6 +3441,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "2",
                 "2",
                 " ".join(str(runner) for runner in group_a),
@@ -3439,6 +3479,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "6",
                 "2",
                 " ".join(str(runner) for runner in group_a),
@@ -3475,6 +3516,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "10",
                 "2",
                 " ".join(str(runner) for runner in elimination_a),
@@ -3508,6 +3550,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "12",
                 "1",
                 "11 12 13 14 15 16",
@@ -3716,6 +3759,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "12",
                 "1",
                 "11",
@@ -3758,6 +3802,7 @@ class CubieDerbyTests(unittest.TestCase):
             side_effect=[
                 "1",
                 "1",
+                "2",
                 "12",
                 "1",
                 "11 12 13 14 15 16",
@@ -3780,6 +3825,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Choose analysis branch", prompt_text)
         self.assertIn("Choose champion prediction mode", prompt_text)
+        self.assertIn("Choose champion prediction entry", prompt_text)
         self.assertIn("Current starting stage: Grand Final", prompt_text)
         self.assertIn("How to provide the Grand Final roster", prompt_text)
 
