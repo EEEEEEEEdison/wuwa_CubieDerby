@@ -7,7 +7,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cubie_derby_core.champion_interactive import _emit_runner_progress, _prompt_line, _prompt_yes_no, _runner_catalog_lines
+from cubie_derby_core.champion_interactive import (
+    InteractiveWizardUI,
+    _emit_runner_progress,
+    _prompt_line,
+    _prompt_yes_no,
+    _runner_catalog_lines,
+)
 from cubie_derby_core.interactive_i18n import translate_interactive_text
 from cubie_derby_core.tournament_context import (
     tournament_entry_request_from_dict,
@@ -280,6 +286,20 @@ class CubieDerbyTests(unittest.TestCase):
                 "还需要输入 1 名角色。",
             ],
         )
+
+    def test_interactive_wizard_ui_compacts_previous_steps_into_summary(self):
+        lines: list[str] = []
+        ui = InteractiveWizardUI(prompt_output_fn=lines.append, lang="zh", compact_mode=True)
+        ui.set_summary("season", "赛季 = 第2季")
+        ui.set_summary("analysis", "分析 = 单场胜率分析")
+
+        ui.start_block("请选择单场模拟阶段")
+
+        self.assertEqual(lines[0], "\x1b[2J\x1b[H")
+        self.assertIn("当前摘要", lines)
+        self.assertIn("  赛季 = 第2季", lines)
+        self.assertIn("  分析 = 单场胜率分析", lines)
+        self.assertEqual(lines[-3:], ["=" * 24, "请选择单场模拟阶段", "=" * 24])
 
     def test_single_runner_always_wins(self):
         config = RaceConfig(

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import random
+import sys
 import time
 import unicodedata
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Sequence
@@ -16,6 +17,46 @@ from cubie_derby_core.runners import RUNNER_ALIASES, RUNNER_NAMES
 PRIMARY_RUNNER_ALIASES: dict[int, str] = {}
 for _alias, _runner in RUNNER_ALIASES.items():
     PRIMARY_RUNNER_ALIASES.setdefault(_runner, _alias)
+
+
+@dataclass
+class InteractiveWizardUI:
+    prompt_output_fn: Callable[[str], None]
+    lang: str
+    compact_mode: bool = False
+    summaries: list[tuple[str, str]] = field(default_factory=list)
+
+    def set_summary(self, key: str, value: str) -> None:
+        for index, (existing_key, _) in enumerate(self.summaries):
+            if existing_key == key:
+                self.summaries[index] = (key, value)
+                return
+        self.summaries.append((key, value))
+
+    def start_block(self, title: str) -> None:
+        if self.compact_mode:
+            self.prompt_output_fn("\x1b[2J\x1b[H")
+            if self.summaries:
+                heading = "当前摘要" if self.lang == "zh" else "Current Summary"
+                self.prompt_output_fn("-" * 24)
+                self.prompt_output_fn(heading)
+                self.prompt_output_fn("-" * 24)
+                for _, line in self.summaries:
+                    self.prompt_output_fn(f"  {line}")
+                self.prompt_output_fn("")
+        else:
+            self.prompt_output_fn("")
+        self.prompt_output_fn("=" * 24)
+        self.prompt_output_fn(title)
+        self.prompt_output_fn("=" * 24)
+
+
+_ACTIVE_WIZARD_UI: InteractiveWizardUI | None = None
+
+
+def _set_wizard_summary(key: str, value: str) -> None:
+    if _ACTIVE_WIZARD_UI is not None:
+        _ACTIVE_WIZARD_UI.set_summary(key, value)
 
 
 @dataclass(frozen=True)
@@ -120,6 +161,9 @@ def _emit_question_block(
     title: str,
     prompt_output_fn: Callable[[str], None],
 ) -> None:
+    if _ACTIVE_WIZARD_UI is not None:
+        _ACTIVE_WIZARD_UI.start_block(title)
+        return
     prompt_output_fn("")
     prompt_output_fn("=" * 24)
     prompt_output_fn(title)
@@ -1098,6 +1142,12 @@ def run_interactive_simulation_command(
     if args.tournament_context_in or args.tournament_context_out:
         raise ValueError("--tournament-context-in/out are only supported for interactive champion prediction")
     season = args.season
+    season_label = f"第{season}季" if lang == "zh" else f"Season {season}"
+    _set_wizard_summary("season", f"{'赛季' if lang == 'zh' else 'Season'} = {season_label}")
+    _set_wizard_summary(
+        "analysis",
+        "分析 = 单场胜率分析" if lang == "zh" else "Analysis = Single-stage win-rate analysis",
+    )
     if season == 2:
         match_options = [
             (key, helpers.get_match_type_rule(season, key).label)
@@ -1110,10 +1160,12 @@ def run_interactive_simulation_command(
             prompt_output_fn=prompt_output_fn,
             translate_fn=translate_fn,
         )
+        _set_wizard_summary("stage", f"{'阶段' if lang == 'zh' else 'Stage'} = {helpers.get_match_type_rule(season, match_type).label}")
         prompt_output_fn(f"当前模拟阶段：{helpers.get_match_type_rule(season, match_type).label}")
         prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
     else:
         match_type = None
+        _set_wizard_summary("stage", "阶段 = 基础单场分析" if lang == "zh" else "Stage = Basic single-stage analysis")
         prompt_output_fn("当前赛季暂不使用阶段化规则；下面会进行基础单场胜率分析。")
         prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
     runner_tokens = args.runners or _prompt_simulation_runner_tokens(
@@ -1124,10 +1176,12 @@ def run_interactive_simulation_command(
         prompt_output_fn=prompt_output_fn,
         lang=lang,
     )
+    _set_wizard_summary("runners", f"{'角色' if lang == 'zh' else 'Runners'} = 已选 {len(runner_tokens)} 名" if lang == "zh" else f"Runners = {len(runner_tokens)} selected")
     if season == 2:
         prompt_output_fn("默认起跑配置会根据当前阶段自动适配；如果你想覆盖，下一步可以手动输入自定义起跑。")
         if getattr(args, "_start_explicit", False):
             start_spec = args.start
+            _set_wizard_summary("start", "起跑 = 自定义" if lang == "zh" else "Start = Custom")
         else:
             use_custom_start = _prompt_yes_no_block(
                 title="起跑配置" if lang == "zh" else "Start Layout",
@@ -1145,9 +1199,13 @@ def run_interactive_simulation_command(
                     prompt_output_fn=prompt_output_fn,
                     translate_fn=translate_fn,
                 )
+                _set_wizard_summary("start", "起跑 = 自定义" if lang == "zh" else "Start = Custom")
+            else:
+                _set_wizard_summary("start", "起跑 = 默认" if lang == "zh" else "Start = Default")
     else:
         if getattr(args, "_start_explicit", False):
             start_spec = args.start
+            _set_wizard_summary("start", "起跑 = 自定义" if lang == "zh" else "Start = Custom")
         else:
             start_spec = _prompt_line_block(
                 title="起跑配置" if lang == "zh" else "Start Layout",
@@ -1156,6 +1214,7 @@ def run_interactive_simulation_command(
                 prompt_output_fn=prompt_output_fn,
                 translate_fn=translate_fn,
             )
+            _set_wizard_summary("start", "起跑 = 自定义" if lang == "zh" else "Start = Custom")
     iterations = args.iterations
     if not getattr(args, "_iterations_explicit", False):
         iterations = int(
@@ -1167,6 +1226,7 @@ def run_interactive_simulation_command(
                 translate_fn=translate_fn,
             )
         )
+    _set_wizard_summary("iterations", f"{'次数' if lang == 'zh' else 'Iterations'} = {iterations}")
     seed = args.seed
     if not getattr(args, "_seed_explicit", False):
         seed_text = _prompt_line_block(
@@ -1178,6 +1238,7 @@ def run_interactive_simulation_command(
             allow_empty=True,
         )
         seed = int(seed_text) if seed_text else None
+    _set_wizard_summary("seed", f"{'种子' if lang == 'zh' else 'Seed'} = {seed if seed is not None else ('未固定' if lang == 'zh' else 'unfixed')}")
     workers = args.workers
     if not getattr(args, "_workers_explicit", False):
         workers = int(
@@ -1189,6 +1250,7 @@ def run_interactive_simulation_command(
                 translate_fn=translate_fn,
             )
         )
+    _set_wizard_summary("workers", f"{'并行' if lang == 'zh' else 'Workers'} = {workers}")
     json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no_block(
         title="输出格式" if lang == "zh" else "Output Format",
         prompt="是否输出 JSON 结果",
@@ -1196,6 +1258,7 @@ def run_interactive_simulation_command(
         prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
     )
+    _set_wizard_summary("output", "输出 = JSON" if (lang == "zh" and json_output) else ("输出 = 文本" if lang == "zh" else ("Output = JSON" if json_output else "Output = Text")))
     interactive_args = _with_args(
         args,
         season=season,
@@ -1238,92 +1301,144 @@ def run_interactive_command(
         input_fn = input
     if prompt_output_fn is None:
         prompt_output_fn = print
+    global _ACTIVE_WIZARD_UI
     lang = getattr(args, "interactive_language", "zh")
     translate_fn = lambda text: translate_interactive_text(text, lang)
     raw_input_fn = input_fn
     raw_prompt_output_fn = prompt_output_fn
     input_fn = lambda prompt: raw_input_fn(translate_fn(prompt))
     prompt_output_fn = lambda text: raw_prompt_output_fn(translate_fn(text))
-    season = args.season
-    if not args.tournament_context_in and not getattr(args, "_season_explicit", False):
-        season = int(
-            _prompt_choice(
-                "请选择赛季",
-                (
-                    ("1", "第1季"),
-                    ("2", "第2季"),
-                ),
+    previous_ui = _ACTIVE_WIZARD_UI
+    _ACTIVE_WIZARD_UI = InteractiveWizardUI(
+        prompt_output_fn=prompt_output_fn,
+        lang=lang,
+        compact_mode=bool(getattr(sys.stderr, "isatty", lambda: False)()),
+    )
+    try:
+        season = args.season
+        if not args.tournament_context_in and not getattr(args, "_season_explicit", False):
+            season = int(
+                _prompt_choice(
+                    "请选择赛季",
+                    (
+                        ("1", "第1季"),
+                        ("2", "第2季"),
+                    ),
+                    input_fn=input_fn,
+                    prompt_output_fn=prompt_output_fn,
+                    translate_fn=translate_fn,
+                )
+            )
+            args = _with_args(args, season=season)
+        season_label = f"第{season}季" if lang == "zh" else f"Season {season}"
+        _set_wizard_summary("season", f"{'赛季' if lang == 'zh' else 'Season'} = {season_label}")
+
+        if args.champion_prediction or args.tournament_context_in or args.tournament_context_out:
+            _set_wizard_summary(
+                "analysis",
+                "分析 = 赛事冠军预测" if lang == "zh" else "Analysis = Tournament champion prediction",
+            )
+            return run_interactive_champion_prediction_command(
+                args,
+                show_progress=show_progress,
+                helpers=champion_helpers,
                 input_fn=input_fn,
                 prompt_output_fn=prompt_output_fn,
-                translate_fn=translate_fn,
+                result_output_fn=result_output_fn,
             )
+        if args.match_type or args.runners is not None or args.start or args.initial_order:
+            _set_wizard_summary(
+                "analysis",
+                "分析 = 单场胜率分析" if lang == "zh" else "Analysis = Single-stage win-rate analysis",
+            )
+            return run_interactive_simulation_command(
+                args,
+                show_progress=show_progress,
+                helpers=simulation_helpers,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+
+        season = args.season
+        if season != 2:
+            _set_wizard_summary(
+                "analysis",
+                "分析 = 单场胜率分析" if lang == "zh" else "Analysis = Single-stage win-rate analysis",
+            )
+            prompt_output_fn("当前第1季交互向导先提供单场胜率分析；赛事冠军预测将在后续版本开放。")
+            return run_interactive_simulation_command(
+                args,
+                show_progress=show_progress,
+                helpers=simulation_helpers,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+
+        analysis_branch = _prompt_choice(
+            "请选择分析大类",
+            (
+                ("champion", "赛事冠军预测"),
+                ("simulation", "单场胜率分析"),
+            ),
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+            translate_fn=translate_fn,
         )
-        args = _with_args(args, season=season)
-    if args.champion_prediction or args.tournament_context_in or args.tournament_context_out:
+        if analysis_branch == "simulation":
+            _set_wizard_summary(
+                "analysis",
+                "分析 = 单场胜率分析" if lang == "zh" else "Analysis = Single-stage win-rate analysis",
+            )
+            prompt_output_fn("你正在进入“单场胜率分析”；下一步会先选择具体比赛阶段。")
+            return run_interactive_simulation_command(
+                args,
+                show_progress=show_progress,
+                helpers=simulation_helpers,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+
+        _set_wizard_summary(
+            "analysis",
+            "分析 = 赛事冠军预测" if lang == "zh" else "Analysis = Tournament champion prediction",
+        )
+        prompt_output_fn("你正在进入“赛事冠军预测”；下一步会选择单届演示或 Monte Carlo 统计。")
+        prediction_mode = _prompt_choice(
+            "请选择冠军预测方式",
+            (
+                ("random", "单届演示（跑 1 届完整赛事）"),
+                ("monte-carlo", "Monte Carlo 分析（重复统计夺冠率）"),
+            ),
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+            translate_fn=translate_fn,
+        )
+        _set_wizard_summary(
+            "prediction_mode",
+            (
+                "冠军方式 = 单届演示"
+                if lang == "zh" and prediction_mode == "random"
+                else (
+                    "冠军方式 = Monte Carlo 分析"
+                    if lang == "zh"
+                    else (
+                        "Champion Mode = Single-run demo"
+                        if prediction_mode == "random"
+                        else "Champion Mode = Monte Carlo analysis"
+                    )
+                )
+            ),
+        )
         return run_interactive_champion_prediction_command(
-            args,
+            _with_args(args, champion_prediction=prediction_mode),
             show_progress=show_progress,
             helpers=champion_helpers,
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
             result_output_fn=result_output_fn,
         )
-    if args.match_type or args.runners is not None or args.start or args.initial_order:
-        return run_interactive_simulation_command(
-            args,
-            show_progress=show_progress,
-            helpers=simulation_helpers,
-            input_fn=input_fn,
-            prompt_output_fn=prompt_output_fn,
-        )
-    season = args.season
-    if season != 2:
-        prompt_output_fn("当前第1季交互向导先提供单场胜率分析；赛事冠军预测将在后续版本开放。")
-        return run_interactive_simulation_command(
-            args,
-            show_progress=show_progress,
-            helpers=simulation_helpers,
-            input_fn=input_fn,
-            prompt_output_fn=prompt_output_fn,
-        )
-    analysis_branch = _prompt_choice(
-        "请选择分析大类",
-        (
-            ("champion", "赛事冠军预测"),
-            ("simulation", "单场胜率分析"),
-        ),
-        input_fn=input_fn,
-        prompt_output_fn=prompt_output_fn,
-        translate_fn=translate_fn,
-    )
-    if analysis_branch == "simulation":
-        prompt_output_fn("你正在进入“单场胜率分析”；下一步会先选择具体比赛阶段。")
-        return run_interactive_simulation_command(
-            args,
-            show_progress=show_progress,
-            helpers=simulation_helpers,
-            input_fn=input_fn,
-            prompt_output_fn=prompt_output_fn,
-        )
-    prompt_output_fn("你正在进入“赛事冠军预测”；下一步会选择单届演示或 Monte Carlo 统计。")
-    prediction_mode = _prompt_choice(
-        "请选择冠军预测方式",
-        (
-            ("random", "单届演示（跑 1 届完整赛事）"),
-            ("monte-carlo", "Monte Carlo 分析（重复统计夺冠率）"),
-        ),
-        input_fn=input_fn,
-        prompt_output_fn=prompt_output_fn,
-        translate_fn=translate_fn,
-    )
-    return run_interactive_champion_prediction_command(
-        _with_args(args, champion_prediction=prediction_mode),
-        show_progress=show_progress,
-        helpers=champion_helpers,
-        input_fn=input_fn,
-        prompt_output_fn=prompt_output_fn,
-        result_output_fn=result_output_fn,
-    )
+    finally:
+        _ACTIVE_WIZARD_UI = previous_ui
 
 
 def run_interactive_champion_prediction_command(
@@ -1363,14 +1478,32 @@ def run_interactive_champion_prediction_command(
     if args.match_type:
         raise ValueError("--interactive champion prediction does not accept --match-type")
 
+    season_label = f"第{args.season}季" if lang == "zh" else f"Season {args.season}"
+    _set_wizard_summary("season", f"{'赛季' if lang == 'zh' else 'Season'} = {season_label}")
+    _set_wizard_summary(
+        "analysis",
+        "分析 = 赛事冠军预测" if lang == "zh" else "Analysis = Tournament champion prediction",
+    )
+
     request = None
     if args.tournament_context_in:
         request = helpers.load_tournament_entry_request(args.tournament_context_in)
         season = request.season
         helpers.validate_champion_prediction_season(season)
+        season_label = f"第{season}季" if lang == "zh" else f"Season {season}"
+        _set_wizard_summary("season", f"{'赛季' if lang == 'zh' else 'Season'} = {season_label}")
+        stage_label = helpers.get_tournament_entry_point_definition(season, request.entry_point).label
+        _set_wizard_summary(
+            "stage",
+            f"{'起始阶段' if lang == 'zh' else 'Start Stage'} = {stage_label}",
+        )
+        _set_wizard_summary(
+            "context",
+            "上下文 = 已载入" if lang == "zh" else "Context = Loaded",
+        )
         prompt_output_fn(
             f"已从 {args.tournament_context_in} 载入赛事上下文："
-            f"{helpers.get_tournament_entry_point_definition(season, request.entry_point).label}"
+            f"{stage_label}"
         )
         _emit_champion_entry_guidance(
             season=season,
@@ -1393,6 +1526,22 @@ def run_interactive_champion_prediction_command(
         prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
     )
+    _set_wizard_summary(
+        "prediction_mode",
+        (
+            "冠军方式 = 单届演示"
+            if lang == "zh" and prediction_mode == "random"
+            else (
+                "冠军方式 = Monte Carlo 分析"
+                if lang == "zh"
+                else (
+                    "Champion Mode = Single-run demo"
+                    if prediction_mode == "random"
+                    else "Champion Mode = Monte Carlo analysis"
+                )
+            )
+        ),
+    )
 
     if request is None:
         entry_options = [
@@ -1405,6 +1554,11 @@ def run_interactive_champion_prediction_command(
             input_fn=input_fn,
             prompt_output_fn=prompt_output_fn,
             translate_fn=translate_fn,
+        )
+        stage_label = helpers.get_tournament_entry_point_definition(season, entry_point).label
+        _set_wizard_summary(
+            "stage",
+            f"{'起始阶段' if lang == 'zh' else 'Start Stage'} = {stage_label}",
         )
         _emit_champion_entry_guidance(
             season=season,
@@ -1449,6 +1603,10 @@ def run_interactive_champion_prediction_command(
             entry_point=entry_point,
             inputs=requirement_values,
         )
+        _set_wizard_summary(
+            "context",
+            "上下文 = 已补齐" if lang == "zh" else "Context = Ready",
+        )
 
     if args.tournament_context_out:
         helpers.save_tournament_entry_request(request, args.tournament_context_out)
@@ -1465,12 +1623,20 @@ def run_interactive_champion_prediction_command(
             allow_empty=True,
         )
         seed = int(seed_text) if seed_text else None
+    _set_wizard_summary(
+        "seed",
+        f"{'种子' if lang == 'zh' else 'Seed'} = {seed if seed is not None else ('未固定' if lang == 'zh' else 'unfixed')}",
+    )
     json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no_block(
         title="输出格式" if lang == "zh" else "Output Format",
         prompt="是否输出 JSON 结果",
         input_fn=input_fn,
         prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
+    )
+    _set_wizard_summary(
+        "output",
+        "输出 = JSON" if (lang == "zh" and json_output) else ("输出 = 文本" if lang == "zh" else ("Output = JSON" if json_output else "Output = Text")),
     )
 
     if prediction_mode == "random":
@@ -1496,6 +1662,7 @@ def run_interactive_champion_prediction_command(
                 translate_fn=translate_fn,
             )
         )
+    _set_wizard_summary("iterations", f"{'次数' if lang == 'zh' else 'Iterations'} = {iterations}")
     workers = args.workers
     if not getattr(args, "_workers_explicit", False):
         workers = int(
@@ -1507,6 +1674,7 @@ def run_interactive_champion_prediction_command(
                 translate_fn=translate_fn,
             )
         )
+    _set_wizard_summary("workers", f"{'并行' if lang == 'zh' else 'Workers'} = {workers}")
     summary = helpers.run_champion_prediction_from_entry_request_monte_carlo(
         request,
         iterations,
