@@ -42,6 +42,12 @@ Run one full Season 2 tournament and print the champion plus every stage result:
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 ```
 
+If you want the program to guide you step by step through stage selection, runner input, or tournament context entry, use `--interactive`:
+
+```powershell
+python cubie_derby.py --interactive --season 2
+```
+
 `--runners` selects the participants. You can freely change both the runner combination and the number of participants; see [Runner IDs and Skills](#runner-ids-and-skills) for the available ids, names, and skill notes.
 
 ## Parameter Guide
@@ -122,6 +128,40 @@ Examples:
 ```powershell
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --seed 42 --workers 0
+```
+
+### `--interactive`
+
+Launch the interactive wizard. It currently focuses on two flows:
+
+- Single-stage simulation: choose a stage, enter the runners, start layout, iteration count, and output format.
+- Champion prediction: choose which tournament stage to start from, then provide the minimum information needed to continue all the way to the grand final.
+
+Notes:
+
+- Interactive champion prediction currently supports starting from any Season 2 tournament entry point, such as `group-a-round-2`, `elimination-a`, `winners-round-2`, or `grand-final`.
+- For many mid-tournament entry points, the wizard can derive later rosters automatically from full rankings so you do not have to split lists manually.
+- The prompts first explain the current entry stage and which later stages will still be simulated, then ask for the required inputs.
+
+Examples:
+
+```powershell
+python cubie_derby.py --interactive --season 2
+python cubie_derby.py --interactive --season 2 --champion-prediction monte-carlo --json
+```
+
+### `--tournament-context-in` / `--tournament-context-out`
+
+Save or load tournament entry context for interactive champion prediction. This is useful when you want to reuse the same “start from a mid-tournament stage” setup multiple times.
+
+- `--tournament-context-out PATH`: write the collected tournament entry context to a JSON file.
+- `--tournament-context-in PATH`: load an existing tournament entry context JSON and continue with either single-run or Monte Carlo champion prediction.
+
+Examples:
+
+```powershell
+python cubie_derby.py --interactive --season 2 --champion-prediction random --tournament-context-out saved_context.json
+python cubie_derby.py --champion-prediction monte-carlo -n 10000 --workers 0 --tournament-context-in saved_context.json --json
 ```
 
 ### `--season-roster-scan`

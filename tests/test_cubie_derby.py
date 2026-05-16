@@ -3210,6 +3210,82 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["stages"][0]["entrants"], list(qualifiers[6:12]))
         self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
 
+    def test_main_interactive_group_a_round_two_can_split_remaining_groups(self):
+        stdout = io.StringIO()
+        pool = tuple(season_runner_pool(2))
+        group_a = pool[:6]
+        remaining = pool[6:18]
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "2",
+                "2",
+                " ".join(str(runner) for runner in group_a),
+                " ".join(str(runner) for runner in remaining),
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "group-a-round-2")
+        self.assertEqual(data["stages"][0]["entrants"], list(group_a))
+        self.assertEqual(data["stages"][1]["entrants"], list(remaining[:6]))
+        self.assertEqual(data["stages"][3]["entrants"], list(remaining[6:12]))
+        self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
+
+    def test_main_interactive_group_c_round_two_can_derive_from_rankings(self):
+        stdout = io.StringIO()
+        pool = tuple(season_runner_pool(2))
+        group_a = pool[:6]
+        group_b = pool[6:12]
+        group_c = pool[12:18]
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "6",
+                "2",
+                " ".join(str(runner) for runner in group_a),
+                " ".join(str(runner) for runner in group_b),
+                " ".join(str(runner) for runner in group_c),
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "group-c-round-2")
+        self.assertEqual(data["stages"][0]["entrants"], list(group_c))
+        self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
+
     def test_main_interactive_winners_round_can_derive_from_elimination_and_losers_rankings(self):
         stdout = io.StringIO()
         pool = tuple(season_runner_pool(2))
@@ -3280,6 +3356,8 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("当前起始阶段：总决赛", prompt_text)
         self.assertIn("后续将模拟：总决赛", prompt_text)
         self.assertIn("下面会只询问继续推演到总决赛所必需的信息。", prompt_text)
+        self.assertIn("接下来会需要这些信息：", prompt_text)
+        self.assertIn("总决赛参赛角色（6名）", prompt_text)
 
     def test_main_interactive_simulation_prompts_are_readable(self):
         stdout = io.StringIO()

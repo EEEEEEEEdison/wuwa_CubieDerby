@@ -42,6 +42,12 @@ python cubie_derby.py --season 2 --match-type group-round-1 -n 100000 --runners 
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 ```
 
+如果你想让程序一步一步引导你输入比赛阶段、登场角色或赛事上下文，可以改用 `--interactive`：
+
+```powershell
+python cubie_derby.py --interactive --season 2
+```
+
 `--runners` 用于选择参赛角色。你可以自由更改角色组合和参赛人数；可用编号、名称和技能说明见下方的[角色编号与技能](#角色编号与技能)。
 
 ## 参数说明
@@ -122,6 +128,40 @@ python cubie_derby.py --season 2 --match-type grand-final -n 100000 --runners 11
 ```powershell
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --seed 42 --workers 0
+```
+
+### `--interactive`
+
+进入交互式向导。当前主要覆盖两条线路：
+
+- 单场模拟：按提示选择阶段、输入登场角色、起跑配置、模拟次数等参数。
+- 冠军预测：按提示选择从哪个赛事阶段开始，并补齐继续推演到总决赛所需的最少信息。
+
+说明：
+
+- 当前交互式冠军预测支持从赛季 2 的任意赛事入口开始，例如 `小组A第二轮`、`淘汰赛A`、`胜者组`、`总决赛`。
+- 对很多中途入口，向导支持“输入完整排名后自动推导后续名单”，减少手工拆分。
+- 交互提示会先说明“当前起始阶段”和“后续将依次模拟哪些阶段”，再开始提问。
+
+示例：
+
+```powershell
+python cubie_derby.py --interactive --season 2
+python cubie_derby.py --interactive --season 2 --champion-prediction monte-carlo --json
+```
+
+### `--tournament-context-in` / `--tournament-context-out`
+
+为交互式冠军预测保存或载入赛事上下文，适合把“从某个中途阶段开始的补录输入”保存下来反复复用。
+
+- `--tournament-context-out PATH`：把本次交互收集好的赛事入口上下文写到 JSON 文件。
+- `--tournament-context-in PATH`：直接从已有 JSON 文件载入赛事入口上下文，再继续做单届或 Monte Carlo 冠军预测。
+
+示例：
+
+```powershell
+python cubie_derby.py --interactive --season 2 --champion-prediction random --tournament-context-out saved_context.json
+python cubie_derby.py --champion-prediction monte-carlo -n 10000 --workers 0 --tournament-context-in saved_context.json --json
 ```
 
 ### `--season-roster-scan`

@@ -141,6 +141,42 @@ def _emit_champion_entry_guidance(
         prompt_output_fn("下面会只询问继续推演到总决赛所必需的信息。")
 
 
+def _requirement_summary_line(requirement: Any) -> str:
+    if requirement.kind == "qualified":
+        return (
+            f"- {requirement.label}：可直接输入 {requirement.runner_count} 名晋级角色，"
+            "也可以输入上一阶段完整排名后自动截取。"
+        )
+    if requirement.kind == "ranking":
+        return f"- {requirement.label}：请按上一阶段第 1 名到第 {requirement.runner_count} 名的顺序输入。"
+    if requirement.kind == "grouped-entrants":
+        if requirement.optional:
+            return (
+                f"- {requirement.label}：可选。"
+                f"如果你已经确定分组，可输入 {requirement.group_count} 组、每组 {requirement.group_size} 名；"
+                "否则系统会按 seed 随机分组。"
+            )
+        return (
+            f"- {requirement.label}：请输入 {requirement.group_count} 组、每组 {requirement.group_size} 名角色。"
+        )
+    return f"- {requirement.label}：请输入 {requirement.runner_count} 名角色。"
+
+
+def _emit_requirement_overview(
+    *,
+    season: int,
+    entry_point: str,
+    helpers: ChampionInteractiveHelpers,
+    prompt_output_fn: Callable[[str], None],
+) -> None:
+    requirements = tuple(helpers.tournament_entry_requirements(season, entry_point))
+    if not requirements:
+        return
+    prompt_output_fn("接下来会需要这些信息：")
+    for requirement in requirements:
+        prompt_output_fn(_requirement_summary_line(requirement))
+
+
 def _parse_runner_input(
     text: str,
     *,
@@ -314,6 +350,208 @@ def _collect_derived_entry_inputs(
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
 ) -> dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]]:
+    if entry_point == "group-a-round-2":
+        mode = _prompt_choice(
+            "小组A第二轮的补录方式",
+            (
+                ("direct", "分别输入小组A第二轮顺序，以及小组B/C第一轮名单"),
+                ("derive", "输入小组A第一轮完整排名 + 小组B/C第一轮名单（共12名）"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            group_a_ranking = _prompt_runner_list(
+                "请输入小组A第一轮完整排名（6名）",
+                description="系统会直接把这 6 名作为小组A第二轮的参赛顺序。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            remaining_groups = _prompt_runner_list(
+                "请输入小组B和小组C第一轮名单（共12名）",
+                description="请按“小组B的 6 名在前，小组C的 6 名在后”的顺序输入，系统会自动拆成两组继续模拟。",
+                helpers=helpers,
+                season=season,
+                expected_count=12,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "group-a-round-2-entrants": group_a_ranking,
+                "group-b-round-1-entrants": remaining_groups[:6],
+                "group-c-round-1-entrants": remaining_groups[6:],
+            }
+    if entry_point == "group-b-round-1":
+        mode = _prompt_choice(
+            "小组B第一轮的补录方式",
+            (
+                ("direct", "分别输入小组A晋级名单，以及小组B/C第一轮名单"),
+                ("derive", "输入小组A第二轮完整排名 + 小组B/C第一轮名单（共12名）"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            group_a_ranking = _prompt_runner_list(
+                "请输入小组A第二轮完整排名（6名）",
+                description="系统会自动取前 4 名作为小组A晋级名单。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            remaining_groups = _prompt_runner_list(
+                "请输入小组B和小组C第一轮名单（共12名）",
+                description="请按“小组B的 6 名在前，小组C的 6 名在后”的顺序输入，系统会自动拆成两组继续模拟。",
+                helpers=helpers,
+                season=season,
+                expected_count=12,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "group-a-round-2-qualified": group_a_ranking[:4],
+                "group-b-round-1-entrants": remaining_groups[:6],
+                "group-c-round-1-entrants": remaining_groups[6:],
+            }
+    if entry_point == "group-b-round-2":
+        mode = _prompt_choice(
+            "小组B第二轮的补录方式",
+            (
+                ("direct", "分别输入小组A晋级名单、小组B第二轮顺序和小组C第一轮名单"),
+                ("derive", "输入小组A第二轮完整排名 + 小组B第一轮完整排名 + 小组C第一轮名单"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            group_a_ranking = _prompt_runner_list(
+                "请输入小组A第二轮完整排名（6名）",
+                description="系统会自动取前 4 名作为小组A晋级名单。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            group_b_ranking = _prompt_runner_list(
+                "请输入小组B第一轮完整排名（6名）",
+                description="系统会直接把这 6 名作为小组B第二轮的参赛顺序。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            group_c_entrants = _prompt_runner_list(
+                "请输入小组C第一轮参赛角色（6名）",
+                description="这些角色会继续完整跑完小组C的两轮比赛。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "group-a-round-2-qualified": group_a_ranking[:4],
+                "group-b-round-2-entrants": group_b_ranking,
+                "group-c-round-1-entrants": group_c_entrants,
+            }
+    if entry_point == "group-c-round-1":
+        mode = _prompt_choice(
+            "小组C第一轮的补录方式",
+            (
+                ("direct", "分别输入小组A/B晋级名单和小组C第一轮名单"),
+                ("derive", "输入小组A/B第二轮完整排名 + 小组C第一轮名单"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            group_a_ranking = _prompt_runner_list(
+                "请输入小组A第二轮完整排名（6名）",
+                description="系统会自动取前 4 名作为小组A晋级名单。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            group_b_ranking = _prompt_runner_list(
+                "请输入小组B第二轮完整排名（6名）",
+                description="系统会自动取前 4 名作为小组B晋级名单。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            group_c_entrants = _prompt_runner_list(
+                "请输入小组C第一轮参赛角色（6名）",
+                description="这些角色会继续完整跑完小组C的两轮比赛。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "group-a-round-2-qualified": group_a_ranking[:4],
+                "group-b-round-2-qualified": group_b_ranking[:4],
+                "group-c-round-1-entrants": group_c_entrants,
+            }
+    if entry_point == "group-c-round-2":
+        mode = _prompt_choice(
+            "小组C第二轮的补录方式",
+            (
+                ("direct", "分别输入小组A/B晋级名单和小组C第二轮顺序"),
+                ("derive", "输入小组A/B第二轮完整排名 + 小组C第一轮完整排名"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            group_a_ranking = _prompt_runner_list(
+                "请输入小组A第二轮完整排名（6名）",
+                description="系统会自动取前 4 名作为小组A晋级名单。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            group_b_ranking = _prompt_runner_list(
+                "请输入小组B第二轮完整排名（6名）",
+                description="系统会自动取前 4 名作为小组B晋级名单。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            group_c_ranking = _prompt_runner_list(
+                "请输入小组C第一轮完整排名（6名）",
+                description="系统会直接把这 6 名作为小组C第二轮的参赛顺序。",
+                helpers=helpers,
+                season=season,
+                expected_count=6,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "group-a-round-2-qualified": group_a_ranking[:4],
+                "group-b-round-2-qualified": group_b_ranking[:4],
+                "group-c-round-2-entrants": group_c_ranking,
+            }
     if entry_point == "elimination-a":
         mode = _prompt_choice(
             "淘汰赛分组的补录方式",
@@ -793,6 +1031,12 @@ def run_interactive_champion_prediction_command(
             prompt_output_fn=prompt_output_fn,
         )
         _emit_champion_entry_guidance(
+            season=season,
+            entry_point=entry_point,
+            helpers=helpers,
+            prompt_output_fn=prompt_output_fn,
+        )
+        _emit_requirement_overview(
             season=season,
             entry_point=entry_point,
             helpers=helpers,
