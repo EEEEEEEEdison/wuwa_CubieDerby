@@ -3033,8 +3033,8 @@ class CubieDerbyTests(unittest.TestCase):
             "builtins.input",
             side_effect=[
                 "1",
-                "1 2 3 4 6 11 12 13 14 15 16 17 18 19 20 21 22 23",
-                "n",
+                "1",
+                "1",
             ],
         ), contextlib.redirect_stdout(stdout):
             exit_code = main(
@@ -3261,7 +3261,8 @@ class CubieDerbyTests(unittest.TestCase):
                 "1",
                 "1",
                 "1",
-                "n",
+                "1",
+                "1",
             ],
         ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main(["--seed", "7", "--json"])
@@ -3269,10 +3270,12 @@ class CubieDerbyTests(unittest.TestCase):
         prompt_text = stderr.getvalue()
         data = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 0)
-        self.assertIn("本次会默认使用第2季全部18名角色参赛。", prompt_text)
+        self.assertIn("请选择参赛角色设置", prompt_text)
+        self.assertIn("请选择小组赛分组方式", prompt_text)
         self.assertNotIn("请输入 18 名角色", prompt_text)
         self.assertNotIn("本赛季可用角色", prompt_text)
         self.assertNotIn("后续将依次模拟：", prompt_text)
+        self.assertNotIn("是否手动输入", prompt_text)
         self.assertEqual(data["start_entry_point"], "group-a-round-1")
 
     def test_main_interactive_can_save_tournament_context_json(self):
@@ -3631,7 +3634,7 @@ class CubieDerbyTests(unittest.TestCase):
         prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
         self.assertIn("下一步", prompt_text)
-        self.assertIn("顶部摘要", prompt_text)
+        self.assertIn("进度会保留在顶部摘要中", prompt_text)
         self.assertIn("接下来会需要这些信息：", prompt_text)
         self.assertIn("总决赛参赛角色（6名）", prompt_text)
 
@@ -3884,7 +3887,7 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("Choose analysis branch", prompt_text)
         self.assertIn("Choose champion prediction mode", prompt_text)
         self.assertIn("Choose champion prediction entry", prompt_text)
-        self.assertIn("start stage and remaining schedule stay in the summary above", prompt_text)
+        self.assertIn("progress stays visible in the summary above", prompt_text)
         self.assertIn("How to provide the Grand Final roster", prompt_text)
 
 

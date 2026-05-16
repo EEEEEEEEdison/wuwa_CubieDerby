@@ -558,6 +558,112 @@ def _request_runner_summary(
     return "已补齐" if lang == "zh" else "ready"
 
 
+def _prompt_group_round_one_setup(
+    *,
+    season: int,
+    helpers: ChampionInteractiveHelpers,
+    input_fn: Callable[[str], str],
+    prompt_output_fn: Callable[[str], None],
+    lang: str,
+    translate_fn: Callable[[str], str],
+) -> dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]]:
+    requirements = {requirement.key: requirement for requirement in helpers.tournament_entry_requirements(season, "group-a-round-1")}
+    roster_requirement = requirements["season-roster"]
+    group_requirement = requirements["group-stage-groups"]
+    season_roster = tuple(helpers.season_runner_pool(season))
+    values: dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]] = {}
+
+    roster_mode = _prompt_choice(
+        "请选择参赛角色设置" if lang == "zh" else "Choose entrant roster mode",
+        (
+            ("default", "默认使用本赛季全部角色" if lang == "zh" else "Use the full season roster"),
+            ("manual", "手动指定本届参赛角色" if lang == "zh" else "Enter the tournament roster manually"),
+        ),
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+        translate_fn=translate_fn,
+    )
+    if roster_mode == "default":
+        values["season-roster"] = season_roster
+        _set_wizard_summary(
+            "runners",
+            "参赛角色 = 18名（默认全赛季）"
+            if lang == "zh"
+            else "Entrants = 18 runners (full season default)",
+        )
+    else:
+        roster = _prompt_runner_list(
+            roster_requirement.label,
+            title=roster_requirement.label,
+            description=roster_requirement.description,
+            helpers=helpers,
+            season=season,
+            expected_count=roster_requirement.runner_count,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
+        )
+        values["season-roster"] = roster
+        _set_wizard_summary(
+            "runners",
+            "参赛角色 = 18名（手动指定）"
+            if lang == "zh"
+            else "Entrants = 18 runners (manual roster)",
+        )
+
+    group_mode = _prompt_choice(
+        "请选择小组赛分组方式" if lang == "zh" else "Choose group-stage assignment mode",
+        (
+            ("random", "随机分组（按 seed）" if lang == "zh" else "Randomize groups from the seed"),
+            ("manual", "手动指定 A/B/C 分组" if lang == "zh" else "Enter Groups A/B/C manually"),
+        ),
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+        translate_fn=translate_fn,
+    )
+    if group_mode == "random":
+        _set_wizard_summary(
+            "groups",
+            "分组 = 随机A/B/C" if lang == "zh" else "Groups = Random A/B/C",
+        )
+        return values
+
+    while True:
+        groups = _prompt_grouped_runner_list(
+            replace(group_requirement, optional=False),
+            helpers=helpers,
+            season=season,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
+            prompt_optional_choice=False,
+        )
+        assert groups is not None
+        flattened = tuple(runner for group in groups for runner in group)
+        if len(set(flattened)) != len(flattened):
+            prompt_output_fn(
+                "小组 A/B/C 分组里有重复角色，请重新输入。"
+                if lang == "zh"
+                else "Groups A/B/C contain duplicate runners. Please enter them again."
+            )
+            continue
+        if set(flattened) != set(values["season-roster"]):  # type: ignore[arg-type]
+            prompt_output_fn(
+                "小组 A/B/C 分组必须与本届参赛角色完全一致，请重新输入。"
+                if lang == "zh"
+                else "Groups A/B/C must contain exactly the same runners as the tournament roster. Please enter them again."
+            )
+            continue
+        values["group-stage-groups"] = groups
+        _set_wizard_summary(
+            "groups",
+            "分组 = 手动A/B/C" if lang == "zh" else "Groups = Manual A/B/C",
+        )
+        return values
+
+
 def _emit_champion_entry_guidance(
     *,
     season: int,
@@ -579,17 +685,17 @@ def _emit_champion_entry_guidance(
     )
     if loaded_from_context:
         _emit_wrapped_paragraph(
-            "本次会直接使用已保存的上下文继续预测。摘要里会保留当前入口和剩余赛程。"
+            "本次会直接使用已保存的上下文继续预测；进度会保留在顶部摘要中。"
             if lang == "zh"
-            else "This run will continue directly from the saved context. The summary will keep the current entry and remaining stages visible.",
+            else "This run will continue from the saved context; progress stays visible in the summary above.",
             prompt_output_fn=prompt_output_fn,
             initial_indent="  ",
         )
     else:
         _emit_wrapped_paragraph(
-            "下面只会继续询问推进到总决赛所必需的信息；起始阶段和剩余赛程会保留在顶部摘要中。"
+            "下面按顺序确认比赛设置；进度会保留在顶部摘要中。"
             if lang == "zh"
-            else "The wizard will now ask only for the inputs required to continue through the grand final; the start stage and remaining schedule stay in the summary above.",
+            else "Next, confirm the tournament setup step by step; progress stays visible in the summary above.",
             prompt_output_fn=prompt_output_fn,
             initial_indent="  ",
         )
@@ -896,10 +1002,11 @@ def _prompt_grouped_runner_list(
     prompt_output_fn: Callable[[str], None],
     lang: str = "zh",
     translate_fn: Callable[[str], str] | None = None,
+    prompt_optional_choice: bool = True,
 ) -> tuple[tuple[int, ...], ...] | None:
     if translate_fn is None:
         translate_fn = lambda text: text
-    if requirement.optional:
+    if requirement.optional and prompt_optional_choice:
         wants_manual = _prompt_yes_no(
             f"{requirement.label}是否手动输入",
             input_fn=input_fn,
@@ -2031,49 +2138,44 @@ def run_interactive_champion_prediction_command(
             lang=lang,
             translate_fn=translate_fn,
         )
-        requirement_values = _auto_fill_entry_inputs(
-            helpers=helpers,
-            season=season,
-            entry_point=entry_point,
-        )
-        if entry_point == "group-a-round-1" and "season-roster" in requirement_values:
-            _set_wizard_summary(
-                "runners",
-                "参赛角色 = 18名（默认全赛季）"
-                if lang == "zh"
-                else "Entrants = 18 runners (full season default)",
+        if entry_point == "group-a-round-1":
+            requirement_values = _prompt_group_round_one_setup(
+                helpers=helpers,
+                season=season,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+                lang=lang,
+                translate_fn=translate_fn,
             )
-            prompt_output_fn(
-                "本次会默认使用第2季全部18名角色参赛。"
-                if lang == "zh"
-                else "This run will use all 18 Season 2 runners automatically."
+            handled_requirement_keys = {"season-roster", "group-stage-groups"}
+        else:
+            requirement_values = _auto_fill_entry_inputs(
+                helpers=helpers,
+                season=season,
+                entry_point=entry_point,
             )
-            prompt_output_fn(
-                "如果你想固定小组 A/B/C 分组，下一步可以手动指定；否则系统会按 seed 随机分组。"
-                if lang == "zh"
-                else "If you want fixed Groups A/B/C, you can enter them next; otherwise the wizard will randomize them from the seed."
+            derived_values = _collect_derived_entry_inputs(
+                helpers=helpers,
+                season=season,
+                entry_point=entry_point,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+                lang=lang,
+                translate_fn=translate_fn,
             )
-        derived_values = _collect_derived_entry_inputs(
-            helpers=helpers,
-            season=season,
-            entry_point=entry_point,
-            input_fn=input_fn,
-            prompt_output_fn=prompt_output_fn,
-            lang=lang,
-            translate_fn=translate_fn,
-        )
-        requirement_values.update(derived_values)
-        _emit_requirement_overview(
-            season=season,
-            entry_point=entry_point,
-            helpers=helpers,
-            prompt_output_fn=prompt_output_fn,
-            lang=lang,
-            translate_fn=translate_fn,
-            skip_keys=tuple(requirement_values.keys()),
-        )
+            requirement_values.update(derived_values)
+            _emit_requirement_overview(
+                season=season,
+                entry_point=entry_point,
+                helpers=helpers,
+                prompt_output_fn=prompt_output_fn,
+                lang=lang,
+                translate_fn=translate_fn,
+                skip_keys=tuple(requirement_values.keys()),
+            )
+            handled_requirement_keys = set()
         for requirement in helpers.tournament_entry_requirements(season, entry_point):
-            if requirement.key in requirement_values:
+            if requirement.key in requirement_values or requirement.key in handled_requirement_keys:
                 continue
             value = _prompt_requirement_value(
                 requirement,
