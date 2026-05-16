@@ -102,7 +102,7 @@ def _prompt_choice(
 ) -> str:
     if translate_fn is None:
         translate_fn = lambda text: text
-    prompt_output_fn(title)
+    _emit_question_block(title=translate_fn(title), prompt_output_fn=prompt_output_fn)
     for index, (_, label) in enumerate(options, start=1):
         prompt_output_fn(f"{index}. {translate_fn(label)}")
     while True:
@@ -112,6 +112,51 @@ def _prompt_choice(
             if 0 <= choice_index < len(options):
                 return options[choice_index][0]
         prompt_output_fn(translate_fn("输入无效，请重新输入上面的序号。"))
+
+
+def _emit_question_block(
+    *,
+    title: str,
+    prompt_output_fn: Callable[[str], None],
+) -> None:
+    prompt_output_fn("")
+    prompt_output_fn("=" * 24)
+    prompt_output_fn(title)
+    prompt_output_fn("=" * 24)
+
+
+def _prompt_line_block(
+    *,
+    title: str,
+    prompt: str,
+    input_fn: Callable[[str], str],
+    prompt_output_fn: Callable[[str], None],
+    translate_fn: Callable[[str], str] | None = None,
+    allow_empty: bool = False,
+) -> str:
+    _emit_question_block(title=title, prompt_output_fn=prompt_output_fn)
+    return _prompt_line(
+        prompt,
+        input_fn=input_fn,
+        translate_fn=translate_fn,
+        allow_empty=allow_empty,
+    )
+
+
+def _prompt_yes_no_block(
+    *,
+    title: str,
+    prompt: str,
+    input_fn: Callable[[str], str],
+    prompt_output_fn: Callable[[str], None],
+    translate_fn: Callable[[str], str] | None = None,
+) -> bool:
+    _emit_question_block(title=title, prompt_output_fn=prompt_output_fn)
+    return _prompt_yes_no(
+        prompt,
+        input_fn=input_fn,
+        translate_fn=translate_fn,
+    )
 
 
 def _runner_catalog_lines(
@@ -336,6 +381,7 @@ def _emit_runner_progress(
 def _prompt_runner_list(
     prompt: str,
     *,
+    title: str | None = None,
     description: str,
     helpers: ChampionInteractiveHelpers,
     season: int,
@@ -348,6 +394,8 @@ def _prompt_runner_list(
 ) -> tuple[int, ...]:
     if translate_fn is None:
         translate_fn = lambda text: text
+    if title is not None:
+        _emit_question_block(title=title, prompt_output_fn=prompt_output_fn)
     if show_catalog:
         for line in _runner_catalog_lines(
             season=season,
@@ -414,6 +462,7 @@ def _prompt_qualified_runner_list(
             )
         ranking = _prompt_runner_list(
             f"请输入用于推导{requirement.label}的完整排名",
+            title=f"{requirement.label}补录",
             description=description,
             helpers=helpers,
             season=season,
@@ -426,6 +475,7 @@ def _prompt_qualified_runner_list(
         return ranking[: requirement.runner_count]
     return _prompt_runner_list(
         requirement.label,
+        title=f"{requirement.label}补录",
         description=requirement.description,
         helpers=helpers,
         season=season,
@@ -957,6 +1007,10 @@ def _prompt_simulation_runner_tokens(
         description = "请按上一轮第 1 名到第 6 名的顺序输入 6 名角色，系统会按这个顺序自动生成起跑站位。"
     if lang == "en":
         prompt_label = "Enter runners (IDs, Chinese names, or English aliases)"
+    _emit_question_block(
+        title="登场角色输入" if lang == "zh" else "Runner Entry",
+        prompt_output_fn=prompt_output_fn,
+    )
     for line in _runner_catalog_lines(
         season=season,
         runner_pool=tuple(helpers.season_runner_pool(season)),
@@ -1052,41 +1106,51 @@ def run_interactive_simulation_command(
         if getattr(args, "_start_explicit", False):
             start_spec = args.start
         else:
-            use_custom_start = _prompt_yes_no(
-                "是否覆盖默认起跑配置",
+            use_custom_start = _prompt_yes_no_block(
+                title="起跑配置" if lang == "zh" else "Start Layout",
+                prompt="是否覆盖默认起跑配置",
                 input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
                 translate_fn=translate_fn,
             )
             start_spec = None
             if use_custom_start:
-                start_spec = _prompt_line(
-                    "请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8",
+                start_spec = _prompt_line_block(
+                    title="自定义起跑配置" if lang == "zh" else "Custom Start Layout",
+                    prompt="请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8",
                     input_fn=input_fn,
+                    prompt_output_fn=prompt_output_fn,
                     translate_fn=translate_fn,
                 )
     else:
         if getattr(args, "_start_explicit", False):
             start_spec = args.start
         else:
-            start_spec = _prompt_line(
-                "请输入起跑配置，例如 1:* 或 -3:2;-2:1,4;1:5",
+            start_spec = _prompt_line_block(
+                title="起跑配置" if lang == "zh" else "Start Layout",
+                prompt="请输入起跑配置，例如 1:* 或 -3:2;-2:1,4;1:5",
                 input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
                 translate_fn=translate_fn,
             )
     iterations = args.iterations
     if not getattr(args, "_iterations_explicit", False):
         iterations = int(
-            _prompt_line(
-                "请输入 Monte Carlo 模拟次数",
+            _prompt_line_block(
+                title="模拟次数" if lang == "zh" else "Iterations",
+                prompt="请输入 Monte Carlo 模拟次数",
                 input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
                 translate_fn=translate_fn,
             )
         )
     seed = args.seed
     if not getattr(args, "_seed_explicit", False):
-        seed_text = _prompt_line(
-            "请输入随机种子，留空表示不固定",
+        seed_text = _prompt_line_block(
+            title="随机种子" if lang == "zh" else "Random Seed",
+            prompt="请输入随机种子，留空表示不固定",
             input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
             translate_fn=translate_fn,
             allow_empty=True,
         )
@@ -1094,15 +1158,19 @@ def run_interactive_simulation_command(
     workers = args.workers
     if not getattr(args, "_workers_explicit", False):
         workers = int(
-            _prompt_line(
-                "请输入 workers 数量，0 表示使用 CPU 核心数",
+            _prompt_line_block(
+                title="并行设置" if lang == "zh" else "Worker Count",
+                prompt="请输入 workers 数量，0 表示使用 CPU 核心数",
                 input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
                 translate_fn=translate_fn,
             )
         )
-    json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no(
-        "是否输出 JSON 结果",
+    json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no_block(
+        title="输出格式" if lang == "zh" else "Output Format",
+        prompt="是否输出 JSON 结果",
         input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
     )
     interactive_args = _with_args(
@@ -1365,16 +1433,20 @@ def run_interactive_champion_prediction_command(
 
     seed = args.seed
     if not getattr(args, "_seed_explicit", False):
-        seed_text = _prompt_line(
-            "请输入随机种子（留空表示不固定）",
+        seed_text = _prompt_line_block(
+            title="随机种子" if lang == "zh" else "Random Seed",
+            prompt="请输入随机种子（留空表示不固定）",
             input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
             translate_fn=translate_fn,
             allow_empty=True,
         )
         seed = int(seed_text) if seed_text else None
-    json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no(
-        "是否输出 JSON 结果",
+    json_output = args.json if getattr(args, "_json_explicit", False) else _prompt_yes_no_block(
+        title="输出格式" if lang == "zh" else "Output Format",
+        prompt="是否输出 JSON 结果",
         input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
         translate_fn=translate_fn,
     )
 
@@ -1393,18 +1465,22 @@ def run_interactive_champion_prediction_command(
     iterations = args.iterations
     if not getattr(args, "_iterations_explicit", False):
         iterations = int(
-            _prompt_line(
-                "请输入 Monte Carlo 模拟次数",
+            _prompt_line_block(
+                title="模拟次数" if lang == "zh" else "Iterations",
+                prompt="请输入 Monte Carlo 模拟次数",
                 input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
                 translate_fn=translate_fn,
             )
         )
     workers = args.workers
     if not getattr(args, "_workers_explicit", False):
         workers = int(
-            _prompt_line(
-                "请输入 workers 数量（0 表示 CPU 核心数）",
+            _prompt_line_block(
+                title="并行设置" if lang == "zh" else "Worker Count",
+                prompt="请输入 workers 数量（0 表示 CPU 核心数）",
                 input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
                 translate_fn=translate_fn,
             )
         )
