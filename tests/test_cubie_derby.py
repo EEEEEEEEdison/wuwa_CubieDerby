@@ -3138,6 +3138,77 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["stages"][0]["match_type"], "winners-bracket")
         self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
 
+    def test_main_interactive_elimination_a_can_split_ordered_qualifiers(self):
+        stdout = io.StringIO()
+        pool = tuple(season_runner_pool(2))
+        qualifiers = pool[:12]
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "7",
+                "2",
+                " ".join(str(runner) for runner in qualifiers),
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "elimination-a")
+        self.assertEqual(data["stages"][0]["entrants"], list(qualifiers[:6]))
+        self.assertEqual(data["stages"][1]["entrants"], list(qualifiers[6:12]))
+        self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
+
+    def test_main_interactive_elimination_b_can_derive_remaining_group(self):
+        stdout = io.StringIO()
+        pool = tuple(season_runner_pool(2))
+        qualifiers = pool[:12]
+        elimination_a = qualifiers[:6]
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "8",
+                "2",
+                " ".join(str(runner) for runner in qualifiers),
+                " ".join(str(runner) for runner in elimination_a),
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "random",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "elimination-b")
+        self.assertEqual(data["stages"][0]["entrants"], list(qualifiers[6:12]))
+        self.assertEqual(data["stages"][-1]["match_type"], "grand-final")
+
 
 if __name__ == "__main__":
     unittest.main()

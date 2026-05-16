@@ -279,6 +279,74 @@ def _collect_derived_entry_inputs(
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
 ) -> dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]]:
+    if entry_point == "elimination-a":
+        mode = _prompt_choice(
+            "淘汰赛分组的补录方式",
+            (
+                ("direct", "直接输入淘汰赛 A/B 两组名单"),
+                ("ordered-qualified", "输入 12 名晋级者，前 6 名视为淘汰赛 A，后 6 名视为 B"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "ordered-qualified":
+            qualified = _prompt_runner_list(
+                "请输入 12 名小组赛晋级角色",
+                description="按“淘汰赛 A 的 6 人在前，淘汰赛 B 的 6 人在后”的顺序输入，系统会自动拆成两组。",
+                helpers=helpers,
+                season=season,
+                expected_count=12,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            return {
+                "elimination-a-entrants": qualified[:6],
+                "elimination-b-entrants": qualified[6:],
+            }
+    if entry_point == "elimination-b":
+        mode = _prompt_choice(
+            "淘汰赛B的补录方式",
+            (
+                ("direct", "直接输入淘汰赛 A 排名和淘汰赛 B 名单"),
+                ("derive", "输入 12 名晋级者和淘汰赛 A 完整排名，自动反推淘汰赛 B 名单"),
+            ),
+            default_key="direct",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+        if mode == "derive":
+            qualified = _prompt_runner_list(
+                "请输入 12 名小组赛晋级角色",
+                description="输入本阶段的全部 12 名晋级者；系统会用淘汰赛 A 的完整排名反推淘汰赛 B 的 6 人名单。",
+                helpers=helpers,
+                season=season,
+                expected_count=12,
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+            )
+            qualified_set = set(qualified)
+            while True:
+                elimination_a = _prompt_runner_list(
+                    "请输入淘汰赛A完整排名（6名）",
+                    description="系统会自动把不在这 6 名中的其余晋级者归入淘汰赛 B。",
+                    helpers=helpers,
+                    season=season,
+                    expected_count=6,
+                    input_fn=input_fn,
+                    prompt_output_fn=prompt_output_fn,
+                )
+                if any(runner not in qualified_set for runner in elimination_a):
+                    prompt_output_fn("淘汰赛A排名中包含不在这 12 名晋级者里的角色，请重新输入。")
+                    continue
+                elimination_b = tuple(runner for runner in qualified if runner not in elimination_a)
+                if len(elimination_b) != 6:
+                    prompt_output_fn("淘汰赛A完整排名需要刚好占用 12 名晋级者中的 6 名，请重新输入。")
+                    continue
+                return {
+                    "elimination-a-ranking": elimination_a,
+                    "elimination-b-entrants": elimination_b,
+                }
     if entry_point == "losers-round-1":
         mode = _prompt_choice(
             "败者组第一轮的补录方式",
