@@ -3001,6 +3001,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "2",
                 "1",
                 "1",
                 "12",
@@ -3015,9 +3016,36 @@ class CubieDerbyTests(unittest.TestCase):
         text = stdout.getvalue()
         prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
-        self.assertIn("未指定赛季，交互向导默认使用第2季", prompt_text)
+        self.assertIn("请选择赛季", prompt_text)
         self.assertIn("请选择分析大类", prompt_text)
         self.assertIn("起始阶段：总决赛", text)
+
+    def test_main_without_args_can_choose_season_one_simulation(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "1",
+                "1 2 3 4 5 6",
+                "1:*",
+                "4",
+                "7",
+                "1",
+                "y",
+            ],
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main([])
+
+        data = json.loads(stdout.getvalue())
+        prompt_text = stderr.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("请选择赛季", prompt_text)
+        self.assertIn("当前第1季交互向导先提供单场胜率分析", prompt_text)
+        self.assertEqual(data["config"]["season"], 1)
+        self.assertNotIn("match_type", data["config"])
+        self.assertEqual(data["config"]["runners"], [1, 2, 3, 4, 5, 6])
 
     def test_main_with_prefill_args_still_enters_interactive_wizard(self):
         stdout = io.StringIO()

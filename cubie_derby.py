@@ -2811,9 +2811,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.interactive = True
     setattr(args, "_interactive_auto_entry", auto_interactive)
     setattr(args, "_season_explicit", season_explicit)
-    if args.interactive and not season_explicit:
-        args.season = 2
-        setattr(args, "_interactive_defaulted_season", True)
     show_progress = sys.stderr.isatty() and not args.json
     try:
         if args.tournament_context_out and not args.interactive:

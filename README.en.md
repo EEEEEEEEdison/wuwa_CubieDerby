@@ -145,7 +145,8 @@ Notes:
 - Interactive champion prediction currently supports starting from any Season 2 tournament entry point, such as `group-a-round-2`, `elimination-a`, `winners-round-2`, or `grand-final`.
 - For many mid-tournament entry points, the wizard can derive later rosters automatically from full rankings so you do not have to split lists manually.
 - The prompts first explain the current entry stage and which later stages will still be simulated, then ask for the required inputs.
-- If you run `python cubie_derby.py` directly, the wizard now enters interactive mode automatically and defaults to Season 2. You can also prefill flags such as `--season`, `--iterations`, or `--json`, then let the wizard ask only for the remaining inputs.
+- If you run `python cubie_derby.py` directly, the wizard now asks for the season first and then continues into the appropriate analysis branch. You can also prefill flags such as `--season`, `--iterations`, or `--json`, then let the wizard ask only for the remaining inputs.
+- The current Season 1 interactive flow focuses on the basic single-stage win-rate path first; tournament champion prediction still primarily follows the Season 2 tournament flow.
 - `--interactive-language en` switches the wizard prompts to English for demos and English-speaking users. The JSON structure itself is unchanged.
 
 Examples:

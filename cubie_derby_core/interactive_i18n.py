@@ -8,6 +8,9 @@ INTERACTIVE_LANGUAGE_CHOICES = ("zh", "en")
 
 TRANSLATIONS_EN: dict[str, str] = {
     "请选择分析大类": "Choose analysis branch",
+    "请选择赛季": "Choose season",
+    "第1季": "Season 1",
+    "第2季": "Season 2",
     "赛事冠军预测": "Tournament champion prediction",
     "单场胜率分析": "Single-stage win-rate analysis",
     "你正在进入“单场胜率分析”；下一步会先选择具体比赛阶段。": (
@@ -16,14 +19,17 @@ TRANSLATIONS_EN: dict[str, str] = {
     "你正在进入“赛事冠军预测”；下一步会选择单届演示或 Monte Carlo 统计。": (
         "You are entering tournament champion prediction. Next you will choose a single-run demo or Monte Carlo statistics."
     ),
-    "未指定赛季，交互向导默认使用第2季；如果你想覆盖，可以下次带上 --season。": (
-        "No season was specified, so the interactive wizard defaults to Season 2. Add --season next time if you want to override it."
+    "当前第1季交互向导先提供单场胜率分析；赛事冠军预测将在后续版本开放。": (
+        "Season 1 currently offers the single-stage analysis wizard first. Tournament champion prediction will open in a later version."
     ),
     "请选择冠军预测方式": "Choose champion prediction mode",
     "单届演示（跑 1 届完整赛事）": "Single-run demo (simulate 1 full tournament)",
     "Monte Carlo 分析（重复统计夺冠率）": "Monte Carlo analysis (repeat tournaments and estimate champion rates)",
     "请选择从哪个阶段开始": "Choose the stage to start from",
     "请选择单场模拟阶段": "Choose single-stage simulation stage",
+    "当前赛季暂不使用阶段化规则；下面会进行基础单场胜率分析。": (
+        "This season does not use stage-based rules yet. The wizard will continue with the basic single-stage win-rate flow."
+    ),
     "当前模拟阶段：": "Current simulation stage: ",
     "当前起始阶段：": "Current starting stage: ",
     "后续将模拟：": "Remaining simulation: ",
@@ -51,6 +57,9 @@ TRANSLATIONS_EN: dict[str, str] = {
     "是否覆盖默认起跑配置": "Override the default start layout",
     "请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8": (
         "Enter a custom start layout, for example 1:* or -3:10;-2:4,3;-1:8"
+    ),
+    "请输入起跑配置，例如 1:* 或 -3:2;-2:1,4;1:5": (
+        "Enter a start layout, for example 1:* or -3:2;-2:1,4;1:5"
     ),
     "请输入 Monte Carlo 模拟次数": "Enter Monte Carlo iteration count",
     "请输入随机种子，留空表示不固定": "Enter random seed, or leave blank for non-fixed randomness",

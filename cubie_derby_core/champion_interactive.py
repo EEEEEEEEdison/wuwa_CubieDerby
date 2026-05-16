@@ -869,15 +869,15 @@ def _collect_derived_entry_inputs(
 def _prompt_simulation_runner_tokens(
     *,
     season: int,
-    match_type: str,
+    match_type: str | None,
     helpers: SimulationInteractiveHelpers,
     input_fn: Callable[[str], str],
     prompt_output_fn: Callable[[str], None],
     lang: str = "zh",
 ) -> list[str]:
-    rule = helpers.get_match_type_rule(season, match_type)
+    rule = helpers.get_match_type_rule(season, match_type) if match_type is not None else None
     description = "请输入 6 名登场角色，使用空格或逗号分隔。"
-    if getattr(rule, "seeded_from_runner_order", False):
+    if rule is not None and getattr(rule, "seeded_from_runner_order", False):
         description = "请按上一轮第 1 名到第 6 名的顺序输入 6 名角色，系统会按这个顺序自动生成起跑站位。"
     prompt_output_fn(description)
     while True:
@@ -925,22 +925,25 @@ def run_interactive_simulation_command(
     if args.tournament_context_in or args.tournament_context_out:
         raise ValueError("--tournament-context-in/out are only supported for interactive champion prediction")
     season = args.season
-    if season != 2:
-        raise ValueError("interactive single-stage simulation currently only supports --season 2")
-    match_options = [
-        (key, helpers.get_match_type_rule(season, key).label)
-        for key in helpers.match_type_choices()
-    ]
-    match_type = args.match_type or _prompt_choice(
-        "请选择单场模拟阶段",
-        match_options,
-        default_key="elimination",
-        input_fn=input_fn,
-        prompt_output_fn=prompt_output_fn,
-        translate_fn=translate_fn,
-    )
-    prompt_output_fn(f"当前模拟阶段：{helpers.get_match_type_rule(season, match_type).label}")
-    prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
+    if season == 2:
+        match_options = [
+            (key, helpers.get_match_type_rule(season, key).label)
+            for key in helpers.match_type_choices()
+        ]
+        match_type = args.match_type or _prompt_choice(
+            "请选择单场模拟阶段",
+            match_options,
+            default_key="elimination",
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+            translate_fn=translate_fn,
+        )
+        prompt_output_fn(f"当前模拟阶段：{helpers.get_match_type_rule(season, match_type).label}")
+        prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
+    else:
+        match_type = None
+        prompt_output_fn("当前赛季暂不使用阶段化规则；下面会进行基础单场胜率分析。")
+        prompt_output_fn("下面会继续询问登场角色、起跑配置、模拟次数和输出格式。")
     runner_tokens = args.runners or _prompt_simulation_runner_tokens(
         season=season,
         match_type=match_type,
@@ -949,17 +952,24 @@ def run_interactive_simulation_command(
         prompt_output_fn=prompt_output_fn,
         lang=lang,
     )
-    prompt_output_fn("默认起跑配置会根据当前阶段自动适配；如果你想覆盖，下一步可以手动输入自定义起跑。")
-    use_custom_start = _prompt_yes_no(
-        "是否覆盖默认起跑配置",
-        default=bool(args.start),
-        input_fn=input_fn,
-        translate_fn=translate_fn,
-    )
-    start_spec = args.start if use_custom_start and args.start else None
-    if use_custom_start and start_spec is None:
-        start_spec = _prompt_line(
-            "请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8",
+    if season == 2:
+        prompt_output_fn("默认起跑配置会根据当前阶段自动适配；如果你想覆盖，下一步可以手动输入自定义起跑。")
+        use_custom_start = _prompt_yes_no(
+            "是否覆盖默认起跑配置",
+            default=bool(args.start),
+            input_fn=input_fn,
+            translate_fn=translate_fn,
+        )
+        start_spec = args.start if use_custom_start and args.start else None
+        if use_custom_start and start_spec is None:
+            start_spec = _prompt_line(
+                "请输入自定义起跑配置，例如 1:* 或 -3:10;-2:4,3;-1:8",
+                input_fn=input_fn,
+                translate_fn=translate_fn,
+            )
+    else:
+        start_spec = args.start or _prompt_line(
+            "请输入起跑配置，例如 1:* 或 -3:2;-2:1,4;1:5",
             input_fn=input_fn,
             translate_fn=translate_fn,
         )
@@ -1040,8 +1050,22 @@ def run_interactive_command(
     raw_prompt_output_fn = prompt_output_fn
     input_fn = lambda prompt: raw_input_fn(translate_fn(prompt))
     prompt_output_fn = lambda text: raw_prompt_output_fn(translate_fn(text))
-    if getattr(args, "_interactive_defaulted_season", False):
-        prompt_output_fn("未指定赛季，交互向导默认使用第2季；如果你想覆盖，可以下次带上 --season。")
+    season = args.season
+    if not args.tournament_context_in and not getattr(args, "_season_explicit", False):
+        season = int(
+            _prompt_choice(
+                "请选择赛季",
+                (
+                    ("1", "第1季"),
+                    ("2", "第2季"),
+                ),
+                default_key="2",
+                input_fn=input_fn,
+                prompt_output_fn=prompt_output_fn,
+                translate_fn=translate_fn,
+            )
+        )
+        args = _with_args(args, season=season)
     if args.champion_prediction or args.tournament_context_in or args.tournament_context_out:
         return run_interactive_champion_prediction_command(
             args,
@@ -1052,6 +1076,16 @@ def run_interactive_command(
             result_output_fn=result_output_fn,
         )
     if args.match_type or args.runners is not None or args.start or args.initial_order:
+        return run_interactive_simulation_command(
+            args,
+            show_progress=show_progress,
+            helpers=simulation_helpers,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+    season = args.season
+    if season != 2:
+        prompt_output_fn("当前第1季交互向导先提供单场胜率分析；赛事冠军预测将在后续版本开放。")
         return run_interactive_simulation_command(
             args,
             show_progress=show_progress,
