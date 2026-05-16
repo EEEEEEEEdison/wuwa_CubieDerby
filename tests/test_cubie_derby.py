@@ -3561,7 +3561,8 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(data["config"]["runners"], [1, 3, 11, 21, 16, 22])
         self.assertIn("当前已记录 5/6 名：", prompt_text)
-        self.assertIn("今汐、卡卡罗、卡提希娅、奥古斯塔、绯雪", prompt_text)
+        self.assertIn("  1 = 今汐", prompt_text)
+        self.assertIn("  5 = 绯雪", prompt_text)
         self.assertIn("还需要输入 1 名角色。", prompt_text)
 
     def test_main_interactive_simulation_prompts_support_english(self):
@@ -3638,7 +3639,8 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(data["stages"][0]["entrants"], [11, 12, 13, 14, 15, 16])
         self.assertIn("当前已记录 5/6 名：", prompt_text)
-        self.assertIn("卡提希娅、菲比、西格莉卡、陆赫斯、达尼娅", prompt_text)
+        self.assertIn("  1 = 卡提希娅", prompt_text)
+        self.assertIn("  5 = 达尼娅", prompt_text)
         self.assertIn("还需要输入 1 名角色。", prompt_text)
 
     def test_main_interactive_champion_prompts_support_english(self):

@@ -321,14 +321,15 @@ def _emit_runner_progress(
     prompt_output_fn: Callable[[str], None],
     lang: str,
 ) -> None:
-    names = [_runner_display_name(runner, lang=lang) for runner in runners]
     if lang == "en":
         prompt_output_fn(f"Recorded {len(runners)}/{expected_count} runners:")
-        prompt_output_fn("  " + ", ".join(names))
+        for index, runner in enumerate(runners, start=1):
+            prompt_output_fn(f"  {index}. {_runner_display_name(runner, lang=lang)}")
         prompt_output_fn(f"{expected_count - len(runners)} runners remaining.")
     else:
         prompt_output_fn(f"当前已记录 {len(runners)}/{expected_count} 名：")
-        prompt_output_fn("  " + "、".join(names))
+        for index, runner in enumerate(runners, start=1):
+            prompt_output_fn(f"  {index} = {_runner_display_name(runner, lang=lang)}")
         prompt_output_fn(f"还需要输入 {expected_count - len(runners)} 名角色。")
 
 
