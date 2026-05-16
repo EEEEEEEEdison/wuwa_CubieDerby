@@ -863,6 +863,60 @@ def format_runner_arrow_list(runners: Sequence[int]) -> str:
     return " -> ".join(format_runner(runner) for runner in runners)
 
 
+def format_ranked_runner_list(runners: Sequence[int]) -> str:
+    return "，".join(f"{index}. {format_runner(runner)}" for index, runner in enumerate(runners, start=1))
+
+
+def _parse_start_spec_cells(start_spec: str) -> dict[int, tuple[str, ...]]:
+    cells: dict[int, tuple[str, ...]] = {}
+    for part in start_spec.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        pos_text, runners_text = part.split(":", 1)
+        runners = tuple(token.strip() for token in runners_text.split(",") if token.strip())
+        cells[int(pos_text)] = runners
+    return cells
+
+
+def _ranking_order_from_start_spec(start_spec: str) -> tuple[int, ...] | None:
+    cells = _parse_start_spec_cells(start_spec)
+    if set(cells) != {-3, -2, -1, 0}:
+        return None
+    if not (
+        len(cells[0]) == 1
+        and len(cells[-1]) == 2
+        and len(cells[-2]) == 2
+        and len(cells[-3]) == 1
+    ):
+        return None
+    try:
+        return (
+            int(cells[0][0]),
+            int(cells[-1][0]),
+            int(cells[-1][1]),
+            int(cells[-2][0]),
+            int(cells[-2][1]),
+            int(cells[-3][0]),
+        )
+    except ValueError:
+        return None
+
+
+def format_start_rule(start_spec: str) -> str:
+    cells = _parse_start_spec_cells(start_spec)
+    if any("*" in runners for runners in cells.values()):
+        return "随机"
+    ranking_order = _ranking_order_from_start_spec(start_spec)
+    if ranking_order is not None:
+        return f"排名顺序（{format_ranked_runner_list(ranking_order)}）"
+    parts = [
+        f"{pos}: {format_runner_list(tuple(int(runner) for runner in runners))}"
+        for pos, runners in sorted(cells.items())
+    ]
+    return f"自定义（{' | '.join(parts)}）"
+
+
 def display_width(text: str) -> int:
     width = 0
     for char in text:
@@ -1698,15 +1752,15 @@ def format_tournament_result(result: TournamentResult) -> str:
                 "",
                 stage.title,
                 f"参赛：{format_runner_list(stage.entrants)}",
-                f"起跑：{stage.start_spec}",
-                f"排名：{format_runner_arrow_list(stage.ranking)}",
+                f"起跑规则：{format_start_rule(stage.start_spec)}",
+                f"排名：{format_ranked_runner_list(stage.ranking)}",
             ]
         )
         if stage.show_qualify_stats:
             lines.append(f"晋级：{format_runner_list(stage.qualified_runners)}")
             lines.append(f"淘汰：{format_runner_list(stage.eliminated_runners)}")
         if stage.next_stage_start_spec is not None:
-            lines.append(f"下一轮站位：{stage.next_stage_start_spec}")
+            lines.append(f"下一轮起跑规则：{format_start_rule(stage.next_stage_start_spec)}")
     return "\n".join(lines)
 
 

@@ -890,6 +890,10 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn(result.champion, season_runner_pool(2))
         self.assertIn("总决赛", text)
         self.assertIn("冠军", text)
+        self.assertIn("起跑规则：随机", text)
+        self.assertIn("下一轮起跑规则：排名顺序（1.", text)
+        self.assertIn("排名：1.", text)
+        self.assertNotIn(" -> ", text)
 
     def test_tournament_phase_choices_cover_explicit_season_two_flow(self):
         self.assertEqual(
