@@ -3249,6 +3249,32 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertIn("Choose analysis branch", prompt_text)
         self.assertIn("Grand Final", text)
 
+    def test_main_from_start_champion_prediction_uses_full_season_roster_automatically(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "1",
+                "2",
+                "1",
+                "1",
+                "1",
+                "n",
+            ],
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["--seed", "7", "--json"])
+
+        prompt_text = stderr.getvalue()
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertIn("本次会默认使用第2季全部18名角色参赛。", prompt_text)
+        self.assertNotIn("请输入 18 名角色", prompt_text)
+        self.assertNotIn("本赛季可用角色", prompt_text)
+        self.assertNotIn("后续将依次模拟：", prompt_text)
+        self.assertEqual(data["start_entry_point"], "group-a-round-1")
+
     def test_main_interactive_can_save_tournament_context_json(self):
         stdout = io.StringIO()
 

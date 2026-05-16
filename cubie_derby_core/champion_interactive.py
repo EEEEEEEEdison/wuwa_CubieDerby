@@ -495,6 +495,24 @@ def _remaining_entry_labels(
     )
 
 
+def _auto_fill_entry_inputs(
+    *,
+    season: int,
+    entry_point: str,
+    helpers: ChampionInteractiveHelpers,
+) -> dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]]:
+    auto_values: dict[str, tuple[int, ...] | tuple[tuple[int, ...], ...]] = {}
+    season_roster = tuple(helpers.season_runner_pool(season))
+    for requirement in helpers.tournament_entry_requirements(season, entry_point):
+        if (
+            requirement.key == "season-roster"
+            and requirement.kind == "entrants"
+            and requirement.runner_count == len(season_roster)
+        ):
+            auto_values[requirement.key] = season_roster
+    return auto_values
+
+
 def _emit_champion_entry_guidance(
     *,
     season: int,
@@ -520,6 +538,13 @@ def _emit_champion_entry_guidance(
     prompt_output_fn(f"当前起始阶段：{localized_definition_label}")
     if len(remaining_labels) == 1:
         prompt_output_fn(f"后续将模拟：{localized_remaining_labels[0]}")
+    elif len(remaining_labels) > 4:
+        if lang == "zh":
+            prompt_output_fn(f"后续将自动模拟剩余 {len(remaining_labels)} 个阶段，直到 {localized_remaining_labels[-1]}。")
+        else:
+            prompt_output_fn(
+                f"The wizard will simulate the remaining {len(remaining_labels)} stages automatically, through {localized_remaining_labels[-1]}."
+            )
     else:
         prompt_output_fn("后续将依次模拟：" if lang == "zh" else "Remaining stages to simulate:")
         _emit_numbered_list(localized_remaining_labels, prompt_output_fn=prompt_output_fn)
@@ -592,11 +617,16 @@ def _emit_requirement_overview(
     prompt_output_fn: Callable[[str], None],
     lang: str = "zh",
     translate_fn: Callable[[str], str] | None = None,
+    skip_keys: Sequence[str] = (),
 ) -> None:
     if translate_fn is None:
         translate_fn = lambda text: text
-    requirements = tuple(helpers.tournament_entry_requirements(season, entry_point))
-    if not requirements:
+    requirements = tuple(
+        requirement
+        for requirement in helpers.tournament_entry_requirements(season, entry_point)
+        if requirement.key not in set(skip_keys)
+    )
+    if not requirements or all(requirement.optional for requirement in requirements):
         return
     _emit_section_heading(
         "需要准备的输入" if lang == "zh" else "Required Inputs",
@@ -1958,15 +1988,23 @@ def run_interactive_champion_prediction_command(
             lang=lang,
             translate_fn=translate_fn,
         )
-        _emit_requirement_overview(
+        requirement_values = _auto_fill_entry_inputs(
+            helpers=helpers,
             season=season,
             entry_point=entry_point,
-            helpers=helpers,
-            prompt_output_fn=prompt_output_fn,
-            lang=lang,
-            translate_fn=translate_fn,
         )
-        requirement_values = _collect_derived_entry_inputs(
+        if entry_point == "group-a-round-1" and "season-roster" in requirement_values:
+            prompt_output_fn(
+                "本次会默认使用第2季全部18名角色参赛。"
+                if lang == "zh"
+                else "This run will use all 18 Season 2 runners automatically."
+            )
+            prompt_output_fn(
+                "如果你想固定小组 A/B/C 分组，下一步可以手动指定；否则系统会按 seed 随机分组。"
+                if lang == "zh"
+                else "If you want fixed Groups A/B/C, you can enter them next; otherwise the wizard will randomize them from the seed."
+            )
+        derived_values = _collect_derived_entry_inputs(
             helpers=helpers,
             season=season,
             entry_point=entry_point,
@@ -1974,6 +2012,16 @@ def run_interactive_champion_prediction_command(
             prompt_output_fn=prompt_output_fn,
             lang=lang,
             translate_fn=translate_fn,
+        )
+        requirement_values.update(derived_values)
+        _emit_requirement_overview(
+            season=season,
+            entry_point=entry_point,
+            helpers=helpers,
+            prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
+            skip_keys=tuple(requirement_values.keys()),
         )
         for requirement in helpers.tournament_entry_requirements(season, entry_point):
             if requirement.key in requirement_values:
