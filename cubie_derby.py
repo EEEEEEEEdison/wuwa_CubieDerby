@@ -104,7 +104,8 @@ from cubie_derby_core.cli_dispatch import (
 )
 from cubie_derby_core.champion_interactive import (
     ChampionInteractiveHelpers,
-    run_interactive_champion_prediction_command as core_run_interactive_champion_prediction_command,
+    SimulationInteractiveHelpers,
+    run_interactive_command as core_run_interactive_command,
 )
 from cubie_derby_core.cli_parser import (
     make_parser as core_make_parser,
@@ -2643,10 +2644,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.tournament_context_in and not (args.interactive or args.champion_prediction):
             raise ValueError("--tournament-context-in requires --interactive or --champion-prediction")
         if args.interactive:
-            return core_run_interactive_champion_prediction_command(
+            return core_run_interactive_command(
                 args,
                 show_progress=show_progress,
-                helpers=ChampionInteractiveHelpers(
+                champion_helpers=ChampionInteractiveHelpers(
                     build_tournament_entry_request=build_tournament_entry_request,
                     champion_prediction_to_dict=champion_prediction_to_dict,
                     format_champion_prediction_summary=format_champion_prediction_summary,
@@ -2662,6 +2663,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     tournament_entry_requirements=tournament_entry_requirements,
                     tournament_result_to_dict=tournament_result_to_dict,
                     validate_champion_prediction_season=validate_champion_prediction_season,
+                ),
+                simulation_helpers=SimulationInteractiveHelpers(
+                    build_config_from_args=build_config_from_args,
+                    get_match_type_rule=get_match_type_rule,
+                    match_type_choices=match_type_choices,
+                    parse_runner_tokens=parse_runner_tokens,
+                    run_simulation_command=core_run_simulation_command,
+                    season_runner_pool=season_runner_pool,
+                    simulation_cli_helpers=SimulationCLIHelpers(
+                        emit_progress_overview=emit_progress_overview,
+                        format_simulation_overview_lines=format_simulation_overview_lines,
+                        format_skill_ablation_summary=format_skill_ablation_summary,
+                        format_summary=format_summary,
+                        parse_runner_tokens=parse_runner_tokens,
+                        run_monte_carlo=run_monte_carlo,
+                        run_skill_ablation=run_skill_ablation,
+                        skill_ablation_to_dict=skill_ablation_to_dict,
+                        summary_to_dict=summary_to_dict,
+                        with_elapsed=with_elapsed,
+                    ),
                 ),
                 prompt_output_fn=lambda text: print(text, file=sys.stderr),
             )

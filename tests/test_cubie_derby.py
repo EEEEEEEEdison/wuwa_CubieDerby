@@ -2948,6 +2948,45 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["start_entry_point"], "grand-final")
         self.assertEqual({row["runner"] for row in data["rows"]}, {11, 12, 13, 14, 15, 16})
 
+    def test_main_interactive_single_stage_elimination_monte_carlo_json(self):
+        stdout = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "3",
+                "3",
+                "11 12 13 14 15 16",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--iterations",
+                    "4",
+                    "--workers",
+                    "1",
+                    "--seed",
+                    "7",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["iterations"], 4)
+        self.assertEqual(data["config"]["match_type"], "elimination")
+        self.assertEqual(data["config"]["map_label"], "淘汰赛阶段地图")
+        self.assertEqual(data["config"]["qualify_cutoff"], 3)
+        self.assertEqual(data["config"]["runners"], [11, 12, 13, 14, 15, 16])
+
     def test_main_interactive_can_save_tournament_context_json(self):
         stdout = io.StringIO()
 

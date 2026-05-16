@@ -29,7 +29,7 @@ def make_parser(*, match_type_choices_fn: MatchTypeChoicesFn) -> argparse.Argume
     parser.add_argument(
         "--interactive",
         action="store_true",
-        help="launch interactive prompts instead of providing every champion-prediction input by flags",
+        help="launch interactive prompts for single-stage simulation or champion prediction",
     )
     parser.add_argument(
         "--tournament-context-in",

@@ -5,6 +5,7 @@ import random
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
 
@@ -25,6 +26,23 @@ class ChampionInteractiveHelpers:
     tournament_entry_requirements: Callable[[int, str], Sequence[Any]]
     tournament_result_to_dict: Callable[[Any], dict[str, object]]
     validate_champion_prediction_season: Callable[[int], None]
+
+
+@dataclass(frozen=True)
+class SimulationInteractiveHelpers:
+    build_config_from_args: Callable[[Any], Any]
+    get_match_type_rule: Callable[[int, str], Any]
+    match_type_choices: Callable[[], Sequence[str]]
+    parse_runner_tokens: Callable[[Sequence[str] | None, random.Random | None, Sequence[int] | None], tuple[int, ...] | None]
+    run_simulation_command: Callable[..., int]
+    season_runner_pool: Callable[[int], Sequence[int]]
+    simulation_cli_helpers: Any
+
+
+def _with_args(args: Any, **updates: Any) -> Any:
+    values = dict(vars(args))
+    values.update(updates)
+    return SimpleNamespace(**values)
 
 
 def _prompt_line(
@@ -103,6 +121,23 @@ def _parse_runner_input(
     if runners is None:
         raise ValueError("未输入任何角色")
     return runners
+
+
+def _parse_simulation_runner_input(
+    text: str,
+    *,
+    helpers: SimulationInteractiveHelpers,
+    season: int,
+) -> tuple[list[str], tuple[int, ...]]:
+    tokens = [part for part in text.replace(",", " ").split() if part]
+    runners = helpers.parse_runner_tokens(
+        tokens,
+        None,
+        tuple(helpers.season_runner_pool(season)),
+    )
+    if runners is None:
+        raise ValueError("δ�����κν�ɫ")
+    return tokens, runners
 
 
 def _prompt_runner_list(
@@ -346,6 +381,199 @@ def _collect_derived_entry_inputs(
                 "grand-final-entrants": winners_round_two[:3] + losers_round_two[:3],
             }
     return {}
+
+
+def _prompt_simulation_runner_tokens(
+    *,
+    season: int,
+    match_type: str,
+    helpers: SimulationInteractiveHelpers,
+    input_fn: Callable[[str], str],
+    prompt_output_fn: Callable[[str], None],
+) -> list[str]:
+    rule = helpers.get_match_type_rule(season, match_type)
+    description = "������ 6 ����ɫ�����ո���ն��ŷָ���"
+    if getattr(rule, "seeded_from_runner_order", False):
+        description = "��С��ǰһ�ֵ������� 1 ���� 6 ��˳������ 6 ����ɫ��"
+    prompt_output_fn(description)
+    while True:
+        raw = input_fn("��������ɫ��").strip()
+        try:
+            tokens, runners = _parse_simulation_runner_input(
+                raw,
+                helpers=helpers,
+                season=season,
+            )
+            if len(runners) != 6:
+                raise ValueError(f"��Ҫ���� 6 ����ɫ����ǰ�� {len(runners)} ��")
+            return tokens
+        except ValueError as exc:
+            prompt_output_fn(str(exc))
+
+
+def run_interactive_simulation_command(
+    args: Any,
+    *,
+    show_progress: bool,
+    helpers: SimulationInteractiveHelpers,
+    input_fn: Callable[[str], str] | None = None,
+    prompt_output_fn: Callable[[str], None] | None = None,
+) -> int:
+    if input_fn is None:
+        input_fn = input
+    if prompt_output_fn is None:
+        prompt_output_fn = print
+    if args.season_roster_scan:
+        raise ValueError("--interactive cannot be combined with --season-roster-scan")
+    if args.skill_ablation:
+        raise ValueError("--interactive single-stage simulation does not support --skill-ablation yet")
+    if args.trace or args.trace_log:
+        raise ValueError("--interactive single-stage simulation does not support trace output yet")
+    if args.tournament_context_in or args.tournament_context_out:
+        raise ValueError("--tournament-context-in/out are only supported for interactive champion prediction")
+    season = args.season
+    if season != 2:
+        raise ValueError("interactive single-stage simulation currently only supports --season 2")
+    match_options = [
+        (key, helpers.get_match_type_rule(season, key).label)
+        for key in helpers.match_type_choices()
+    ]
+    match_type = args.match_type or _prompt_choice(
+        "��ѡ�񵥳�ģ������",
+        match_options,
+        default_key="elimination",
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+    )
+    runner_tokens = args.runners or _prompt_simulation_runner_tokens(
+        season=season,
+        match_type=match_type,
+        helpers=helpers,
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+    )
+    use_custom_start = _prompt_yes_no(
+        "�Ƿ񸲸�Ĭ���𷽲���",
+        default=bool(args.start),
+        input_fn=input_fn,
+    )
+    start_spec = args.start if use_custom_start and args.start else None
+    if use_custom_start and start_spec is None:
+        start_spec = _prompt_line(
+            "�������Զ����𷽣����� 1:* �� -3:10;-2:4,3;-1:8��",
+            input_fn=input_fn,
+        )
+    iterations = int(
+        _prompt_line(
+            "������ Monte Carlo ģ�����",
+            default=str(args.iterations),
+            input_fn=input_fn,
+        )
+    )
+    seed_text = _prompt_line(
+        "������������ӣ����ձ�ʾ���̶���",
+        default="" if args.seed is None else str(args.seed),
+        input_fn=input_fn,
+    )
+    seed = int(seed_text) if seed_text else None
+    workers = int(
+        _prompt_line(
+            "������ workers ������0 ��ʾ CPU ��������",
+            default=str(args.workers),
+            input_fn=input_fn,
+        )
+    )
+    json_output = _prompt_yes_no(
+        "�Ƿ���� JSON ���",
+        default=bool(args.json),
+        input_fn=input_fn,
+    )
+    interactive_args = _with_args(
+        args,
+        season=season,
+        match_type=match_type,
+        runners=runner_tokens,
+        start=start_spec,
+        initial_order=None,
+        iterations=iterations,
+        seed=seed,
+        workers=workers,
+        json=json_output,
+        champion_prediction=None,
+        trace=False,
+        trace_log=None,
+        skill_ablation=False,
+        skill_ablation_runners=None,
+        skill_ablation_detail=False,
+        season_roster_scan=False,
+    )
+    config = helpers.build_config_from_args(interactive_args)
+    return helpers.run_simulation_command(
+        interactive_args,
+        config,
+        show_progress=show_progress,
+        helpers=helpers.simulation_cli_helpers,
+    )
+
+
+def run_interactive_command(
+    args: Any,
+    *,
+    show_progress: bool,
+    champion_helpers: ChampionInteractiveHelpers,
+    simulation_helpers: SimulationInteractiveHelpers,
+    input_fn: Callable[[str], str] | None = None,
+    prompt_output_fn: Callable[[str], None] | None = None,
+    result_output_fn: Callable[[str], None] | None = None,
+) -> int:
+    if input_fn is None:
+        input_fn = input
+    if prompt_output_fn is None:
+        prompt_output_fn = print
+    if args.champion_prediction or args.tournament_context_in or args.tournament_context_out:
+        return run_interactive_champion_prediction_command(
+            args,
+            show_progress=show_progress,
+            helpers=champion_helpers,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+            result_output_fn=result_output_fn,
+        )
+    if args.match_type or args.runners is not None or args.start or args.initial_order:
+        return run_interactive_simulation_command(
+            args,
+            show_progress=show_progress,
+            helpers=simulation_helpers,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+    mode = _prompt_choice(
+        "��ѡ�񽻻���ģʽ",
+        (
+            ("champion-random", "��������Ԥ��"),
+            ("champion-monte-carlo", "Monte Carlo �ھ�Ԥ��"),
+            ("simulation", "����ģ��"),
+        ),
+        default_key="champion-random",
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+    )
+    if mode == "simulation":
+        return run_interactive_simulation_command(
+            args,
+            show_progress=show_progress,
+            helpers=simulation_helpers,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+        )
+    return run_interactive_champion_prediction_command(
+        _with_args(args, champion_prediction="random" if mode == "champion-random" else "monte-carlo"),
+        show_progress=show_progress,
+        helpers=champion_helpers,
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+        result_output_fn=result_output_fn,
+    )
 
 
 def run_interactive_champion_prediction_command(
