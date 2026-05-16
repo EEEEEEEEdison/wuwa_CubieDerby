@@ -3139,6 +3139,7 @@ class CubieDerbyTests(unittest.TestCase):
             "builtins.input",
             side_effect=[
                 "1",
+                "1",
                 "n",
                 "4",
                 "1",
@@ -3156,10 +3157,44 @@ class CubieDerbyTests(unittest.TestCase):
 
         prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
+        self.assertIn("请选择参赛角色设置", prompt_text)
         self.assertIn("本届参赛角色（18名）", prompt_text)
         self.assertNotIn("随机种子", prompt_text)
         self.assertNotIn("请选择小组赛分组方式", prompt_text)
         self.assertNotIn("上下文 =", prompt_text)
+
+    def test_main_interactive_champion_monte_carlo_from_start_accepts_custom_roster(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "1",
+                "2",
+                "1 2 3 4 6 11 12 13 14 15 16 17 18 19 20 21 22 23",
+                "4",
+                "1",
+            ],
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "--interactive",
+                    "--season",
+                    "2",
+                    "--champion-prediction",
+                    "monte-carlo",
+                    "--json",
+                ]
+            )
+
+        data = json.loads(stdout.getvalue())
+        prompt_text = stderr.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(data["start_entry_point"], "group-a-round-1")
+        self.assertEqual({row["runner"] for row in data["rows"]}, {1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23})
+        self.assertIn("本届参赛角色（18名）", prompt_text)
+        self.assertNotIn("请选择小组赛分组方式", prompt_text)
 
     def test_main_interactive_single_stage_elimination_monte_carlo_json(self):
         stdout = io.StringIO()
@@ -3971,6 +4006,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "1",
                 "1",
                 "n",
                 "4",

@@ -754,6 +754,52 @@ def _prompt_group_round_one_setup(
         return values
 
 
+def _prompt_tournament_roster_setup(
+    *,
+    season: int,
+    helpers: ChampionInteractiveHelpers,
+    input_fn: Callable[[str], str],
+    prompt_output_fn: Callable[[str], None],
+    lang: str,
+    translate_fn: Callable[[str], str],
+) -> tuple[int, ...]:
+    requirements = {requirement.key: requirement for requirement in helpers.tournament_entry_requirements(season, "group-a-round-1")}
+    roster_requirement = requirements["season-roster"]
+    season_roster = tuple(helpers.season_runner_pool(season))
+
+    roster_mode = _prompt_choice(
+        "请选择参赛角色设置" if lang == "zh" else "Choose entrant roster mode",
+        (
+            ("default", "默认使用本赛季全部角色" if lang == "zh" else "Use the full season roster"),
+            ("manual", "手动指定本届参赛角色" if lang == "zh" else "Enter the tournament roster manually"),
+        ),
+        input_fn=input_fn,
+        prompt_output_fn=prompt_output_fn,
+        translate_fn=translate_fn,
+    )
+    if roster_mode == "default":
+        roster = season_roster
+    else:
+        roster = _prompt_runner_list(
+            roster_requirement.label,
+            title=roster_requirement.label,
+            description=roster_requirement.description,
+            helpers=helpers,
+            season=season,
+            expected_count=roster_requirement.runner_count,
+            input_fn=input_fn,
+            prompt_output_fn=prompt_output_fn,
+            lang=lang,
+            translate_fn=translate_fn,
+        )
+    _set_wizard_summary(
+        "runners",
+        f"{'本届参赛角色（18名）' if lang == 'zh' else 'Tournament roster (18)'} = "
+        f"{format_runner_list(roster)}",
+    )
+    return roster
+
+
 def _emit_champion_entry_guidance(
     *,
     season: int,
@@ -2228,14 +2274,16 @@ def run_interactive_champion_prediction_command(
         )
         if entry_point == "group-a-round-1":
             if prediction_mode == "monte-carlo" and entry_mode == "from-start":
-                season_roster = tuple(helpers.season_runner_pool(season))
-                requirement_values = {"season-roster": season_roster}
-                auto_full_tournament_monte_carlo = True
-                _set_wizard_summary(
-                    "runners",
-                    f"{'本届参赛角色（18名）' if lang == 'zh' else 'Tournament roster (18)'} = "
-                    f"{format_runner_list(season_roster)}",
+                roster = _prompt_tournament_roster_setup(
+                    helpers=helpers,
+                    season=season,
+                    input_fn=input_fn,
+                    prompt_output_fn=prompt_output_fn,
+                    lang=lang,
+                    translate_fn=translate_fn,
                 )
+                requirement_values = {"season-roster": roster}
+                auto_full_tournament_monte_carlo = True
             else:
                 requirement_values = _prompt_group_round_one_setup(
                     helpers=helpers,
