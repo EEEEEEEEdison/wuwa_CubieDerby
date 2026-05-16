@@ -10,6 +10,7 @@
 这个项目当前可以模拟的核心内容包括：
 
 - 第 1 季和第 2 季的赛道规则。
+- 第 2 季完整赛事冠军预测，支持从头开始或从中途阶段继续推演。
 - 自定义参赛角色组合和参赛人数。
 - 固定人数下，对整季角色池做全组合遍历统计。
 - 自定义起始站位，包括负格预起跑区和同格随机堆叠。
@@ -18,13 +19,19 @@
 
 ## 快速开始
 
-运行一个基础的第 1 季模拟。在本项目的命名习惯中，第 `1` 格通常视为起点，第 `0` 格视为终点。
+最推荐的入口是交互向导。直接运行下面的命令后，程序会按“赛季 -> 分析大类 -> 子模式 -> 必要参数”的顺序一步步询问：
 
 ```powershell
-python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10
+python cubie_derby.py
 ```
 
-运行第 2 季规则。第 2 季使用 32 格环形赛道，包含特殊格，并会在第 3 回合引入反向移动 NPC：
+如果你想使用英文交互提示，可以加上：
+
+```powershell
+python cubie_derby.py --interactive-language en
+```
+
+如果你已经知道要跑什么，也可以继续使用命令行参数跳过向导。例如运行第 2 季单场胜率分析：
 
 ```powershell
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
@@ -42,10 +49,9 @@ python cubie_derby.py --season 2 --match-type group-round-1 -n 100000 --runners 
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 ```
 
-如果你想一步一步引导输入，现在直接运行 `python cubie_derby.py` 就会进入向导。你也可以带上部分启动参数，让向导只补剩下缺的信息。如果你想用英文提示，可以再加上 `--interactive-language en`：
+向导也支持带启动参数：你可以先给出 `--season`、`--iterations`、`--json` 等已知信息，再让向导只补剩下缺的输入。
 
 ```powershell
-python cubie_derby.py
 python cubie_derby.py --interactive --season 2
 python cubie_derby.py --season 2 --iterations 10000 --json
 python cubie_derby.py --interactive --interactive-language en --season 2 --json
@@ -99,6 +105,8 @@ python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 1
 - `group-round-2` 会把 `--runners` 的顺序视为上一轮排名，并自动生成 `0 / -1 / -2 / -3` 的站位。
 - `elimination`、`losers-bracket`、`winners-bracket` 都会自动使用 `--start "1:*"`，默认取前三晋级。
 - `grand-final` 会自动使用 `--start "1:*"`，只统计夺冠率，不显示晋级率。
+- `group-round-1` 和 `group-round-2` 使用“小组赛阶段地图”：前进格 `3 / 11 / 16 / 23`，打乱格 `6 / 20`，后退格 `10 / 28`。
+- `elimination`、`losers-bracket`、`winners-bracket`、`grand-final` 使用“淘汰赛阶段地图”：前进格 `4 / 10 / 20`，打乱格 `6 / 14 / 23`，后退格 `16 / 26 / 30`。
 - 在单阶段模式下，你仍然可以手动传 `--start` 覆盖默认站位。
 
 示例：
@@ -144,7 +152,8 @@ python cubie_derby.py --season 2 --champion-prediction monte-carlo -n 10000 --se
 
 - 当前交互式冠军预测支持从赛季 2 的任意赛事入口开始，例如 `小组A第二轮`、`淘汰赛A`、`胜者组`、`总决赛`。
 - 对很多中途入口，向导支持“输入完整排名后自动推导后续名单”，减少手工拆分。
-- 交互提示会先说明“当前起始阶段”和“后续将依次模拟哪些阶段”，再开始提问。
+- 向导顶部会维护“当前摘要”，把语言、赛季、分析分支、阶段、运行模式、参赛角色、剩余赛程、JSON 输出、Trace/log 等已选项集中展示。
+- 单场胜率分析支持普通 Monte Carlo 模式，也支持调试 Trace 模式；Trace 日志可以显示在终端，也可以写入 `logs/trace/` 下的带时间、赛季、阶段和赛道信息的日志文件。
 - 如果你直接运行 `python cubie_derby.py`，向导会先询问赛季，再进入后续分析分支；你也可以先带上 `--season`、`--iterations`、`--json` 等参数，再由向导补齐剩余输入。
 - 当前第 1 季的交互向导先支持基础单场胜率分析；赛事冠军预测仍以第 2 季流程为主。
 - `--interactive-language en` 会把交互向导提示切到英文，便于英文环境演示或录屏；JSON 结构不变。
@@ -180,7 +189,7 @@ python cubie_derby.py --champion-prediction monte-carlo -n 10000 --workers 0 --t
 
 - 该模式不要和 `--runners` 一起使用；角色池会根据 `--season` 自动选择。
 - 当前第 1 季扫描池是 `1..12`。
-- 当前第 2 季扫描池是 `1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20`。
+- 当前第 2 季扫描池是 `1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23`。
 - 输出表会按角色汇总其出现在所有组合中的整体表现。
 - 该模式下不会使用 `--trace` 和 `--skill-ablation`。
 
@@ -385,9 +394,11 @@ python cubie_derby.py --season 2 --trace-log logs/season2_trace.log --start "-3:
 
 ## 第 2 季赛道规则
 
-- 前进格：`3`、`11`、`16`、`23`
-- 后退格：`10`、`28`
-- 打乱格：`6`、`20`
+第 2 季使用 32 格环形赛道，并会根据比赛阶段切换地图：
+
+- 小组赛阶段地图：前进格 `3`、`11`、`16`、`23`；后退格 `10`、`28`；打乱格 `6`、`20`。
+- 淘汰赛阶段地图：前进格 `4`、`10`、`20`；后退格 `16`、`26`、`30`；打乱格 `6`、`14`、`23`。
+- 不传 `--match-type` 时，第 2 季默认仍使用小组赛阶段地图；传入 `elimination`、`losers-bracket`、`winners-bracket` 或 `grand-final` 时会自动切到淘汰赛阶段地图。
 - NPC 从比赛开始起就物理存在于终点格 `0`，但在第 3 回合前，它不会参与绯雪接触判定、行动顺序和排名。第 3 回合开始后，NPC 会加入行动顺序，与其他角色一起掷点，在自己的回合反向移动 `1..6` 格，并且在同格时永远处于最右侧。NPC 反向移动过程中，只要经过某格时自己还有剩余步数，就会带着该格角色继续后退。每轮结束时，只有当 NPC 的位置小于最后一名角色的位置时，NPC 才会被送回第 `0` 格。
 
 ## 输出列说明

@@ -10,6 +10,7 @@ Python Monte Carlo simulator for Cubie Derby race outcomes.
 Core things this project can simulate:
 
 - Season 1 and Season 2 race rules.
+- Full Season 2 tournament champion prediction, either from the beginning or from a mid-tournament entry point.
 - Custom runner lineups and runner counts.
 - Full season-roster combination scans for a fixed field size.
 - Custom start layouts, including pre-start cells and random same-cell stacks.
@@ -18,13 +19,19 @@ Core things this project can simulate:
 
 ## Quick Start
 
-Run a basic Season 1 simulation. In this project, cell `1` is the usual start cell and cell `0` is the finish cell.
+The recommended entry point is the interactive wizard. Run this command and the program will guide you through "season -> analysis branch -> submode -> required parameters":
 
 ```powershell
-python cubie_derby.py --season 1 -n 100000 --start "1:*" --runners 3 4 8 10
+python cubie_derby.py
 ```
 
-Run with Season 2 rules. Season 2 uses a 32-position ring lap, special cells, and the reverse-moving NPC from round 3:
+To force English prompts:
+
+```powershell
+python cubie_derby.py --interactive-language en
+```
+
+If you already know the parameters you want, you can still skip the wizard. For example, run a Season 2 single-stage win-rate simulation:
 
 ```powershell
 python cubie_derby.py --season 2 -n 100000 --start "1:*" --runners 11 12 13 14 15 16
@@ -42,10 +49,9 @@ Run one full Season 2 tournament and print the champion plus every stage result:
 python cubie_derby.py --season 2 --champion-prediction random --seed 42
 ```
 
-If you want guided input, you can now run `python cubie_derby.py` directly and the wizard will start automatically. You can also pass a few startup parameters first and let the wizard fill in the rest. If you want English wizard prompts explicitly, add `--interactive-language en`:
+You can also prefill part of the interactive flow. For example, pass `--season`, `--iterations`, or `--json` first and let the wizard ask only for missing inputs:
 
 ```powershell
-python cubie_derby.py
 python cubie_derby.py --interactive --season 2
 python cubie_derby.py --season 2 --iterations 10000 --json
 python cubie_derby.py --interactive --interactive-language en --season 2 --json
@@ -99,6 +105,8 @@ Notes:
 - `group-round-2` uses the `--runners` order as the previous round ranking and auto-builds the seeded start layout `0 / -1 / -2 / -3`.
 - `elimination`, `losers-bracket`, and `winners-bracket` all use `--start "1:*"` automatically and qualify the top `3`.
 - `grand-final` uses `--start "1:*"` automatically and only tracks champion rate.
+- `group-round-1` and `group-round-2` use the group-stage map: forward cells `3 / 11 / 16 / 23`, shuffle cells `6 / 20`, backward cells `10 / 28`.
+- `elimination`, `losers-bracket`, `winners-bracket`, and `grand-final` use the knockout-stage map: forward cells `4 / 10 / 20`, shuffle cells `6 / 14 / 23`, backward cells `16 / 26 / 30`.
 - You can still override the start layout manually with `--start` in single-stage mode.
 
 Examples:
@@ -144,7 +152,8 @@ Notes:
 
 - Interactive champion prediction currently supports starting from any Season 2 tournament entry point, such as `group-a-round-2`, `elimination-a`, `winners-round-2`, or `grand-final`.
 - For many mid-tournament entry points, the wizard can derive later rosters automatically from full rankings so you do not have to split lists manually.
-- The prompts first explain the current entry stage and which later stages will still be simulated, then ask for the required inputs.
+- The wizard keeps a compact current-summary block at the top, including language, season, analysis branch, stage, run mode, runners, remaining tournament path, JSON output, Trace/log choices, and other selected options.
+- Single-stage analysis supports both normal Monte Carlo mode and debug Trace mode. Trace logs can be printed to the terminal or written under `logs/trace/` with timestamp, season, stage, and map metadata in the filename/header.
 - If you run `python cubie_derby.py` directly, the wizard now asks for the season first and then continues into the appropriate analysis branch. You can also prefill flags such as `--season`, `--iterations`, or `--json`, then let the wizard ask only for the remaining inputs.
 - The current Season 1 interactive flow focuses on the basic single-stage win-rate path first; tournament champion prediction still primarily follows the Season 2 tournament flow.
 - `--interactive-language en` switches the wizard prompts to English for demos and English-speaking users. The JSON structure itself is unchanged.
@@ -180,7 +189,7 @@ Notes:
 
 - Do not combine this mode with `--runners`; the season roster is chosen automatically from `--season`.
 - The current Season 1 scan pool is runners `1..12`.
-- The current Season 2 scan pool is `1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20`.
+- The current Season 2 scan pool is `1, 2, 3, 4, 6, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23`.
 - The printed table is aggregated per runner across every combination they appear in.
 - `--trace` and `--skill-ablation` are not used in this mode.
 
@@ -385,9 +394,10 @@ So in the actual Season 2 competition pool, runners `5 椿`, `7 洛可可`, `8 �
 
 ## Season 2 Rules
 
-- Forward cells: `3`, `11`, `16`, `23`.
-- Backward cells: `10`, `28`.
-- Shuffle cells: `6`, `20`.
+- Season 2 uses a 32-cell ring track and switches maps by match stage.
+- Group-stage map: forward cells `3`, `11`, `16`, `23`; backward cells `10`, `28`; shuffle cells `6`, `20`.
+- Knockout-stage map: forward cells `4`, `10`, `20`; backward cells `16`, `26`, `30`; shuffle cells `6`, `14`, `23`.
+- Without `--match-type`, Season 2 still defaults to the group-stage map. Passing `elimination`, `losers-bracket`, `winners-bracket`, or `grand-final` automatically switches to the knockout-stage map.
 - NPC is physically waiting on the finish cell `0` from race start, but it is not active for Hiyuki contact checks, action order, or ranking before round 3. It joins the action order from round 3, rolls with the selected runners, moves backward `1..6` positions on its own turn, and is always rightmost when sharing a cell. During its backward movement, if it passes through a cell while it still has movement remaining, it carries that cell's runners onward. At round end, NPC returns to `0` only when its position is less than the last-place runner's position.
 
 ## Output Columns
