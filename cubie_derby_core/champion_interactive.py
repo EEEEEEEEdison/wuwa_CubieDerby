@@ -174,6 +174,26 @@ def _prompt_choice(
         prompt_output_fn(translate_fn("输入无效，请重新输入上面的序号。"))
 
 
+def _prompt_interactive_language(
+    *,
+    input_fn: Callable[[str], str],
+    prompt_output_fn: Callable[[str], None],
+) -> str:
+    prompt_output_fn("")
+    prompt_output_fn("=" * 24)
+    prompt_output_fn("Choose language / 请选择语言")
+    prompt_output_fn("=" * 24)
+    prompt_output_fn("1. 中文")
+    prompt_output_fn("2. English")
+    while True:
+        raw = input_fn("Enter number / 请输入序号: ").strip()
+        if raw == "1":
+            return "zh"
+        if raw == "2":
+            return "en"
+        prompt_output_fn("Invalid input. Please enter 1 or 2. / 输入无效，请输入 1 或 2。")
+
+
 def _emit_question_block(
     *,
     title: str,
@@ -1470,10 +1490,18 @@ def run_interactive_command(
     if prompt_output_fn is None:
         prompt_output_fn = print
     global _ACTIVE_WIZARD_UI
-    lang = getattr(args, "interactive_language", "zh")
-    translate_fn = lambda text: translate_interactive_text(text, lang)
     raw_input_fn = input_fn
     raw_prompt_output_fn = prompt_output_fn
+    if getattr(args, "_interactive_auto_entry", False) and not getattr(args, "_interactive_language_explicit", False):
+        args = _with_args(
+            args,
+            interactive_language=_prompt_interactive_language(
+                input_fn=raw_input_fn,
+                prompt_output_fn=raw_prompt_output_fn,
+            ),
+        )
+    lang = getattr(args, "interactive_language", "zh")
+    translate_fn = lambda text: translate_interactive_text(text, lang)
     input_fn = lambda prompt: raw_input_fn(translate_fn(prompt))
     prompt_output_fn = lambda text: raw_prompt_output_fn(translate_fn(text))
     previous_ui = _ACTIVE_WIZARD_UI
@@ -1498,6 +1526,10 @@ def run_interactive_command(
                 )
             )
             args = _with_args(args, season=season)
+        _set_wizard_summary(
+            "language",
+            "语言 = 中文" if lang == "zh" else "Language = English",
+        )
         season_label = f"第{season}季" if lang == "zh" else f"Season {season}"
         _set_wizard_summary("season", f"{'赛季' if lang == 'zh' else 'Season'} = {season_label}")
 

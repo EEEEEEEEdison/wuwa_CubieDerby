@@ -3135,6 +3135,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "1",
                 "2",
                 "1",
                 "1",
@@ -3151,6 +3152,7 @@ class CubieDerbyTests(unittest.TestCase):
         text = stdout.getvalue()
         prompt_text = stderr.getvalue()
         self.assertEqual(exit_code, 0)
+        self.assertIn("Choose language / 请选择语言", prompt_text)
         self.assertIn("请选择赛季", prompt_text)
         self.assertIn("请选择分析大类", prompt_text)
         self.assertIn("起始阶段：总决赛", text)
@@ -3162,6 +3164,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "1",
                 "1",
                 "1",
                 "1 2 3 4 5 6",
@@ -3189,6 +3192,7 @@ class CubieDerbyTests(unittest.TestCase):
         with patch(
             "builtins.input",
             side_effect=[
+                "1",
                 "2",
                 "3",
                 "1",
@@ -3215,6 +3219,35 @@ class CubieDerbyTests(unittest.TestCase):
         self.assertEqual(data["iterations"], 4)
         self.assertEqual(data["config"]["match_type"], "elimination")
         self.assertEqual(data["config"]["runners"], [11, 12, 13, 14, 15, 16])
+
+    def test_main_without_args_can_choose_english_first(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with patch(
+            "builtins.input",
+            side_effect=[
+                "2",
+                "2",
+                "1",
+                "1",
+                "2",
+                "12",
+                "1",
+                "11 12 13 14 15 16",
+                "7",
+                "n",
+            ],
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main([])
+
+        prompt_text = stderr.getvalue()
+        text = stdout.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Choose language / 请选择语言", prompt_text)
+        self.assertIn("Choose season", prompt_text)
+        self.assertIn("Choose analysis branch", prompt_text)
+        self.assertIn("Grand Final", text)
 
     def test_main_interactive_can_save_tournament_context_json(self):
         stdout = io.StringIO()

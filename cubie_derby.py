@@ -2803,6 +2803,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     seed_explicit = has_option("--seed")
     json_explicit = has_option("--json")
     start_explicit = has_option("--start")
+    interactive_language_explicit = has_option("--interactive-language")
     auto_interactive = not args.interactive and not any(
         (
             args.champion_prediction,
@@ -2827,6 +2828,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     setattr(args, "_seed_explicit", seed_explicit)
     setattr(args, "_json_explicit", json_explicit)
     setattr(args, "_start_explicit", start_explicit)
+    setattr(args, "_interactive_language_explicit", interactive_language_explicit)
     show_progress = sys.stderr.isatty() and not args.json
     try:
         if args.tournament_context_out and not args.interactive:
