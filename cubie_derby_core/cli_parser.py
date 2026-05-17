@@ -107,6 +107,14 @@ def make_parser(*, match_type_choices_fn: MatchTypeChoicesFn) -> argparse.Argume
         action="store_true",
         help="include skill success-count distribution in ablation output",
     )
+    parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help=(
+            "run a small fixed-seed regression battery and exit; "
+            "fails if any pinned (seed, config) output drifts from the expected value"
+        ),
+    )
     return parser
 
 

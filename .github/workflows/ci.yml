@@ -47,10 +47,8 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python -m unittest discover -s tests -v
 
-      - name: CLI smoke test (single race trace + tiny Monte Carlo)
+      - name: Embedded smoke-test (pinned regression battery)
         shell: bash
         env:
           PYTHONIOENCODING: utf-8
-        run: |
-          python cubie_derby.py --season 2 --start "1:*" --runners 11 12 13 14 15 16 --seed 42 -n 200
-          python cubie_derby.py --season 2 --champion-prediction monte-carlo --seed 42 -n 50 --workers 1
+        run: python cubie_derby.py --smoke-test

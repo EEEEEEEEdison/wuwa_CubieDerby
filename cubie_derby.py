@@ -42,6 +42,7 @@ from cubie_derby_core.movement import (
     validate_start_position,
 )
 from cubie_derby_core import constants as _const
+from cubie_derby_core.smoke_test import run_smoke_tests
 from cubie_derby_core.effects import (
     EffectHooks,
     add_group_to_position as core_add_group_to_position,
@@ -2788,6 +2789,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     start_explicit = has_option("--start")
     interactive_language_explicit = has_option("--interactive-language")
     champion_analysis_explicit = has_option("--champion-analysis")
+    if getattr(args, "smoke_test", False):
+        return run_smoke_tests(
+            out=sys.stdout,
+            build_config=RaceConfig,
+            run_monte_carlo=run_monte_carlo,
+            run_champion_prediction_monte_carlo=run_champion_prediction_monte_carlo,
+            run_season_roster_scan=run_season_roster_scan,
+            season2_lap_length=SEASON2_LAP_LENGTH,
+            season2_group_forward_cells=SEASON2_GROUP_FORWARD_CELLS,
+            season2_group_backward_cells=SEASON2_GROUP_BACKWARD_CELLS,
+            season2_group_shuffle_cells=SEASON2_GROUP_SHUFFLE_CELLS,
+        )
     auto_interactive = not args.interactive and not any(
         (
             args.champion_prediction,
