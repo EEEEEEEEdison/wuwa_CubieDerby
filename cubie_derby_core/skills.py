@@ -25,7 +25,11 @@ ZANI_ONE_STEP_DICE_CHANCE = 0.5
 
 
 def skill_enabled(config: object, runner: int) -> bool:
-    return skill_enabled_from_set(getattr(config, "disabled_skills", frozenset()), runner)
+    try:
+        disabled_skills = config.disabled_skills  # type: ignore[attr-defined]
+    except AttributeError:
+        disabled_skills = frozenset()
+    return skill_enabled_from_set(disabled_skills, runner)
 
 
 def skill_enabled_from_set(disabled_skills: frozenset[int], runner: int) -> bool:

@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import argparse
-from itertools import combinations
-import json
-import math
 import multiprocessing as mp
 import random
 import sys
 import time
 import unicodedata
-from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Iterable, Sequence, TextIO
+from dataclasses import dataclass, field
+from typing import Callable, Iterable, Sequence, TextIO
 
 from cubie_derby_core.runners import (
     AEMEATH_ID,
@@ -25,11 +21,8 @@ from cubie_derby_core.runners import (
     CHISA_ID,
     DENIA_ID,
     HIYUKI_ID,
-    JINHSI_ID,
     LUNO_ID,
-    LUUK_HERSSEN_ID,
     LYNAE_ID,
-    MORNYE_ID,
     NAME_TO_RUNNER,
     NPC_ID,
     PHOEBE_ID,
@@ -41,22 +34,11 @@ from cubie_derby_core.runners import (
     RUNNER_NAMES,
     SEASON1_RUNNER_POOL,
     SEASON2_RUNNER_POOL,
-    SHOREKEEPER_ID,
-    SIGRIKA_ID,
     SKILL_RUNNERS,
     ZANI_ID,
 )
 from cubie_derby_core.movement import (
-    MIN_START_POSITION,
-    cell_effect_path_positions,
     display_position,
-    forward_path_positions,
-    keep_npc_rightmost,
-    move_progress,
-    move_progress_by_delta,
-    npc_reverse_path_positions,
-    remove_runner_from_grid,
-    shuffle_without_npc,
     validate_start_position,
 )
 from cubie_derby_core.effects import (
@@ -246,6 +228,12 @@ PHOEBE_EXTRA_STEP_CHANCE = 0.5
 POTATO_REPEAT_DICE_CHANCE = 0.28
 JINHSI_REORDER_CHANCE = 0.4
 CHANGLI_EXTRA_STEP_CHANCE = 0.65
+
+# Defensive upper bound for simulate_race's main loop. A real race terminates
+# in ≲ 20 rounds; this guard exists only to convert pathological configs
+# (e.g. all skills disabled + impossible start grid) into a clear error
+# instead of an infinite loop. Set generously so it never trips in practice.
+_MAX_RACE_ROUNDS = 10_000
 
 _EFFECT_HOOKS: EffectHooks | None = None
 _NPC_HELPERS: NPCHelpers | None = None
@@ -727,6 +715,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 return False
         return True
     while True:
+        if round_number > _MAX_RACE_ROUNDS:
+            raise RuntimeError(
+                f"simulate_race exceeded {_MAX_RACE_ROUNDS} rounds; "
+                f"track_length={track_length}, runners={runners}; "
+                "this likely indicates a misconfigured race that can never finish."
+            )
         npc_rank_active = False
         if config.npc_enabled and round_number >= config.npc_start_round and not npc_active:
             npc_active = True
@@ -1637,41 +1631,6 @@ def record_hiyuki_npc_path_contact(
         trace=trace,
         helpers=_skill_hook_helpers(),
     )
-
-
-def record_hiyuki_npc_destination_contact_legacy(
-    arrivals: Sequence[int],
-    destination_before: Sequence[int],
-    skill_state: RaceSkillState | None,
-    trace: TraceContext = False,
-) -> None:
-    """旧版绯雪规则：仅在终点格重合时叠加。保留以便需要时快速回滚。"""
-    if skill_state is None:
-        return
-    arrivals_set = set(arrivals)
-    if HIYUKI_ID in arrivals_set and NPC_ID in destination_before:
-        reason = f"{format_runner(HIYUKI_ID)}落到NPC所在格"
-    elif NPC_ID in arrivals_set and HIYUKI_ID in destination_before:
-        reason = f"NPC落到{format_runner(HIYUKI_ID)}所在格"
-    else:
-        return
-    if skill_state.hiyuki_bonus_steps > 0:
-        if trace:
-            log_block(
-                trace,
-                f"{format_runner(HIYUKI_ID)}技能不重复叠加：",
-                f"原因：{reason}",
-                "当前状态：已生效",
-            )
-        return
-    skill_state.hiyuki_bonus_steps += 1
-    if trace:
-        log_block(
-            trace,
-            f"{format_runner(HIYUKI_ID)}技能触发：",
-            f"原因：{reason}",
-            "效果：之后移动额外+1步",
-        )
 
 
 def maybe_trigger_player1_skill_after_action(

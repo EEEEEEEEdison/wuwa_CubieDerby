@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Protocol, Sequence
 
 from .movement import keep_npc_rightmost, remove_runner_from_grid
 from .runners import NPC_ID
@@ -10,24 +10,31 @@ ValidateSameRunnersFn = Callable[[Sequence[int], Sequence[int], str], None]
 FormatRunnerFn = Callable[[int], str]
 
 
+class _OrderingConfig(Protocol):
+    runners: Sequence[int]
+    initial_order_mode: str
+    fixed_initial_order: Sequence[int]
+
+
 def initial_player_order(
-    config: object,
+    config: _OrderingConfig,
     grid: dict[int, Sequence[int]],
     rng: random.Random,
     *,
     validate_same_runners_fn: ValidateSameRunnersFn,
 ) -> list[int]:
-    if getattr(config, "initial_order_mode") == "random":
-        order = list(getattr(config, "runners"))
+    mode = config.initial_order_mode
+    if mode == "random":
+        order = list(config.runners)
         rng.shuffle(order)
         return order
-    if getattr(config, "initial_order_mode") == "start":
+    if mode == "start":
         order = [runner for _, cell in sorted(grid.items()) for runner in cell if runner != NPC_ID]
-        validate_same_runners_fn(getattr(config, "runners"), order, "initial start order")
+        validate_same_runners_fn(config.runners, order, "initial start order")
         return order
-    if getattr(config, "initial_order_mode") == "fixed":
-        return list(getattr(config, "fixed_initial_order"))
-    raise ValueError(f"unknown initial_order_mode: {getattr(config, 'initial_order_mode')}")
+    if mode == "fixed":
+        return list(config.fixed_initial_order)
+    raise ValueError(f"unknown initial_order_mode: {mode}")
 
 
 def rank_scope(runners: Sequence[int], progress: dict[int, int], include_npc: bool) -> tuple[int, ...]:

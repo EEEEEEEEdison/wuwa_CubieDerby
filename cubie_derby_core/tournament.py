@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
 from cubie_derby_core.match_types import (
-    MatchTypeRule,
     build_group_round_two_start_spec,
     effective_qualify_cutoff,
     eliminated_runners_for_rule,
