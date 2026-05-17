@@ -66,20 +66,22 @@ def move_npc(
         remove_runner_from_grid(grid, NPC_ID)
         movers = [NPC_ID]
 
-    path = [current_pos]
+    path: list[int] | None = [current_pos] if trace else None
     contact_cell: list[int] = []
-    final_movers = list(movers)
+    final_movers = movers
     final_pos = current_pos
+    disabled_skills = config.disabled_skills
+    hiyuki_check = (
+        skill_state is not None
+        and HIYUKI_ID in progress
+        and HIYUKI_ID not in disabled_skills
+    )
     for step_index in range(steps):
         new_progress = (npc_progress - 1) % track_length
         new_pos = new_progress
         destination_before = [runner for runner in grid.get(new_pos, []) if runner != NPC_ID]
         contact_cell.extend(destination_before)
-        if (
-            skill_state is not None
-            and HIYUKI_ID in progress
-            and HIYUKI_ID not in config.disabled_skills
-        ):
+        if hiyuki_check:
             helpers.record_hiyuki_npc_path_contact(
                 movers=[NPC_ID],
                 progress=progress,
@@ -103,8 +105,9 @@ def move_npc(
 
         npc_progress = new_progress
         final_pos = new_pos
-        final_movers = list(movers)
-        path.append(new_pos)
+        final_movers = movers
+        if path is not None:
+            path.append(new_pos)
 
         if step_index < steps - 1:
             current_cell = grid[new_pos]
