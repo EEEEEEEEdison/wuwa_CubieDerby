@@ -86,6 +86,7 @@ from cubie_derby_core.cli_parser import (
     normalize_cli_args as core_normalize_cli_args,
 )
 from cubie_derby_core.match_types import (
+    MapVariant,
     MatchTypeRule,
     effective_qualify_cutoff,
     get_match_type_rule,
@@ -527,13 +528,13 @@ def season_rules(season: int, match_rule: MatchTypeRule | None = None) -> dict[s
             "map_label": None,
         }
     if season == 2:
-        map_variant = match_rule.map_variant if match_rule is not None else "group-stage"
-        if map_variant == "knockout-stage":
+        map_variant = match_rule.map_variant if match_rule is not None else MapVariant.GROUP_STAGE
+        if map_variant is MapVariant.KNOCKOUT_STAGE:
             forward_cells = SEASON2_KNOCKOUT_FORWARD_CELLS
             backward_cells = SEASON2_KNOCKOUT_BACKWARD_CELLS
             shuffle_cells = SEASON2_KNOCKOUT_SHUFFLE_CELLS
             map_label = "淘汰赛阶段地图"
-        elif map_variant == "group-stage":
+        elif map_variant is MapVariant.GROUP_STAGE:
             forward_cells = SEASON2_GROUP_FORWARD_CELLS
             backward_cells = SEASON2_GROUP_BACKWARD_CELLS
             shuffle_cells = SEASON2_GROUP_SHUFFLE_CELLS

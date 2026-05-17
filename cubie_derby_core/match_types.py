@@ -1,12 +1,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Sequence
 
 
-ADVANCEMENT_ALL = "all"
-ADVANCEMENT_TOP_N = "top_n"
-ADVANCEMENT_NONE = "none"
+class AdvancementMode(str, Enum):
+    """How a match-type stage decides who advances.
+
+    Inherits from str so existing code that compares the field to a
+    string literal (e.g. in old log files or external scripts that read
+    JSON output) keeps working — `AdvancementMode.ALL == "all"` is True.
+    """
+
+    ALL = "all"
+    TOP_N = "top_n"
+    NONE = "none"
+
+
+class MapVariant(str, Enum):
+    """Season 2 cell-set variant. Same str-Enum trick as AdvancementMode."""
+
+    DEFAULT = "default"
+    GROUP_STAGE = "group-stage"
+    KNOCKOUT_STAGE = "knockout-stage"
+
+
+# Backwards-compatible aliases. These were previously plain string
+# constants exported from this module; keeping them lets any external
+# user (or stale import) continue to work, while internal code now uses
+# the enum members directly for type-safety.
+ADVANCEMENT_ALL = AdvancementMode.ALL
+ADVANCEMENT_TOP_N = AdvancementMode.TOP_N
+ADVANCEMENT_NONE = AdvancementMode.NONE
 
 
 @dataclass(frozen=True)
@@ -15,15 +41,15 @@ class MatchTypeRule:
     label: str
     season: int
     default_start: str | None
-    advancement_mode: str
+    advancement_mode: AdvancementMode
     qualify_cutoff: int | None = None
     seeded_from_runner_order: bool = False
     emits_seed_layout: bool = False
-    map_variant: str = "default"
+    map_variant: MapVariant = MapVariant.DEFAULT
 
     @property
     def show_qualify_stats(self) -> bool:
-        return self.advancement_mode == ADVANCEMENT_TOP_N
+        return self.advancement_mode is AdvancementMode.TOP_N
 
 
 SEASON2_MATCH_TYPES: dict[str, MatchTypeRule] = {
@@ -32,54 +58,54 @@ SEASON2_MATCH_TYPES: dict[str, MatchTypeRule] = {
         label="小组赛第一轮",
         season=2,
         default_start="1:*",
-        advancement_mode=ADVANCEMENT_ALL,
+        advancement_mode=AdvancementMode.ALL,
         emits_seed_layout=True,
-        map_variant="group-stage",
+        map_variant=MapVariant.GROUP_STAGE,
     ),
     "group-round-2": MatchTypeRule(
         key="group-round-2",
         label="小组赛第二轮",
         season=2,
         default_start=None,
-        advancement_mode=ADVANCEMENT_TOP_N,
+        advancement_mode=AdvancementMode.TOP_N,
         qualify_cutoff=4,
         seeded_from_runner_order=True,
-        map_variant="group-stage",
+        map_variant=MapVariant.GROUP_STAGE,
     ),
     "elimination": MatchTypeRule(
         key="elimination",
         label="淘汰赛",
         season=2,
         default_start="1:*",
-        advancement_mode=ADVANCEMENT_TOP_N,
+        advancement_mode=AdvancementMode.TOP_N,
         qualify_cutoff=3,
-        map_variant="knockout-stage",
+        map_variant=MapVariant.KNOCKOUT_STAGE,
     ),
     "losers-bracket": MatchTypeRule(
         key="losers-bracket",
         label="败者组",
         season=2,
         default_start="1:*",
-        advancement_mode=ADVANCEMENT_TOP_N,
+        advancement_mode=AdvancementMode.TOP_N,
         qualify_cutoff=3,
-        map_variant="knockout-stage",
+        map_variant=MapVariant.KNOCKOUT_STAGE,
     ),
     "winners-bracket": MatchTypeRule(
         key="winners-bracket",
         label="胜者组",
         season=2,
         default_start="1:*",
-        advancement_mode=ADVANCEMENT_TOP_N,
+        advancement_mode=AdvancementMode.TOP_N,
         qualify_cutoff=3,
-        map_variant="knockout-stage",
+        map_variant=MapVariant.KNOCKOUT_STAGE,
     ),
     "grand-final": MatchTypeRule(
         key="grand-final",
         label="总决赛",
         season=2,
         default_start="1:*",
-        advancement_mode=ADVANCEMENT_NONE,
-        map_variant="knockout-stage",
+        advancement_mode=AdvancementMode.NONE,
+        map_variant=MapVariant.KNOCKOUT_STAGE,
     ),
 }
 
@@ -172,9 +198,9 @@ def resolve_match_start_spec(rule: MatchTypeRule, runners: Sequence[int]) -> str
 def effective_qualify_cutoff(rule: MatchTypeRule, field_size: int) -> int:
     if field_size < 1:
         raise ValueError("field size must be at least 1")
-    if rule.advancement_mode == ADVANCEMENT_ALL:
+    if rule.advancement_mode is AdvancementMode.ALL:
         return field_size
-    if rule.advancement_mode == ADVANCEMENT_NONE:
+    if rule.advancement_mode is AdvancementMode.NONE:
         return 1
     if rule.qualify_cutoff is None:
         raise ValueError(f"match type {rule.key} is missing qualify_cutoff")
@@ -183,9 +209,9 @@ def effective_qualify_cutoff(rule: MatchTypeRule, field_size: int) -> int:
 
 def qualified_runners_for_rule(rule: MatchTypeRule, ranking: Sequence[int]) -> tuple[int, ...]:
     ordered = tuple(ranking)
-    if rule.advancement_mode == ADVANCEMENT_ALL:
+    if rule.advancement_mode is AdvancementMode.ALL:
         return ordered
-    if rule.advancement_mode == ADVANCEMENT_NONE:
+    if rule.advancement_mode is AdvancementMode.NONE:
         return ()
     if rule.qualify_cutoff is None:
         raise ValueError(f"match type {rule.key} is missing qualify_cutoff")
@@ -194,7 +220,7 @@ def qualified_runners_for_rule(rule: MatchTypeRule, ranking: Sequence[int]) -> t
 
 def eliminated_runners_for_rule(rule: MatchTypeRule, ranking: Sequence[int]) -> tuple[int, ...]:
     ordered = tuple(ranking)
-    if rule.advancement_mode != ADVANCEMENT_TOP_N:
+    if rule.advancement_mode is not AdvancementMode.TOP_N:
         return ()
     if rule.qualify_cutoff is None:
         raise ValueError(f"match type {rule.key} is missing qualify_cutoff")
