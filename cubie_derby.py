@@ -41,6 +41,7 @@ from cubie_derby_core.movement import (
     display_position,
     validate_start_position,
 )
+from cubie_derby_core import constants as _const
 from cubie_derby_core.effects import (
     EffectHooks,
     add_group_to_position as core_add_group_to_position,
@@ -212,29 +213,29 @@ from cubie_derby_core.tournament_context import (
 )
 
 
-DEFAULT_LAP_LENGTH = 24
-SEASON2_LAP_LENGTH = 32
-AEMEATH_TRIGGER_CELL = 17
-SEASON2_GROUP_FORWARD_CELLS = frozenset({3, 11, 16, 23})
-SEASON2_GROUP_BACKWARD_CELLS = frozenset({10, 28})
-SEASON2_GROUP_SHUFFLE_CELLS = frozenset({6, 20})
-SEASON2_KNOCKOUT_FORWARD_CELLS = frozenset({4, 10, 20})
-SEASON2_KNOCKOUT_BACKWARD_CELLS = frozenset({16, 26, 30})
-SEASON2_KNOCKOUT_SHUFFLE_CELLS = frozenset({6, 14, 23})
-RNG_SEED_MASK = (1 << 64) - 1
-CAMELLYA_SOLO_ACTION_CHANCE = 0.5
-ZANI_EXTRA_STEPS_CHANCE = 0.4
-CARTETHYIA_EXTRA_STEPS_CHANCE = 0.6
-PHOEBE_EXTRA_STEP_CHANCE = 0.5
-POTATO_REPEAT_DICE_CHANCE = 0.28
-JINHSI_REORDER_CHANCE = 0.4
-CHANGLI_EXTRA_STEP_CHANCE = 0.65
+DEFAULT_LAP_LENGTH = _const.DEFAULT_LAP_LENGTH
+SEASON2_LAP_LENGTH = _const.SEASON2_LAP_LENGTH
+AEMEATH_TRIGGER_CELL = _const.AEMEATH_TRIGGER_CELL
+SEASON2_GROUP_FORWARD_CELLS = _const.SEASON2_GROUP_FORWARD_CELLS
+SEASON2_GROUP_BACKWARD_CELLS = _const.SEASON2_GROUP_BACKWARD_CELLS
+SEASON2_GROUP_SHUFFLE_CELLS = _const.SEASON2_GROUP_SHUFFLE_CELLS
+SEASON2_KNOCKOUT_FORWARD_CELLS = _const.SEASON2_KNOCKOUT_FORWARD_CELLS
+SEASON2_KNOCKOUT_BACKWARD_CELLS = _const.SEASON2_KNOCKOUT_BACKWARD_CELLS
+SEASON2_KNOCKOUT_SHUFFLE_CELLS = _const.SEASON2_KNOCKOUT_SHUFFLE_CELLS
+RNG_SEED_MASK = _const.RNG_SEED_MASK
+CAMELLYA_SOLO_ACTION_CHANCE = _const.CAMELLYA_SOLO_ACTION_CHANCE
+ZANI_EXTRA_STEPS_CHANCE = _const.ZANI_EXTRA_STEPS_CHANCE
+CARTETHYIA_EXTRA_STEPS_CHANCE = _const.CARTETHYIA_EXTRA_STEPS_CHANCE
+PHOEBE_EXTRA_STEP_CHANCE = _const.PHOEBE_EXTRA_STEP_CHANCE
+POTATO_REPEAT_DICE_CHANCE = _const.POTATO_REPEAT_DICE_CHANCE
+JINHSI_REORDER_CHANCE = _const.JINHSI_REORDER_CHANCE
+CHANGLI_EXTRA_STEP_CHANCE = _const.CHANGLI_EXTRA_STEP_CHANCE
 
-# Defensive upper bound for simulate_race's main loop. A real race terminates
-# in ≲ 20 rounds; this guard exists only to convert pathological configs
-# (e.g. all skills disabled + impossible start grid) into a clear error
-# instead of an infinite loop. Set generously so it never trips in practice.
-_MAX_RACE_ROUNDS = 10_000
+# Re-export the defensive max-rounds bound under both its canonical and
+# legacy names. `_MAX_RACE_ROUNDS` predates the move to constants.py and
+# is kept private-by-name purely for backwards compatibility.
+MAX_RACE_ROUNDS = _const.MAX_RACE_ROUNDS
+_MAX_RACE_ROUNDS = MAX_RACE_ROUNDS
 
 _EFFECT_HOOKS: EffectHooks | None = None
 _NPC_HELPERS: NPCHelpers | None = None
