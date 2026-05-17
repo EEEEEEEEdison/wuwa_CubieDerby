@@ -48,7 +48,12 @@ def move_single_runner(
     if not current_cell:
         grid.pop(current_pos, None)
     new_progress = move_progress(current_progress, total_steps, track_length)
-    if skill_state is not None and skill_enabled(config, HIYUKI_ID) and player == HIYUKI_ID and NPC_ID in progress:
+    if (
+        skill_state is not None
+        and player == HIYUKI_ID
+        and NPC_ID in progress
+        and HIYUKI_ID not in config.disabled_skills
+    ):
         helpers.record_hiyuki_npc_path_contact(
             movers=[player],
             progress=progress,
@@ -104,7 +109,12 @@ def move_runner_with_left_side(
     if not old_cell:
         grid.pop(current_pos, None)
     new_progress = move_progress(current_progress, total_steps, track_length)
-    if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
+    if (
+        skill_state is not None
+        and HIYUKI_ID in movers
+        and NPC_ID in progress
+        and HIYUKI_ID not in config.disabled_skills
+    ):
         helpers.record_hiyuki_npc_path_contact(
             movers=movers,
             progress=progress,
@@ -172,7 +182,12 @@ def move_cantarella(
         grid[current_pos] = [runner for runner in grid[current_pos] if runner not in movers]
         new_progress = move_progress(current_progress, 1, track_length)
         new_pos = display_position(new_progress, track_length)
-        if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in movers and NPC_ID in progress:
+        if (
+            skill_state is not None
+            and HIYUKI_ID in movers
+            and NPC_ID in progress
+            and HIYUKI_ID not in config.disabled_skills
+        ):
             helpers.record_hiyuki_npc_path_contact(
                 movers=movers,
                 progress=progress,

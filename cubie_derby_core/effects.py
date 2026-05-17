@@ -206,9 +206,13 @@ def move_group_due_to_cell_effect(
     else:
         new_progress = max(MIN_START_POSITION, base_progress + delta)
     new_pos = display_position(new_progress, config.track_length)
-    if skill_state is not None and skill_enabled(config, HIYUKI_ID) and (
-        (HIYUKI_ID in active_movers and NPC_ID in progress)
-        or (active_movers == [NPC_ID] and HIYUKI_ID in progress)
+    if (
+        skill_state is not None
+        and HIYUKI_ID not in config.disabled_skills
+        and (
+            (HIYUKI_ID in active_movers and NPC_ID in progress)
+            or (active_movers == [NPC_ID] and HIYUKI_ID in progress)
+        )
     ):
         hooks.record_hiyuki_npc_path_contact(
             movers=active_movers,

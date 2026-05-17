@@ -75,7 +75,11 @@ def move_npc(
         new_pos = new_progress
         destination_before = [runner for runner in grid.get(new_pos, []) if runner != NPC_ID]
         contact_cell.extend(destination_before)
-        if skill_state is not None and skill_enabled(config, HIYUKI_ID) and HIYUKI_ID in progress:
+        if (
+            skill_state is not None
+            and HIYUKI_ID in progress
+            and HIYUKI_ID not in config.disabled_skills
+        ):
             helpers.record_hiyuki_npc_path_contact(
                 movers=[NPC_ID],
                 progress=progress,
