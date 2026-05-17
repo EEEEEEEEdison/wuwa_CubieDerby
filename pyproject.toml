@@ -1,0 +1,91 @@
+# Project metadata for wuwa-cubie-derby.
+#
+# This file primarily exists so that:
+#   1. `requires-python` is declared explicitly. The codebase uses
+#      runtime PEP 604 unions (X | Y) and PEP 585 generics
+#      (dict[int, list[int]]) without `from __future__ import annotations`
+#      in some core modules, so 3.10+ is the actual minimum.
+#   2. The project is documented as pure stdlib (no runtime dependencies).
+#   3. Tooling (pytest / ruff / mypy) has a single source of configuration.
+#
+# The project is not currently published to PyPI; this file is for local
+# tooling and clarity only.
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wuwa-cubie-derby"
+version = "2.0.1"
+description = "Monte Carlo simulator for the Wuthering Waves Cubie Derby minigame."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "EEEEEEEEdison" }]
+keywords = ["wuthering-waves", "monte-carlo", "simulation", "cubie-derby"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Games/Entertainment :: Simulation",
+]
+dependencies = []
+
+[project.scripts]
+cubie-derby = "cubie_derby:main"
+
+[project.urls]
+Homepage = "https://github.com/EEEEEEEEdison/wuwa_CubieDerby"
+
+[tool.setuptools]
+py-modules = ["cubie_derby"]
+
+[tool.setuptools.packages.find]
+include = ["cubie_derby_core*"]
+exclude = ["tests*", "logs*", "experiments*"]
+
+# ---------------------------------------------------------------------------
+# Test runner
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["*Tests"]
+python_functions = ["test_*"]
+filterwarnings = ["error"]
+
+# ---------------------------------------------------------------------------
+# Linting (ruff): only enabled if ruff is installed; running it is optional.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["logs", ".pytest_cache"]
+
+[tool.ruff.lint]
+# Conservative starter set: pyflakes (F), pycodestyle errors (E), bugbear (B),
+# import sorting (I). The project deliberately keeps many wrappers in
+# cubie_derby.py as test-facing re-exports, so F401 is silenced there.
+select = ["F", "E", "B", "I"]
+ignore = [
+    "E501", # line-too-long (some Chinese strings exceed 120 columns)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# cubie_derby.py is the test-facing public-API facade; its imports are
+# re-exports that pyflakes cannot recognize without explicit __all__.
+"cubie_derby.py" = ["F401"]
+
+# ---------------------------------------------------------------------------
+# Type checker (mypy): also optional; only enable once it can run cleanly.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["logs/", "experiments/"]
