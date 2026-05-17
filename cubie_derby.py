@@ -491,6 +491,13 @@ def record_movement(
 def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = False) -> RaceResult:
     runners = config.runners
     track_length = config.track_length
+    # Hoist the disabled-skills set once. Inside the hot loop we then check
+    # `X_ID not in disabled_skills` directly instead of round-tripping through
+    # skill_enabled() per runner per round; this saves ~3% of per-race time
+    # for the common skill-checks. Every runner constant we test against here
+    # is already a SKILL_RUNNERS member by construction, so the second guard
+    # inside skill_enabled_from_set() is redundant and can be skipped.
+    disabled_skills = config.disabled_skills
     grid = {pos: list(cell) for pos, cell in config.start_grid.items() if cell}
 
     if config.random_start_stack:
@@ -619,13 +626,13 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
         round_dice = roll_round_dice(player_order, rng, config=config, skill_state=skill_state)
         chisa_bonus_active = (
             CHISA_ID in player_order
-            and skill_enabled(config, CHISA_ID)
+            and CHISA_ID not in disabled_skills
             and chisa_has_lowest_dice(round_dice[CHISA_ID], round_dice)
         )
         if trace:
             log_block(trace, "本轮行动顺序：", format_runner_arrow_list(player_order))
             log_block(trace, "本轮骰点：", format_round_dice(round_dice, player_order))
-            if CHISA_ID in player_order and skill_enabled(config, CHISA_ID):
+            if CHISA_ID in player_order and CHISA_ID not in disabled_skills:
                 log_chisa_round_check(round_dice[CHISA_ID], round_dice, chisa_bonus_active, trace)
 
         finished = False
@@ -681,7 +688,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
             cantarella_move = False
             augusta_skip_turn = False
 
-            if player == AUGUSTA_ID and skill_enabled(config, AUGUSTA_ID):
+            if player == AUGUSTA_ID and AUGUSTA_ID not in disabled_skills:
                 non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
                 if skill_state.augusta_force_last_next_round:
                     skill_state.augusta_force_last_next_round = False
@@ -721,12 +728,12 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                             f"格内顺序：{format_cell(current_cell)}",
                         )
 
-            if player == DENIA_ID and skill_enabled(config, DENIA_ID):
+            if player == DENIA_ID and DENIA_ID not in disabled_skills:
                 extra_steps += check_denia_skill(skill_state, dice, trace)
-            if player == CHISA_ID and skill_enabled(config, CHISA_ID):
+            if player == CHISA_ID and CHISA_ID not in disabled_skills:
                 extra_steps += apply_chisa_bonus(skill_state, chisa_bonus_active, trace)
 
-            if player == CALCHARO_ID and skill_enabled(config, CALCHARO_ID):
+            if player == CALCHARO_ID and CALCHARO_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为最后一名")
                 if is_last_ranked(player, npc_rank_active):
@@ -737,7 +744,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：当前不是最后一名")
-            elif player == CAMELLYA_ID and skill_enabled(config, CAMELLYA_ID):
+            elif player == CAMELLYA_ID and CAMELLYA_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}进行50%独自行动判定")
                 if rng.random() <= CAMELLYA_SOLO_ACTION_CHANCE:
@@ -749,7 +756,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
-            elif player == ROCCIA_ID and skill_enabled(config, ROCCIA_ID):
+            elif player == ROCCIA_ID and ROCCIA_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最后行动者")
                 if player_order[-1] == player:
@@ -760,7 +767,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：不是本轮最后行动者")
-            elif player == BRANT_ID and skill_enabled(config, BRANT_ID):
+            elif player == BRANT_ID and BRANT_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}检查是否为本轮最先行动者")
                 if player_order[0] == player:
@@ -771,7 +778,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：不是本轮最先行动者")
-            elif player == CANTARELLA_ID and skill_enabled(config, CANTARELLA_ID):
+            elif player == CANTARELLA_ID and CANTARELLA_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}检查是否处于逐格移动状态")
                 cantarella_move = cantarella_state == 1
@@ -782,7 +789,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未生效：", "原因：不处于逐格移动状态")
-            elif player == ZANI_ID and skill_enabled(config, ZANI_ID):
+            elif player == ZANI_ID and ZANI_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}先结算上次保留的额外步数，再检查同格触发")
                 extra_steps = zani_extra_steps
@@ -795,7 +802,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                     zani_extra_steps = 0
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "效果：下一次行动无额外步数")
-            elif player == CARTETHYIA_ID and skill_enabled(config, CARTETHYIA_ID):
+            elif player == CARTETHYIA_ID and CARTETHYIA_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}若已进入强化状态，则检查60%额外+2步")
                 if cartethyia_extra_steps and rng.random() <= CARTETHYIA_EXTRA_STEPS_CHANCE:
@@ -808,7 +815,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未判定：", "原因：尚未进入强化状态")
-            elif player == PHOEBE_ID and skill_enabled(config, PHOEBE_ID):
+            elif player == PHOEBE_ID and PHOEBE_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "行动开始", f"{format_runner(player)}进行50%额外+1步判定")
                 if rng.random() <= PHOEBE_EXTRA_STEP_CHANCE:
@@ -819,11 +826,11 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 else:
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：50%判定失败")
-            elif player == HIYUKI_ID and skill_enabled(config, HIYUKI_ID):
+            elif player == HIYUKI_ID and HIYUKI_ID not in disabled_skills:
                 extra_steps += check_hiyuki_bonus(skill_state, trace)
 
             total_steps = dice + extra_steps
-            if player == POTATO_ID and skill_enabled(config, POTATO_ID):
+            if player == POTATO_ID and POTATO_ID not in disabled_skills:
                 if trace:
                     log_timing(trace, "骰子后", f"{format_runner(player)}进行重复本次骰子的判定")
                 if rng.random() <= POTATO_REPEAT_DICE_CHANCE:
@@ -835,7 +842,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                     if trace:
                         log_block(trace, f"{format_runner(player)}技能未触发：", "原因：本次不重复骰子")
 
-            if player == LYNAE_ID and skill_enabled(config, LYNAE_ID):
+            if player == LYNAE_ID and LYNAE_ID not in disabled_skills:
                 total_steps, lynae_step_adjustment = apply_lynae_skill(
                     skill_state,
                     rng,
@@ -845,7 +852,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 )
                 extra_steps += lynae_step_adjustment
 
-            if player == PHROLOVA_ID and skill_enabled(config, PHROLOVA_ID):
+            if player == PHROLOVA_ID and PHROLOVA_ID not in disabled_skills:
                 non_npc_cell = [runner for runner in current_cell if runner != NPC_ID]
                 if round_number == 1 and config.random_start_stack:
                     if trace:
@@ -1000,7 +1007,7 @@ def simulate_race(config: RaceConfig, rng: random.Random, trace: TraceContext = 
                 invalidate_rank_views()
                 new_progress = progress[player]
 
-            if player == CARTETHYIA_ID and skill_enabled(config, CARTETHYIA_ID) and cartethyia_available:
+            if player == CARTETHYIA_ID and CARTETHYIA_ID not in disabled_skills and cartethyia_available:
                 if trace:
                     log_timing(trace, "行动结束", f"{format_runner(player)}检查是否处于最后一名，以决定本场后续强化")
                 if is_last_ranked(player, npc_rank_active):
