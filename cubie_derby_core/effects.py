@@ -57,16 +57,22 @@ def add_group_to_position(
     track_length = config.track_length
     new_pos = display_position(new_progress, track_length)
     movers_list = list(movers)
+    # Hoist movement_state.total_steps / .carried_steps out of the loop so we
+    # only do the attribute lookup once per call rather than per-runner. On
+    # the hot path this saves ~3M dict-attribute lookups per 20k races.
     if movement_state is not None:
+        total_steps_dict = movement_state.total_steps
+        carried_steps_dict = movement_state.carried_steps
+        track_carried = active_player is not None
         for runner in movers_list:
             if runner <= 0:
                 continue
-            distance = max(0, new_progress - progress[runner])
+            distance = new_progress - progress[runner]
             if distance <= 0:
                 continue
-            movement_state.total_steps[runner] = movement_state.total_steps.get(runner, 0) + distance
-            if active_player is not None and runner != active_player:
-                movement_state.carried_steps[runner] = movement_state.carried_steps.get(runner, 0) + distance
+            total_steps_dict[runner] = total_steps_dict.get(runner, 0) + distance
+            if track_carried and runner != active_player:
+                carried_steps_dict[runner] = carried_steps_dict.get(runner, 0) + distance
     for runner in movers:
         progress[runner] = new_progress
     destination_cell = grid.get(new_pos)
